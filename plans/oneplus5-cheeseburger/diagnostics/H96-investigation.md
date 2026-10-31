@@ -926,6 +926,43 @@ driverkitd/AMFI 的第二目标。
 | `H96a13-payload.img` | 79,691,776 | `34573fe97814299d5b46be40692ba96be590f05c5a51a91c3d52e2201c07cdf6` |
 | `boot-H96a13-no-driverkitd.img` | 81,147,904 | `3c5fe7076238fb8794deaf752bedcb28e5ac3d5095fc49be64757a4762f9c697` |
 
+### 6.23 H96a13 结果：跳过 driverkitd job 反而停在 nehelper
+
+H96a13（同时跳过 `nsurlsessiond` 和 `driverkitd` job）屏幕最后：
+
+```text
+NATIVE_EXEC: routined
+NATIVE_EXEC: xpcproxy argv1=com.apple.accountsd
+NATIVE_EXEC: accountsd
+NATIVE_EXEC: xpcproxy argv1=com.apple.nehelper
+NATIVE_EXEC: nehelper
+```
+
+之后无变化；没有到 backboardd。说明简单禁用 driverkitd job 不是正确
+方向，且会改变启动顺序，暴露另一个网络 helper（nehelper）等待。
+H96a12 的路径（只禁用 nsurlsessiond，保留 driverkitd）仍是目前最远。
+
+### 6.24 H96a14：只记录 driverkitd 的 AMFI 检查目标
+
+H96a14 复用 H96a12 的启动参数（只跳过 nsurlsessiond），内核层只对
+`comm=driverkitd` 且 `call=0x5f` 的 AMFI 调用打印：
+
+```text
+NATIVE_AMFI_SYSCALL: pid=... comm=driverkitd target=AMFI call=95
+  arg=... csflags=... blob=... platform=... cdhash=...
+```
+
+不再 panic，也不再打印其他 AMFI/trust-cache 调用。这样在系统到达第二次
+`driverkitd is active` 停住时，最后屏幕会显示第二次检查的目标 cdhash。
+
+H96a14 产物：
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a14-kernel-gatebypass.macho` | 52,088,832 | `ede3f2b803113ec9921a3faae052bced060ee32f50e7656436889e2d6355ef3a` |
+| `H96a14-payload.img` | 79,691,776 | `aa06e6c0515f5431cbea4c41c6db26f71230ce1cc68a0e39be07f04b93cd58c8` |
+| `boot-H96a14-driverkitdtrace.img` | 81,147,904 | `06bc78c6f14e5a1819c668fb551040c39643c109d083d55521451e14f1adad62` |
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。
