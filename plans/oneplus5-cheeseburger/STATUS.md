@@ -1789,6 +1789,13 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   `0bd34abf...`；用于观察 cryptexd 后下一跳。若仍停在
   cryptexd/SystemOS，则停止靠 skip 推进，转回 owner manifest/AuthAPFS
   或显示依赖。等待上机。
+- H96a19 已上机：driverkitd 连续 4 次 AMFI 检查后进入
+  `FileSet KC`，随后 cryptexd/eligibilityd 启动并停住。四个 cdhash
+  前缀均不在 H91 `kernel.macho.trustcache`、OS DriverExtensions 或
+  已检查的 .kext 中（trace 只打印 16 字节，需补完整 20 字节再定案）。
+- 结论：继续加 skip 不能解决；问题回到 SystemOS/Cryptex1/FileSet KC
+  的真实 trust cache/owner manifest。下一步应打印完整 cdhash 并确认
+  来源 cache，或做一次性 AuthAPFS/cryptexd 受控诊断，不得当作最终修复。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户

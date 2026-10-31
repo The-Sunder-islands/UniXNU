@@ -1109,6 +1109,58 @@ H96a19：在 skip 列表加入 `com.apple.eligibilityd`，观察 cryptexd
 | `H96a19-payload.img` | 79,691,776 | `995d247ce5dfe436bb25211cdf102f6b7256530072af8b042c8be9577694021a` |
 | `boot-H96a19-skipeligibility.img` | 81,147,904 | `0bd34abf97c50979c0f24e58c1f1c1b2c816b74429b6e12d4e3940737ad2b7e9` |
 
+### 6.30 H96a19 结果：driverkitd 四次 AMFI 检查后进入 FileSet KC，目标 cdhash 不在 H91 侧车
+
+H96a19 最后可见四次 driverkitd AMFI 检查（trace 只打印 cdhash 的前
+16 字节，完整 20 字节需要后续补打）：
+
+```text
+NATIVE_AMFI_SYSCALL: pid=62 comm=driverkitd target=AMFI call=95 ...
+  cdhash=b2532db47f393f06a573bf3c2862f2d?
+NATIVE_AMFI_SYSCALL: ... cdhash=4fcc8c8a2177269fc845778576bbf6a3
+NATIVE_AMFI_SYSCALL: ... cdhash=ad7fba3b1986d98b18573584dce43d84
+NATIVE_AMFI_SYSCALL: ... cdhash=86dab7a4fed9f4c976b75127beab4fcb
+```
+
+随后：
+
+```text
+KextLog: driverkitd is not active
+KextLog: Loading FileSet KC(s)
+KextLog: driverkitd is active
+NATIVE_EXEC: xpcproxy argv1=com.apple.security.cryptexd
+NATIVE_EXEC: cryptexd
+NATIVE_EXEC: xpcproxy argv1=com.apple.eligibilityd
+NATIVE_EXEC: eligibilityd
+```
+
+之后 5 分钟无变化。
+
+静态比对：
+
+- 这四个 16 字节前缀都不在 H91 payload 的
+  `kernel.macho.trustcache`（静态+System 侧车）中；
+- 也不在 OS DMG 的 14 个 `/System/Library/DriverExtensions/*.dext`
+  中；
+- 也不在 OS/SystemOS 的 `.kext` 可执行文件中找到匹配。
+
+注意：trace 目前只打印 16 字节，且 AMFI 32 字节参数的 cdhash 布局
+可能需要从 offset 4 开始解析；这些前缀不能当作完整 20 字节 cdhash
+定案。需要一次打印完整 20 字节并重新比对。
+
+无论前缀是否精确，H96a19 已经把问题推回 **SystemOS/Cryptex1/
+FileSet KC 的真实 trust cache/owner manifest** 方向：driverkitd 检查
+的多个 driver/kext 不在当前交付的静态/System 侧车中，随后 cryptexd
+启动并停住。继续增加 `sheng-disable-jobs` 不能解决这个信任链问题。
+
+建议停止 skip 迭代，下一步二选一：
+
+1. 打印完整 20 字节 cdhash，并确认它们属于哪个 SystemOS/DriverKit
+   trust cache；若来自 `Cryptex1,SystemTrustCache`，需要把该 cache
+   正确加载到内核侧车/AMFI runtime；
+2. 作为一次性 bring-up 诊断，配合 AuthAPFS/cryptexd 的受控 patch
+   验证 UI 路径，但必须明确不是最终安全方案。
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。
