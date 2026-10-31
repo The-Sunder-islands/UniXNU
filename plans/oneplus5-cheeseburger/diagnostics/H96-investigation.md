@@ -507,6 +507,39 @@ H96a4 产物：
 | `H96a4-payload.img` | 79,691,776 | `6d6f49355ca1b1f09e70f39ded35fdeda7ba0064d5ceac29db89501f45a22ec0` |
 | `boot-H96a4-tcbypass.img` | 81,147,904 | `f745b54f551ab6473fe8e6aeee68951d592e8d128ed5eb7facce5308bf3f6be0` |
 
+### 6.10 H96a5：首个 AMFI 拒绝即打印调用方并 panic（B 方案）
+
+按用户选择 B，H96a5 不再依赖滚屏，而是在 AMFI 的拒绝分支做一次
+**只读诊断 panic**：
+
+- 在 H96a3 prelinked kernel 的 AMFI 拒绝分支
+  `VM 0xfffffff00aab75d8` 改成跳到代码洞
+  `VM 0xfffffff00a96b318`；
+- 代码洞读取 `proc->p_pid`（`+0x60`）和 `proc->p_comm`（`+0x5bc`），
+  拼接原函数名后调用 `panic()`：
+  ```text
+  H96_AMFI_REJECT: func=%s pid=%d comm=%s
+  ```
+- `panic` 会停住系统并保留屏幕，不再继续刷屏；这是一次性诊断，
+  不改变 AMFI 策略、不跳过权限门、不修改 TrustCache。
+
+H96a5 产物：
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a5-kernel.macho` | 52,088,832 | `2994ae9d7f7dae99d84f597ce3edf4a3a05a962de7fbbf922ddb2893022150cb` |
+| `H96a5-payload.img` | 79,691,776 | `2ed839d356e313a520733963e25965af3c9d30bf2b982e0fe9e83dc15690d9a2` |
+| `boot-H96a5-paniclog.img` | 81,147,904 | `c2a183500c2cff77c3331751e862c5b5487b937d256e49608add075ab81361cc` |
+
+预期屏幕（只出现一次，然后停在 panic）：
+
+```text
+H96_AMFI_REJECT: func=int _check_cdhash_in_trustcache(struct proc *, user_addr_t) pid=<PID> comm=<NAME>
+```
+
+拿到 PID/comm 后即可判断拒绝方是 launchd、amfid、pkd、xpcproxy 还是其他
+进程；随后沿该进程的签名/entitlement 来源继续，而不是继续改 TrustCache。
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。

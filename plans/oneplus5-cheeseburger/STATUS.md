@@ -1671,6 +1671,11 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   查询仍执行；用于获取 `Process %d` 调用方和 query hit/miss。kernel
   `86a7e63a...`、payload `6d6f4935...`、boot
   `f745b54f...`。这是受控诊断绕过，不是默认配置或最终修复。
+- H96a5（B 方案：拒绝即 panic 并打印调用方）已构建：在 AMFI 拒绝分支
+  `VM 0xfffffff00aab75d8` 跳到代码洞，读取 `proc->p_pid`/`p_comm` 后
+  `panic("H96_AMFI_REJECT: func=%s pid=%d comm=%s")`。kernel
+  `2994ae9d...`、payload `2ed839d3...`、boot
+  `c2a18350...`。这是诊断 panic，不改变 AMFI 策略/权限门。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户
