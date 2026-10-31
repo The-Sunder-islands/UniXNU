@@ -1728,6 +1728,14 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   `fe684b31...`、payload `93d052bf...`、boot
   `bd3069c2...`；若 UFS 等待超时会直接 panic 并给出 LBA/长度/UTRD/
   寄存器；若仍无 panic，则停点在上层。等待上机。
+- H96a10 已上机：系统启动到 configd/keybagd/amfid/mobileassetd/
+  storageproxyd/fseventsd/IOMFB_FDR_Loader/xpcproxy 等大量用户态服务；
+  未出现 `NATIVE_UFS_TIMEOUT`/`NATIVE_UFS_STALL`。最后停在 xpcproxy
+  的 dyld cache 注册（`NATIVE_CACHE_SIG`）后，尚未出现 backboardd/
+  SpringBoard。
+- H96a11（exec trace 增加 argv0/argv1 + UFS timeout + gate bypass +
+  cpus=2）已构建：kernel `b12e0480...`、payload `20751860...`、boot
+  `d225ad4b...`；用于确认最后 xpcproxy 的目标服务。等待上机。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户

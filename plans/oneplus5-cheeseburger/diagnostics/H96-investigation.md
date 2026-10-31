@@ -828,6 +828,35 @@ H96a10 产物：
 | `H96a10-payload.img` | 79,691,776 | `93d052bf7b55047d083dafdb2a168931d94f9b20f8fa0cbdbe580a65e3532413` |
 | `boot-H96a10-ufstimeout.img` | 81,147,904 | `bd3069c27fa1c849b4cb2127d68a742579a0d21419c98cb09d9ea650f578e616` |
 
+### 6.20 H96a10 结果：多服务已启动，停在 xpcproxy，未见 UFS 超时
+
+H96a10（UFS 请求内超时 panic + cpus=2 + gate bypass）屏幕显示大量
+`NATIVE_EXEC`：
+
+```text
+logd, UserEventAgent, mediaserverd, configd, removed, keybagd, amfid,
+DumpPanic, mobileassetd, thermalmonitord, tzc, containermanager,
+driverkitd, sleepd, AppleCredentiald, rapportd, storageproxyd,
+fseventsd, IOMFB_FDR_Loader, distnoted, xpcproxy, ptpd, log_helper ...
+```
+
+最后停在若干 `xpcproxy` 进程，最后可见 `NATIVE_H66_FCNTL` /
+`NATIVE_CACHE_SIG`（xpcproxy 的 dyld cache 注册）；没有
+`NATIVE_UFS_TIMEOUT`/`NATIVE_UFS_STALL`，说明 UFS 请求没有超时，停点在
+上层 xpcproxy/服务启动。
+
+这比之前大幅前进：configd/keybagd/amfid/mobileassetd/storageproxyd/
+fseventsd/IOMFB_FDR_Loader 都已启动，但还没有 `backboardd`/SpringBoard。
+
+H96a11：在 H96a10 基础上把 `NATIVE_EXEC` 扩展为打印 `argv0`/`argv1`，
+用于确认最后卡住的 `xpcproxy` 实际要启动的目标服务。
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a11-kernel-gatebypass.macho` | 52,088,832 | `b12e048003d688c3dec3128812a3a09e1e7024b4397234fbfa332e598d8a3288` |
+| `H96a11-payload.img` | 79,691,776 | `20751860174d85f75c59f36d71006a89a764666f810b5de395e17b98903dbb5b` |
+| `boot-H96a11-exargv.img` | 81,147,904 | `d225ad4bcea345d4310acb37f227fbadbdda524d51fdef3b3ef81310cf6ceeb4` |
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。
