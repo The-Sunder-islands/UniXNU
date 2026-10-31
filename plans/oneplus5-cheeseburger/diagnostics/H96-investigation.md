@@ -1161,6 +1161,14 @@ FileSet KC 的真实 trust cache/owner manifest** 方向：driverkitd 检查
 2. 作为一次性 bring-up 诊断，配合 AuthAPFS/cryptexd 的受控 patch
    验证 UI 路径，但必须明确不是最终安全方案。
 
+> **H96a21 更正（见 6.34）**：H96a21 在 AMFI 内部读到四次检查的
+> `mask=0x1`，按 AMFI 位语义是 **type 1（静态）miss、type 2
+> （loadable）hit**，即四个目标都在运行时 loadable TrustCache 中。
+> “不在 H91 静态+System 侧车”是 DriverKit driver 的正常结果，不能
+> 作为 cache 缺失的证据。当前 AMFI/这些 driver 的 trust-cache 检查
+> 已通过；剩余停点要从 FileSet KC 之后（cryptexd/SystemOS/launchd
+> 等待）继续定位。
+
 ### 6.31 H96a20：完整 32 字节 AMFI 参数与返回结果
 
 H96a20 只改 trace，不 panic、不改 skip：
@@ -1265,6 +1273,48 @@ panic: H96a21: fourth driverkitd trust-cache check
 | `boot-H96a21-tcpanic.img` | 81,147,904 | `f7e9a2f051f6cc446d2a775d799b489bd2297f92ef043b516f40d7b9ee88eb67` |
 
 H96a21 已通过 `fastboot boot` 启动，等待第四次 driverkitd 检查触发 panic 后拍照。
+
+### 6.34 H96a21 结果：四次检查全部 loadable hit，AMFI 不是当前阻塞
+
+H96a21 在第四次 driverkitd 检查处 panic，屏幕给出：
+
+```text
+H96A21_TC: n=1 pid=62 comm=driverkitd mask=0x1
+  cdhash=1fc191a7fbb1e532b54ca15befb83d7efe9ab3e1
+H96A21_TC: n=2 pid=62 comm=driverkitd mask=0x1
+  cdhash=0d6972a904236c9c4bea8297c2d8bdacbeb1167a
+H96A21_TC: n=3 pid=62 comm=driverkitd mask=0x1
+  cdhash=d4c8a0514d5952c89dc24039d9efd4a26e0c87ef
+H96A21_TC: n=4 pid=62 comm=driverkitd mask=0x1
+  cdhash=d599af53ba5c1d66a0a0c9135c5756f9d3713284
+
+panic(cpu 0 caller ...): H96a21: fourth driverkitd trust-cache check
+```
+
+判读：
+
+- `mask=0x1`：bit0 表示 type 1（静态）查询 miss，bit1 未置位表示
+  type 2（loadable）查询 hit；这是 DriverKit driver 的**正常**结果。
+- 四次检查全部 `mask=0x1`，说明这四个目标都在运行时 loadable
+  TrustCache 中，AMFI 检查本身没有失败。
+- H96a19 只打印前 16 字节、且未在 H91 静态+System 侧车中找到匹配，
+  是 trace 截断和侧车范围造成的误判；不能用它证明缺少 SystemOS
+  trust cache。
+- 每次启动 driverkitd 检查的目标集合可能不同（H96a19/H96a20/H96a21
+  的 cdhash 不完全相同），但本次 H96a21 的四个目标均已 loadable hit。
+- H96a21 的 panic 发生在检查阶段，因此看不到之后的日志；结合
+  H96a19/H96a20，四次检查后仍进入 `FileSet KC`，随后
+  cryptexd/eligibilityd 停住。**当前阻塞不在 AMFI entitlement，也不在
+  这四个 driver 的 trust-cache 命中。**
+
+下一步应把变量放在 FileSet KC 之后的 **cryptexd/SystemOS/launchd
+等待**，而不是继续补 AMFI/静态 sidecar。可选的最小诊断：
+
+1. H96a22：只把 `com.apple.security.cryptexd` job 加入
+   `sheng-disable-jobs`（一次性诊断，不是最终修复），观察是否能越过
+   cryptexd 到 backboardd/SpringBoard；
+2. 若不跳过 cryptexd，则需要在 launchd/XPC 或 cryptexd 的
+   SystemOS/AuthAPFS 路径上加日志，确认它等待的对象。
 
 ### 6.5 回滚
 

@@ -1812,6 +1812,18 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   `[sp+0x58]` 真实 mask，第 4 次 panic 固定屏幕。kernel
   `b9cd4c9b...`、payload `bc3ea90e...`、boot
   `f7e9a2f0...`；等待 panic 照片。
+- H96a21 已上机并 panic：四次 driverkitd 检查均为 `mask=0x1`，
+  即静态 miss、loadable hit；目标 cdhash：
+  `1fc191a7fbb1e532b54ca15befb83d7efe9ab3e1`、
+  `0d6972a904236c9c4bea8297c2d8bdacbeb1167a`、
+  `d4c8a0514d5952c89dc24039d9efd4a26e0c87ef`、
+  `d599af53ba5c1d66a0a0c9135c5756f9d3713284`。
+  因此 AMFI/这些 driver 的 trust-cache 检查已通过，不是当前阻塞；
+  H96a19 “不在 H91 侧车”是 trace 截断/侧车范围造成的误判。
+- 当前阻塞回到 FileSet KC 之后的 cryptexd/SystemOS/launchd 等待。
+  下一步最小诊断：H96a22 只跳过 `com.apple.security.cryptexd` job
+  （一次性诊断，不是最终修复），观察是否到 backboardd/SpringBoard；
+  或在 cryptexd/launchd 路径加日志。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户
