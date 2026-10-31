@@ -315,6 +315,82 @@ NATIVE_TC_QUERY: pid=<N> comm=<name> type=... cdhash=... ret=<...>
 - 完全没有 `call=95`：当前循环不是这条 AMFI 路径，重新核对日志来源，
   不要继续按 H1 处理。
 
+### 6.6 H96a 构建记录（2026-10-31）
+
+构建机：`192.168.10.103`（macOS 15.8.2 / Xcode 26.3），使用 H91 的
+`out/cheeseburger/tree` 对象树，源版本 `xnu-10063.141.1`（`d8b8029`）。
+构建前已把 H91 的 `kernel.macho`、`kernel.json`、`payload.img`、
+`payload.json` 和 raw kernel 备份到 `~/h96-backup/`。
+
+使用的关键环境（从 H91 对象树的 stamp 反推并匹配）：
+
+```text
+XNU_TRUST_CACHE_RUNTIME=0
+XNU_OWNER_CACHE_MOUNT=1
+XNU_OWNER_CACHE_STARTUP=1
+XNU_OWNER_CACHE_CARRIER=1
+XNU_NATIVE_CS_HASH_CACHE=1
+XNU_OWNER_UNION_SYSTEMOS=1
+XNU_BRINGUP_CACHE_MOUNT=1
+XNU_OWNER_DATA_MOUNT=1
+XNU_OWNER_BOOT_MANIFEST=0
+XNU_OWNER_DATA_VOLATILE=1
+XNU_OWNER_CRYPTEX_FILES=0
+XNU_NATIVE_UFS=0
+XNU_NATIVE_UFS_PROBE=1
+XNU_OWNER_ROOT_AUDIT=0
+XNU_VERIFIED_ROOT_PROBE=0
+XNU_NATIVE_VIRTIO_BLOCK=0
+XNU_SOURCE_CORECRYPTO14=1
+XNU_NATIVE_RAM_BLOCK=1
+XNU_NATIVE_MOBILE_DISPLAY=0
+XNU_NATIVE_AES=0
+XNU_NATIVE_ADRENO=0
+XNU_ARM_DT_PLATFORM=1
+XNU_ARMCPU=1
+XNU_SOURCE_PTHREAD=1
+XNU_NATIVE_ARCH_TIMER=1
+XNU_DT_PANIC_REGION=1
+XNU_BOOT_PROGRESS=0
+XNU_SOURCE_MOCKFS=1
+XNU_CRYPTO_BOOTSTRAP=source
+XNU_OWNER_DATA_VOLUME_UUID=D312EFB3-1335-4E03-87C3-D78A298BB0B1
+XNU_SHENG_PMGR=1
+```
+
+预链接参数沿用 H91：
+
+```text
+--slide=0x5000000
+--prelinked out/ipsw/21H461/kernelcache.decompressed
+--root ...（与 H91 的 15 个 root 完全相同）
+--early-security-init com.apple.driver.AppleMobileFileIntegrity=0xfffffff005ab4ae0
+```
+
+产物：
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| H96a raw kernel | 19,445,640 | `92e55a7076cac782429d7ca3c60e88fabbf44d8d55e3d1b5ccb9647683160045` |
+| `H96a-kernel.macho` | 52,088,832 | `f5dbbe1c6a15a8f6fbfbccbb7cbf562edc385769a30845c68112bc9e324e466c` |
+| `H96a-payload.img` | 79,691,776 | `dd723c78f0ddc645a3f68395b8623ad9c8c3171477219418b816afbed33ecea4` |
+| `boot-H96a-amfitrace.img` | 81,147,904 | `d2d509819ff6fa34919b6473691e75e646623f619ab5e65d0195ac1cfd7d1e85` |
+
+`H96a-kernel.macho` 已用 `strings` 确认包含
+`NATIVE_AMFI_SYSCALL`、`NATIVE_TC_QUERY` 和两个 trace boot arg 字符串。
+payload 从 H91 payload 复制，只替换 `Payloads/kernel.macho` 和
+`unixnu.toml` 的 args；ADT、TrustCache、Data seed 均沿用 H91。
+boot image 从 H91 boot image 复制，只在 ramdisk 偏移 `1456128` 处
+替换为同尺寸的 H96a payload；UEFI kernel 和 header 未改。
+
+`fastboot boot boot-H96a-amfitrace.img` 返回 `Booting OKAY`。设备已启动
+H96a；日志采集结果待补。
+
+注意：构建脚本在本次重编译了 12 个 object（trace 两处，加上它每次都会
+重新应用的 late patches 所触及的对象）。环境变量按 H91 stamp 匹配，但
+尚未做“去掉 trace 补丁后重建并比对 H91 哈希”的严格 control。H96a 的
+结论只应归因于 trace 两处，除非后续 control 证明其他 object 未改变。
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。

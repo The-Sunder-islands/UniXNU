@@ -1637,6 +1637,13 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
 - 验证：补丁已对干净的 `xnu-10063.141.1` 源树通过
   `git apply --check`；本机无 macOS/Xcode 内核工具链，**尚未实际编译**，
   也**未上机**。H91 产物未覆盖。
+- H96a 构建完成（macOS 15.8.2 / Xcode 26.3，H91 对象树 +
+  `xnu-10063.141.1`）：raw kernel `92e55a70...`、kernel.macho
+  `f5dbbe1c...`、payload `dd723c78...`、boot
+  `d2d50981...`。payload/ADT/TrustCache/Data seed 沿用 H91，只替换
+  kernel 与两个 trace boot arg。
+- `fastboot boot boot-H96a-amfitrace.img` 返回 `Booting OKAY`；设备已启动
+  H96a。`NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户
   `fastboot boot`；用 `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 确认调用方
