@@ -20,10 +20,12 @@
    code signing/entitlement 状态为什么不可用。
 3. 原始 SystemOS 镜像中，`com.apple.private.amfi.can-check-trust-cache` 及
    `Unable to find AMFI`、`Unable to connect to AMFI`、
-   `cdhash: %@ is not in trust cache` 等字符串位于一个
-   ExtensionKit/ExtensionFoundation 相关二进制里。循环的候选调用方是
-   ExtensionKit 的宿主/服务进程（例如 `pkd`/`extensiond` 一类），但在没有
-   H96a 运行日志前不能把具体进程名当成已证实事实。
+   `cdhash: %@ is not in trust cache` 等字符串位于
+   `/System/Library/Frameworks/ExtensionFoundation.framework/ExtensionFoundation`
+   （Mach-O 起始偏移 `0x1785b000`，UUID
+   `28968ac0-0ace-360e-83e3-c8e7ad996871`）。循环的候选调用方是加载
+   ExtensionFoundation 的宿主/服务进程（例如 `pkd`/`extensiond` 一类），
+   但在没有 H96a 运行日志前不能把具体进程名当成已证实事实。
 4. H91 的 payload 确实携带 `kernel.macho.trustcache`（61,356 字节），
    DarwinBoot 会把它填入 `/chosen/memory-map/TrustCache`；H91 也没有触发
    “missing external trust caches” panic。因此“完全没有交付 TrustCache”
@@ -143,8 +145,11 @@ SystemOS trust cache 内容不对。
 ### 4.3 调用方候选
 
 在原始 SystemOS 镜像中搜索
-`com.apple.private.amfi.can-check-trust-cache`，命中偏移
-`0x178e...` 附近的 ExtensionKit/ExtensionFoundation 二进制。同一区域包含：
+`com.apple.private.amfi.can-check-trust-cache`，命中
+`/System/Library/Frameworks/ExtensionFoundation.framework/ExtensionFoundation`
+（Mach-O 起始 `0x1785b000`，UUID
+`28968ac0-0ace-360e-83e3-c8e7ad996871`；entitlement 字符串约在
+`0x178e3fxx`）。同一二进制包含：
 
 ```text
 Unable to find AMFI

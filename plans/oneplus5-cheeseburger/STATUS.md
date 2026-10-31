@@ -1616,9 +1616,11 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   (`EACCES`)，发生在 XNU `query_trust_cache()` 之前。当前循环因此是
   调用方权限/签名状态问题，不是 TrustCache 查询未命中。
 - 原始 SystemOS 中该 entitlement 及 `Unable to find AMFI`、
-  `cdhash ... is not in trust cache` 字符串位于 ExtensionKit/
-  ExtensionFoundation 相关二进制；循环候选调用方是使用 ExtensionKit 的
-  宿主/服务进程，具体 PID/comm 仍需 H96a 运行日志确认。
+  `cdhash ... is not in trust cache` 字符串位于
+  `/System/Library/Frameworks/ExtensionFoundation.framework/ExtensionFoundation`
+  （Mach-O `0x1785b000`，UUID `28968ac0-0ace-360e-83e3-c8e7ad996871`）；
+  循环候选调用方是加载该框架的宿主/服务进程，具体 PID/comm 仍需 H96a
+  运行日志确认。
 - H90d `HCS=0x10`：按 UFSHCI，bit 4 是 `HOST_ERROR_INDICATOR`，
   `HCS & 3 == 0` 表示 `DEVICE_PRESENT` 与
   `UTP_TRANSFER_REQ_LIST_READY` 都未置位；不是 idle/live 编码差异。
