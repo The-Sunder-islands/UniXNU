@@ -116,7 +116,7 @@
  #include <sys/codesign.h>
  #include <sys/trust_caches.h>
  #include <IOKit/IOBSD.h>
-@@ -683,6 +684,44 @@
+@@ -683,6 +684,46 @@
  	return ret;
  }
  
@@ -153,15 +153,17 @@
 +	memcpy(words, cdhash, sizeof(words));
 +	printf("NATIVE_TC_QUERY: pid=%d comm=%s type=%u "
 +	    "cdhash=%08x%08x%08x%08x%08x ret=%d\n",
-+	    proc_getpid(p), p->p_comm, query_type, words[0], words[1],
-+	    words[2], words[3], words[4], result);
++	    p != NULL ? proc_getpid(p) : -1,
++	    p != NULL ? p->p_comm : "kernel",
++	    query_type, words[0], words[1], words[2], words[3], words[4],
++	    result);
 +}
 +#endif /* CONFIG_MACF */
 +
  kern_return_t
  query_trust_cache(
  	TCQueryType_t query_type,
-@@ -702,6 +741,9 @@
+@@ -702,6 +743,9 @@
  	ret = xnu_query_trust_cache(query_type, cdhash, query_token);
  #endif
  
