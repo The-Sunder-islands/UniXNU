@@ -995,6 +995,35 @@ com.apple.nsurlsessiond,com.apple.routined,com.apple.nehelper
 | `H96a15-payload.img` | 79,691,776 | `4fed1175ec016d610d3dc8d8bf9b37a581bd53a7140cb645ad83cc2a1ec1acb9` |
 | `boot-H96a15-skipjobs.img` | 81,147,904 | `0b55644d33e4fa848e6c458e0450bd2854e754986941c889198f063006ac4aec` |
 
+### 6.26 H96a15 结果：越过第二次 driverkitd，停在 chronod
+
+H96a15（跳过 nsurlsessiond/routined/nehelper）屏幕显示：
+
+```text
+KextLog: driverkitd is not active
+KextLog: Loading FileSet KC(s)
+KextLog: driverkitd is active
+NATIVE_UFS_PROGRESS: ... winBytes=3266626560 ...
+NATIVE_EXEC: pid=90 comm=xpcproxy argv1=com.apple.chronod
+NATIVE_EXEC: pid=90 comm=chronod argv0=/System/Library/PrivateFrameworks/ChronoCore.framework/Support/chronod
+NATIVE_UFS_PROGRESS: ... winBytes=3272483840 ...
+```
+
+随后 3 分钟无变化：
+
+- 第二次 driverkitd 阶段已越过；
+- `chronod` 已启动；
+- 没有 UFS timeout；
+- 尚未出现 SpringBoard/WindowServer。
+
+所以跳过 routined/nehelper 有效，当前新的停在 `chronod` 或其依赖。
+H96a16 在 skip 列表中再加入 `com.apple.chronod`，观察下一服务。
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a16-payload.img` | 79,691,776 | `646bdae098cdea2b18f01121c58abc9caa3ba6c073cae9cad86b10f771e39d7c` |
+| `boot-H96a16-skipchronod.img` | 81,147,904 | `49fc80be16dd61a60a0cddbf745359a7f1039360eedf295b77326052c0e17126` |
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。

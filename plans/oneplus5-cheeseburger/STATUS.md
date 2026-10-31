@@ -1762,6 +1762,11 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   `nsurlsessiond,routined,nehelper`：payload `4fed1175...`、boot
   `0b55644d...`。用于排除网络/位置服务同步等待并稳定到达
   backboardd/SpringBoard。等待上机。
+- H96a15 已上机：越过第二次 driverkitd，启动到 `chronod`，UFS 约
+  3.27 GB 后停住；无 UFS timeout，未到 SpringBoard/WindowServer。
+  跳过 routined/nehelper 有效，chronod 是新的停在候选。
+- H96a16 在 skip 列表加入 `com.apple.chronod`：payload
+  `646bdae0...`、boot `49fc80be...`。用于观察下一服务。等待上机。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户
