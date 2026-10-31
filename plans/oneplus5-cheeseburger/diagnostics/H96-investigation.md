@@ -612,6 +612,51 @@ H96a6 产物：
 | `H96a6-payload.img` | 79,691,776 | `aec14df75054b80832399301ef2289a9902fe2c0f07e5732d492163975db7881` |
 | `boot-H96a6-tcresult.img` | 81,147,904 | `3ac690a0e083202668173215e68b942eb94310118f098169c1646af616dbd46b` |
 
+### 6.13 H96a6 结果：目标 cdhash 在静态 cache 命中，loadable 查询 miss
+
+H96a6 panic 屏幕给出：
+
+```text
+NATIVE_AMFI_SYSCALL: pid=63 comm=driverkitd target=AMFI call=95
+  arg=0x16f23b710 csflags=0x22002301 blob=0xfffffff... platform=1
+  cdhash=7bb1e5321fc19a7efbb83d7eb54ca15b cdhash_valid=1
+
+NATIVE_TC_QUERY: pid=63 comm=driverkitd type=1
+  cdhash=1fc19a7... ret=0
+NATIVE_TC_QUERY: pid=63 comm=driverkitd type=2
+  cdhash=1fc19a7... ret=56
+
+H96_TC_RESULT: pid=63 comm=driverkitd mask=0x3
+  cdhash=7bb1e5321fc19a7efbb83d7eb54ca15b
+```
+
+判读：
+
+- `target=AMFI`：实际 MAC policy 名是 `AMFI`，不是 bundle ID；这解释了
+  H96a2/H96a3 旧 target 过滤为什么没有日志。
+- type 1 查询 `ret=0`：目标 cdhash 已在**静态 TrustCache** 命中。
+- type 2 查询 `ret=56`：`KERN_NOT_FOUND`，loadable/SystemOS 侧没有
+  该 cdhash。
+- `mask=0x3`（照片略糊，需用更清晰图确认）：AMFI 把两次查询都当作
+  miss 位；但 type 1 的 XNU 查询本身是命中的，说明 AMFI 内部的
+  type 1 wrapper 可能还有额外的 cache capability/type 检查，不能只看
+  XNU query 返回值。
+- `cdhash=7bb1...` 是 driverkitd 请求检查的**目标**（driver/kext），
+  不是 driverkitd 自身 cdhash；原版 driverkitd 自身是 adhoc
+  `2811f834...` 且没有 trust-cache entitlement。
+
+这进一步确认：**当前循环不是“TrustCache 完全缺失”**。目标 cdhash 在
+静态 cache 命中，但：
+1. driverkitd 自身没有 `com.apple.private.amfi.can-check-trust-cache`，
+   却被带进了 `__mac_syscall("AMFI", 0x5f, ...)` 路径；
+2. loadable/SystemOS 查询 miss；
+3. AMFI 的 type 1 wrapper 结果与 XNU 查询返回值不完全一致，需要看
+   AMFI 的 cache type/capability 条件。
+
+下一步应优先回答：**为什么 driverkitd 会走这个未授权的 MAC syscall，
+而不是正常的 AMFI IOKit user client/DriverKit 路径？** 这比继续补
+TrustCache blob 更能解释循环。
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。
