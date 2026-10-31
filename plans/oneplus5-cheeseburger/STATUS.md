@@ -1627,8 +1627,8 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   - `native-trace-amfi-syscall=1`：在 `__mac_syscall()` 记录 AMFI
     selector `0x5a..0x66` 的 pid/comm/csflags/blob/platform/entitled/
     cdhash；selector `0x5f` 限 64 次。
-  - `native-trace-trust-cache=1`：在 `query_trust_cache()` 记录 query
-    type、20 字节 cdhash、返回值和限频。
+  - `native-trace-trust-cache=1`：在 `query_trust_cache()` 记录调用方
+    pid/comm、query type、20 字节 cdhash、返回值和限频。
   - 默认 boot arg 缺失时两个函数立即返回；不改变 AMFI、TrustCache、
     root auth 或 VerifiedRoot 策略。
 - H96 调查/补丁提交：`6102287`（父提交 `93c7fb6`）。

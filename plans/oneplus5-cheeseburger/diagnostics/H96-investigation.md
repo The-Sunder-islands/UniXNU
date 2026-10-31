@@ -232,8 +232,8 @@ SystemOS/Cryptex1 有独立的 `Cryptex1,SystemTrustCache`。即使 H1/H2 的
      以及 copyin 的 20 字节 cdhash。
    - boot arg：`native-trace-amfi-syscall=1`。
 2. `bsd/kern/kern_trustcache.c`
-   - 在 `query_trust_cache()` 返回前记录 query type、完整 20 字节 cdhash
-     和返回值；最多 64 次。
+   - 在 `query_trust_cache()` 返回前记录调用方 pid/comm、query type、
+     完整 20 字节 cdhash 和返回值；最多 64 次。
    - boot arg：`native-trace-trust-cache=1`。
 
 没有修改 AMFI 二进制，没有改变 trust cache 注册/查询逻辑，没有改变
@@ -292,8 +292,11 @@ _check_cdhash_in_trustcache: Only allowed processes can check the trustcache
 
 ```text
 NATIVE_AMFI_SYSCALL: ... call=95 ... entitled=1 ...
-NATIVE_TC_QUERY: type=... cdhash=... ret=<...>
+NATIVE_TC_QUERY: pid=<N> comm=<name> type=... cdhash=... ret=<...>
 ```
+
+两条日志的 `pid` 必须一致，才能把“同一调用方的 0x5f 调用”和
+“XNU 查询”对应起来；不要只看全局是否出现过 `NATIVE_TC_QUERY`。
 
 若 `ret` 为 `KERN_NOT_FOUND`，再比较静态 cache module 与 cdhash；
 若 `ret=0`，问题在 AMFI 之后的策略/调用方逻辑。
