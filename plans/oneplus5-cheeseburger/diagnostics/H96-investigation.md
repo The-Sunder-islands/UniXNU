@@ -1187,6 +1187,38 @@ H96a20 使用 H96a19 的 skip 列表（能到达四次 driverkitd 检查）和
 | `H96a20-payload.img` | 79,691,776 | `bef11b854700493c89dd51792700d00f0b46ce9c802fe044c415baae880c8792` |
 | `boot-H96a20-fullcdhash.img` | 81,147,904 | `9a409302774277cf97c0209694104c7f08c2d16ed1df3193cb617f93ced59b88` |
 
+### 6.32 H96a20 结果：full in/out words 可见，但用户缓冲区没有干净的 mask
+
+H96a20 屏幕出现多组：
+
+```text
+NATIVE_AMFI_SYSCALL: pid=62 comm=driverkitd target=AMFI call=95 ...
+  in=<8 words> copied=1
+NATIVE_AMFI_RESULT: pid=62 comm=driverkitd ... ret=0
+  out=<8 words> copied=1
+```
+
+观察：
+
+- 所有检查 `ret=0`（MAC syscall 成功）；
+- `out` 的前 5 个词（20 字节）与 `in` 相同，说明输入 cdhash 未被修改；
+- 尾部词出现 `aaaa0000` / `00000000` 一类值，不能直接当作查询位图；
+- 之前 H96a6 在 AMFI 内部 `[sp+0x58]` 读到 `mask=0x1`，但用户 32 字节
+  返回缓冲区没有呈现同样干净的 mask。
+
+因此 H96a20 证明了 driverkitd 确实在 FileSet KC 前连续检查多个
+cdhash，但**用户缓冲区不是可靠的 mask 来源**；要拿到每次检查的真实
+查询位图，必须在 AMFI 成功路径内部（`[sp+0x58]`）打点/panic，而不是
+在 `__mac_syscall` 返回后 copyin 用户缓冲区。
+
+结论不变：四次/多次 driverkitd 检查后进入 FileSet KC，随后
+cryptexd/eligibilityd 停住；当前剩余阻塞是 SystemOS/Cryptex1 信任链，
+不是 AMFI entitlement 循环。
+
+下一步如果继续，只建议做一个很小的 AMFI 内部诊断：在成功路径对第 N 次
+driverkitd 检查 panic，打印完整 20 字节 cdhash + `[sp+0x58]` mask；
+不再扩大 boot-arg/skip 列表。
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。

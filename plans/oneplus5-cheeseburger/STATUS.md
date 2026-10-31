@@ -1800,6 +1800,13 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   `e7538cb9...`、payload `bef11b85...`、boot
   `9a409302...`；用于确认 driverkitd 检查的完整 20 字节 cdhash 和
   AMFI 返回位图。等待上机。
+- H96a20 已上机：多组 driverkitd `NATIVE_AMFI_SYSCALL`/`RESULT`，
+  `ret=0`；`out` 前 20 字节与 `in` 相同，尾部为 `aaaa/0` 类值，用户
+  缓冲区不能作为干净 mask 来源。H96a20 确认 FileSet KC 前有多次
+  driverkitd 检查，但真实 mask 仍需在 AMFI 内部 `[sp+0x58]` 打点。
+- 当前剩余阻塞仍是 SystemOS/Cryptex1/FileSet KC 信任链；不再扩大
+  boot-arg/skip 列表。下一步只建议小型 AMFI 内部 panic 诊断（完整
+  20 字节 cdhash + mask）。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户
