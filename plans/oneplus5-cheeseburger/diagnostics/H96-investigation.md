@@ -637,21 +637,26 @@ H96_TC_RESULT: pid=63 comm=driverkitd mask=0x3
 - type 1 查询 `ret=0`：目标 cdhash 已在**静态 TrustCache** 命中。
 - type 2 查询 `ret=56`：`KERN_NOT_FOUND`，loadable/SystemOS 侧没有
   该 cdhash。
-- `mask=0x3`（照片略糊，需用更清晰图确认）：AMFI 把两次查询都当作
-  miss 位；但 type 1 的 XNU 查询本身是命中的，说明 AMFI 内部的
-  type 1 wrapper 可能还有额外的 cache capability/type 检查，不能只看
-  XNU query 返回值。
+- 更清晰照片显示 `mask=0x1`。按 AMFI 查询分支的代码语义：
+  bit0 在 type 1 返回非 0 时置位，bit1 在 type 2 返回非 0 时置位；
+  因此 `mask=0x1` 表示 **type 1（静态）miss、type 2（loadable）hit**。
+  目标 driver 在 loadable TrustCache 中，静态 miss 对 DriverKit driver
+  是预期结果。
 - `cdhash=7bb1...` 是 driverkitd 请求检查的**目标**（driver/kext），
   不是 driverkitd 自身 cdhash；原版 driverkitd 自身是 adhoc
   `2811f834...` 且没有 trust-cache entitlement。
+- 照片中紧随其后的两条 `NATIVE_TC_QUERY pid=63 type=1/2` 使用的是
+  另一个 cdhash `1fc19a...`，不能直接当作 AMFI 目标 `7bb1...` 的查询
+  结果；AMFI 内部查询可能不经过 XNU `query_trust_cache` trace。
 
-这进一步确认：**当前循环不是“TrustCache 完全缺失”**。目标 cdhash 在
-静态 cache 命中，但：
+这进一步确认：**当前循环不是“TrustCache 完全缺失”**。按 `mask=0x1`
+的代码语义，目标 driver 已在 **loadable TrustCache** 命中；静态查询
+miss 对 DriverKit driver 是正常。真正的阻塞是：
 1. driverkitd 自身没有 `com.apple.private.amfi.can-check-trust-cache`，
    却被带进了 `__mac_syscall("AMFI", 0x5f, ...)` 路径；
-2. loadable/SystemOS 查询 miss；
-3. AMFI 的 type 1 wrapper 结果与 XNU 查询返回值不完全一致，需要看
-   AMFI 的 cache type/capability 条件。
+2. 因此 AMFI 在返回 loadable hit 之前就拒绝了调用方；
+3. 需要在 driverkitd 正常使用的 AMFI IOKit user client / amfid / XPC
+   路径上找为什么它回退到了未授权的 MAC syscall。
 
 下一步应优先回答：**为什么 driverkitd 会走这个未授权的 MAC syscall，
 而不是正常的 AMFI IOKit user client/DriverKit 路径？** 这比继续补

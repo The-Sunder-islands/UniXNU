@@ -1686,13 +1686,15 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   payload `aec14df7...`、boot `3ac690a0...`；`mask=0` 表示命中，
   `mask=3` 表示两次查询都 miss。等待上机。
 - H96a6 panic 结果：`pid=63 driverkitd target=AMFI call=95`，目标
-  cdhash `7bb1e532...`；type 1 查询 `ret=0`（静态 cache 命中），type 2
-  查询 `ret=56`（KERN_NOT_FOUND，loadable/SystemOS miss），panic
-  `mask=0x3`（照片略糊待确认）。目标 cdhash 不是 driverkitd 自身。
+  cdhash `7bb1e532...`；panic `mask=0x1`。按 AMFI 代码的失败位语义，
+  这表示 type 1（static）miss、type 2（loadable）hit；目标 driver 已在
+  loadable TrustCache 中。照片中紧随的 `NATIVE_TC_QUERY` type1/2 用的是
+  另一个 cdhash `1fc19a...`，不能当作 AMFI 目标的查询结果。
 - 结论：不是 TrustCache 完全缺失；driverkitd 自身没有
   `com.apple.private.amfi.can-check-trust-cache`，却走了未授权的
-  `__mac_syscall("AMFI",0x5f,...)` 路径；下一步优先查 AMFI IOKit
-  user client/DriverKit 路径为什么不可用/未走，而不是继续补 blob。
+  `__mac_syscall("AMFI",0x5f,...)` 路径；目标 driver 已在 loadable
+  cache 命中，下一步优先查 AMFI IOKit user client / amfid / XPC 路径
+  为什么不可用或未被 driverkitd 使用，而不是继续补 blob。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户
