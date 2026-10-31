@@ -1700,6 +1700,13 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   `413e2b50...`。driverkitd 调用 0x5f 时 panic 输出
   `H96_AMFI_PATH: ... service=<0/1> uc_calls=<N>`，用于判断 AMFI
   IOService/UserClient 是否可用。等待上机。
+- H96a7 panic 结果：`H96_AMFI_PATH: pid=63 comm=driverkitd target=AMFI
+  service=1 uc_calls=0`。AMFI IOService 已注册，但
+  `AppleMobileFileIntegrityUserClient` 从未被调用；同屏 `amfid[47]`
+  存在。driverkitd 直接走 `__mac_syscall("AMFI",0x5f,...)`，而原版
+  driverkitd 没有该 entitlement，因此循环与 TrustCache 内容无关。
+- 下一步用 H96a4（全局跳过 entitlement 门的诊断镜像）确认该 gate 是否
+  是当前唯一阻塞，并观察 driverkitd 之后的下一个阶段。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户

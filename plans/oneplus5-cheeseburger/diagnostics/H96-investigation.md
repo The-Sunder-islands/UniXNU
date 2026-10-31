@@ -693,6 +693,35 @@ H96a7 产物：
 | `H96a7-payload.img` | 79,691,776 | `0313ac797d974c0ce968f1aecbf2718f3c70abd309c350a43372eba34a9e7336` |
 | `boot-H96a7-amfipath.img` | 81,147,904 | `413e2b50e0708827292aedd84b81b0243cea718f5160d6adbff11e203d3589b6` |
 
+### 6.15 H96a7 结果：AMFI service 已注册，但 user client 从未被调用
+
+H96a7 panic 给出：
+
+```text
+H96_AMFI_PATH: pid=63 comm=driverkitd target=AMFI
+  service=1 uc_calls=0
+```
+
+判读：
+
+- `service=1`：`AppleMobileFileIntegrity` IOService 已注册/发布；
+- `uc_calls=0`：`AppleMobileFileIntegrityUserClient::externalMethod` 从未
+  被调用；
+- 同屏还出现 `amfid[47] triggered unnest ...`，说明 **amfid 进程存在**；
+- 因此 driverkitd 没有走 AMFI user client 路径（或 open 在
+  `externalMethod` 之前就失败），而是直接调用了
+  `__mac_syscall("AMFI", 0x5f, ...)`；该调用要求
+  `com.apple.private.amfi.can-check-trust-cache`，而原版 driverkitd
+  没有该 entitlement。
+
+这解释了为什么“TrustCache 里有目标 cdhash”仍然循环：卡在调用路径和
+entitlement，而不是 cache 内容。
+
+下一步实验 H96a4：使用已经构建的“全局跳过 AMFI entitlement 门”的
+一次性诊断镜像，观察 driverkitd 的 check 返回成功后系统是否能越过
+driverkitd，以及下一个阻塞点是什么。H96a4 不是最终修复，也不进入默认
+配置；它只用于确认 gate 是否是当前唯一阻塞。
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。
