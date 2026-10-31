@@ -6,7 +6,7 @@
 - 当前阶段：**H95 基线之后的 H96 只读调查。H91 仍是当前最佳 Probe 镜像；循环的直接拒绝点已定位到 AMFI selector `0x5f` 的调用方 entitlement 门（`com.apple.private.amfi.can-check-trust-cache`），不是 XNU TrustCache 查询未命中。H96a trace 补丁已加入仓库，尚未完成实际 XNU 编译和上机。**
 - 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）；H91 过 mount-phase-1 到 driverkitd**
 - 基线提交：H91 构建提交未记录；当前 UniXNU `main` `93c7fb6`，设备仓库 `main` `5ad54e2`
-- 当前代码提交：UniXNU `6102287`（H96 调查/补丁）；设备仓库 `5ad54e2`；关键子模块见 `BASELINE.md`
+- 当前代码提交：UniXNU H96 提交 `6102287` / `072b18d` / `ecaf7ab`；设备仓库 `5ad54e2`；关键子模块见 `BASELINE.md`
 - 远程仓库：
   - UniXNU `https://github.com/lss717/UniXNU`（`main`）
   - UEFI fork `https://github.com/lss717/edk2-msm8998`（分支 `unixnu-cheeseburger`）
