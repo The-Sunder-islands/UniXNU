@@ -1707,6 +1707,13 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   driverkitd 没有该 entitlement，因此循环与 TrustCache 内容无关。
 - 下一步用 H96a4（全局跳过 entitlement 门的诊断镜像）确认该 gate 是否
   是当前唯一阻塞，并观察 driverkitd 之后的下一个阶段。
+- H96a4（全局跳过 AMFI gate）已上机：AMFI 拒绝循环消失，系统继续
+  SystemOS 读取，最后停在 `NATIVE_UFS_PROGRESS ... winBytes=329618936`
+  附近，无 `NATIVE_UFS_ALIVE` heartbeat、无 stall panic。说明 AMFI gate
+  是 driverkitd 阶段阻塞；跳过后的新停点需要独立 UFS 诊断。
+- H96a8（H96a4 + `cpus=2`，只改 CPU 数）已构建：payload
+  `5c9a4005...`、boot `53f8cfcf...`；用于让 heartbeat/stall
+  watchdog 运行并捕获停点快照。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户

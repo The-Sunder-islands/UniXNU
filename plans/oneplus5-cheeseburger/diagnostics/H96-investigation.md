@@ -722,6 +722,30 @@ entitlement，而不是 cache 内容。
 driverkitd，以及下一个阻塞点是什么。H96a4 不是最终修复，也不进入默认
 配置；它只用于确认 gate 是否是当前唯一阻塞。
 
+### 6.16 H96a4 结果：跳过 AMFI gate 后进入新的 UFS/后续停点
+
+H96a4（全局跳过 AMFI entitlement 门）启动后：
+
+- 可见的 `_check_cdhash_in_trustcache ... Only allowed` 循环消失；
+- 系统继续执行大量 `NATIVE_UFS_WINDOW` / `NATIVE_UFS_PROGRESS`，
+  最后一次可见进度约为 `winBytes=329618936`，随后日志不再变化；
+- 没有 `NATIVE_UFS_ALIVE` heartbeat，也没有 `NATIVE_UFS_STALL` panic；
+- 最后一条窗口请求为 `SystemOS req=... block=2f1ea8 ...`，进度行
+  `winFlight=1`。
+
+这说明 AMFI gate 是 driverkitd 阶段的阻塞点；跳过它后，系统进入
+SystemOS 读取/后续阶段，然后停在一个新的 UFS 或上层等待点。由于当前
+`cpus=1`，heartbeat 线程无法在卡住的 CPU 上运行，stall watchdog 也就
+没有机会打印。
+
+H96a8：只把 H96a4 的启动参数 `cpus=1` 改成 `cpus=2`，用于让
+`NATIVE_UFS_ALIVE`/`NATIVE_UFS_STALL` 有机会运行并给出停点快照。
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a8-payload.img` | 79,691,776 | `5c9a40056dcd10b477a52c7236c610fcd8fa5d6d849e765d9f0af63baa5ace12` |
+| `boot-H96a8-cpus2.img` | 81,147,904 | `53f8cfcf8a9c71fa051c9a85e6d53d2d91bb1b36de7f426494e153b5ffa36d6c` |
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。
