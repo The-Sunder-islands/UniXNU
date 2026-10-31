@@ -3,10 +3,10 @@
 - 计划：`plans/oneplus5-cheeseburger/PLAN.md`
 - 线路：B — UniXNU / 4K
 - 路线/目标：iPad7,1 / iPadOS 17.7.11（21H461）
-- 当前阶段：**H100 无 skip 对照完成（2026-10-31）。H91 仍是最佳 Probe 基线；H100 移除 7 项 `sheng-disable-jobs` 后更早停在 pfd/accountsd/nsurlsessiond/routined，说明这些 skip 在掩盖上游等待，并非 cryptexd 缺失的唯一原因；H99/H100 的进程快照仍无输出，cryptexd/eligibilityd 状态未知。**
-- 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）；H91/H96a18 过 mount-phase-1；H99 停在 driverkitd active；H100 停在 pfd/accountsd/nsurlsessiond/routined**
-- 基线提交：H91 构建提交未记录；本地 UniXNU `main` `9c89475`（H99 文档提交），设备仓库 `main` `5ad54e2`
-- 当前代码提交：本地 `9c89475`；H99/H100 干净构建树为 XNU `d8b8029` + 原始 patches + 远程诊断插桩；H96 脏源码保留在 `.cache/xnu-work.h96dirty-20261031`；设备仓库 `5ad54e2`；关键子模块见 `BASELINE.md`
+- 当前阶段：**H101/H102 快照调试完成（2026-10-31）。H91 仍是最佳 Probe 基线；H100 无 skip 对照证明移除 7 项 skip 会更早停在 pfd/accountsd/nsurlsessiond/routined；H101（boot-arg 定时）和 H102（无条件启动）都没有在最终屏产生快照/panic，cryptexd/eligibilityd 运行状态仍未知。**
+- 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）；H91/H96a18 过 mount-phase-1；H99 停在 driverkitd active；H100 停在 pfd/accountsd/nsurlsessiond/routined；H101/H102 快照未触发**
+- 基线提交：H91 构建提交未记录；本地 UniXNU `main` `e4539ae`（H100 文档提交），设备仓库 `main` `5ad54e2`
+- 当前代码提交：本地 `e4539ae`；H99/H100/H101/H102 干净构建树为 XNU `d8b8029` + 原始 patches + 远程诊断插桩；H96 脏源码保留在 `.cache/xnu-work.h96dirty-20261031`；设备仓库 `5ad54e2`；关键子模块见 `BASELINE.md`
 - 远程仓库：
   - UniXNU `https://github.com/lss717/UniXNU`（`main`）
   - UEFI fork `https://github.com/lss717/edk2-msm8998`（分支 `unixnu-cheeseburger`）
@@ -1925,6 +1925,15 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   - 7 项 skip 在掩盖 pfd/accountsd/nsurlsessiond/routined 的上游等待，不是 cryptexd 缺失的唯一原因；
   - H99 与 H96a18 的差异仍有 run-to-run/未观测成分，不能归因于单一 skip。
 - 下一步 H101：不增加 skip；修复快照（无条件打印入口/参数解析/线程启动），在 cryptexd/eligibilityd exec 时触发短快照；逐项记录 pfd/accountsd/nsurlsessiond/routined 的等待对象。
+
+## H101/H102 快照调试（2026-10-31）
+
+- 报告：`plans/oneplus5-cheeseburger/diagnostics/H102-snapshot-debug-result-2026-10-31.md`
+- H101（`h97-snapshot=120` + `H101_ARM_ENTER/PARSE/THREAD_START`）和 H102（无条件启动 180 秒快照）最终屏都没有 `H101_`/`H102_`、`H10x_PROC` 或 panic；都停在 `driverkitd active`。
+- H102 无条件启动仍无结果，排除了“`h97-snapshot` boot-arg 解析失败”作为唯一解释；但不能从屏幕区分入口未执行、线程启动失败、线程未唤醒或输出被滚动覆盖。
+- 因此 cryptexd/eligibilityd 是否运行/退出仍未确认；不能把“最终屏没有 cryptexd”当作完整进程集合。
+- 产物：H101 kernel `9990f955...`、boot `39f21579...`；H102 kernel `80c30288...`、boot `fe08ad87...`。
+- 下一步 H103：在 `h97_start_snapshot()` 入口直接 panic（或不可滚动标记）确认调用；若入口正常，改为在 `NATIVE_EXEC` 的 cryptexd/eligibilityd/alsd 分支直接 `panic` + `proc_iterate`，绕过线程/定时器。不得新增 skip，不修改完整性验证。
 
 ## 更新规则
 
