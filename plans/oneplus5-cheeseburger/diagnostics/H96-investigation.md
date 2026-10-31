@@ -782,6 +782,52 @@ H96a9：在 H96a8 基础上加入 `NATIVE_EXEC` trace（`set_proc_name()` 里
 | `H96a9-payload.img` | 79,691,776 | `0e714fa8a08ec1c07591cf9a6f7aac5312e91ae7b9f0af5483c9a58bc0459105` |
 | `boot-H96a9-exectrace.img` | 81,147,904 | `697536ff2e60feccf0d37238593579196570ce0f93b58fc280d41d1d8c1bfa8a` |
 
+### 6.18 H96a9 结果：driverkitd 之后最后 exec 是 MobileGestaltHelper
+
+H96a9（H96a8 + `NATIVE_EXEC` trace）最后可见：
+
+```text
+NATIVE_EXEC: pid=85 comm=containermanagerd
+NATIVE_EXEC: pid=87 comm=MobileGestaltHel[per]
+KextLog: driverkitd is not active
+KextLog: Loading FileSet KC(s)
+KextLog: driverkitd is active
+NATIVE_UFS_PROGRESS: ... winBytes=3213053696 winFlight=1
+```
+
+之后没有新的 `NATIVE_EXEC`、`KextLog` 或错误行：
+
+- driverkitd 已 active；
+- `containermanagerd`、`MobileGestaltHelper` 已启动；
+- 最后仍是 SystemOS 读取约 3.21 GB，`winFlight=1`；
+- 没有 `NATIVE_UFS_STALL` panic。
+
+所以当前停点在 driverkitd/FileSet KC 之后，可能是 driverkitd 等待某个
+driver/kext 处理，也可能是 UFS/上层等待。需要把 UFS 超时从“heartbeat
+线程”移到请求本身，才能在 `cpus=1/2` 下都给出证据。
+
+### 6.19 H96a10：UFS 请求内超时 panic
+
+H96a10 在 `NativeUfsProbe.cpp` 的 `ufsSubmit` 超时分支直接把
+`NATIVE_UFS_GPT: OCS timeout` 改成 panic：
+
+```text
+NATIVE_UFS_TIMEOUT: lba=%llx bytes=%u type=%08x ocs=%x loops=%u
+  db=%x is=%x hcs=%x hce=%x ucd0=%x cdb=...
+```
+
+这不再依赖 heartbeat 线程；如果停点确实在 UFS 请求等待，5.2 秒内
+一定会 panic 并给出 LBA/长度/UTRD/寄存器。若仍无 panic，则停点在上层
+（driverkitd/FileSet KC/launchd），不是 UFS 传输。
+
+H96a10 产物：
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a10-kernel-gatebypass.macho` | 52,088,832 | `fe684b31987da19e6ab65c79cd0453bfeb231ec5e4a9ad841c71d8880b703481` |
+| `H96a10-payload.img` | 79,691,776 | `93d052bf7b55047d083dafdb2a168931d94f9b20f8fa0cbdbe580a65e3532413` |
+| `boot-H96a10-ufstimeout.img` | 81,147,904 | `bd3069c27fa1c849b4cb2127d68a742579a0d21419c98cb09d9ea650f578e616` |
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。

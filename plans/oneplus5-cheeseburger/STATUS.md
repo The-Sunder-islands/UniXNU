@@ -1721,6 +1721,13 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
 - H96a9（H96a8 + `NATIVE_EXEC` trace + gate bypass）已构建：kernel
   `84312b76...`、payload `0e714fa8...`、boot
   `697536ff...`；用于显示最后执行的进程。等待上机。
+- H96a9 已上机：最后 exec 为 `containermanagerd`/`MobileGestaltHelper`，
+  之后 `driverkitd is active`，SystemOS 读取约 3.21 GB 后停止；无新
+  exec/KextLog，无 UFS stall。停点在 driverkitd/FileSet KC 之后。
+- H96a10（UFS 请求内超时 panic）已构建：kernel
+  `fe684b31...`、payload `93d052bf...`、boot
+  `bd3069c2...`；若 UFS 等待超时会直接 panic 并给出 LBA/长度/UTRD/
+  寄存器；若仍无 panic，则停点在上层。等待上机。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户
