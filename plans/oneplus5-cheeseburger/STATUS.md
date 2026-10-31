@@ -1774,6 +1774,13 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
 - H96a17 扩大 skip 列表（nsurlsessiond,routined,nehelper,chronod,
   log_helper,accountsd,alsd,pfd）：payload `9fdc58c0...`、boot
   `6906c32e...`；用于一次性排除已观察 daemon。等待上机。
+- H96a17 启动 panic：`sheng watchdog launchd policy failed: 22 @
+  kern_exec.c:8294`。根因是 `sheng-disable-jobs` 字符白名单不允许
+  `_`，列表中的 `com.apple.log_helper` 触发 EINVAL；不是用户态服务
+  问题。H96a16 无下划线所以能启动到 log_helper。
+- H96a18 移除 log_helper，skip 列表改为
+  `nsurlsessiond,routined,nehelper,chronod,accountsd,alsd,pfd`：
+  payload `c58640e1...`、boot `301d8edd...`。等待上机。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户

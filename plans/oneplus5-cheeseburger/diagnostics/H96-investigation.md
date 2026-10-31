@@ -1054,6 +1054,34 @@ backboardd/SpringBoard。
 | `H96a17-payload.img` | 79,691,776 | `9fdc58c01dd4cfa53e76684e300f2ab0f88e096427c6b1fc7d5301181366f589` |
 | `boot-H96a17-broadskip.img` | 81,147,904 | `6906c32e2bab290b08a4e0b767904515f4251fed1260f9a5e7bffea6c2ffa997` |
 
+### 6.28 H96a17 panic：sheng-disable-jobs 不允许下划线
+
+H96a17 启动时 panic：
+
+```text
+panic(cpu 0 ...): sheng watchdog launchd policy failed: 22 @ kern_exec.c:8294
+```
+
+根因不是用户态服务，而是诊断策略的参数校验：`sheng_boot_watchdog_policy`
+的 `jobs` 字符白名单只允许字母、数字、`.`、`-`、`,`，**不允许下划线**。
+H96a17 的 skip 列表包含 `com.apple.log_helper`，其中 `_` 触发
+`EINVAL(22)`，`kern_exec.c` 在 launchd exec 处 panic。
+
+这解释了为什么 H96a16（没有 `log_helper`）可以启动到 log_helper，而
+H96a17 直接 panic。也说明当前 `sheng-disable-jobs` 不能跳过带 `_` 的
+job；后续如果要跳过这类 job，需要把白名单加上 `_`（独立小修复）。
+
+H96a18：移除带下划线的 `log_helper`，skip 列表改为：
+
+```text
+nsurlsessiond,routined,nehelper,chronod,accountsd,alsd,pfd
+```
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a18-payload.img` | 79,691,776 | `c58640e146c4f7d2a97ceaa511bc88e2382256a44f3bd03a0469fe6b60bb74c7` |
+| `boot-H96a18-skipno-underscore.img` | 81,147,904 | `301d8edd7f2c13b144f8c980fa4364ab1ed89141bac2e52325ea65826ad805b6` |
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。
