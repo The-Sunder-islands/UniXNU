@@ -3,10 +3,10 @@
 - 计划：`plans/oneplus5-cheeseburger/PLAN.md`
 - 线路：B — UniXNU / 4K
 - 路线/目标：iPad7,1 / iPadOS 17.7.11（21H461）
-- 当前阶段：**H96a23 之后的只读源码审计完成（2026-10-31）。H91 仍是最佳 Probe 基线；H96a18 是唯一到达 cryptexd/eligibilityd 的路径；H96a21 四次 driverkitd 检查均为 loadable hit；H96a22/H96a23 的 skip 实验是回归。当前根因未由源码确认，重点候选是 cryptexd/AuthAPFS/IM4M 与 launchd/FileSet KC 等待；H91 ADT 的 48 字节 `boot-manifest-hash` 仍是全零 bring-up 占位。**
-- 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）；H91/H96a18 过 mount-phase-1，H96a18 到 cryptexd/eligibilityd**
-- 基线提交：H91 构建提交未记录；当前 UniXNU `main` `59fecce`，设备仓库 `main` `5ad54e2`
-- 当前代码提交：本地 UniXNU `59fecce`；实际 H96 构建树 `9f3daad`（XNU 基础 `d8b8029`，工作区含 H96 未提交 trace/diagnostic 修改）；设备仓库 `5ad54e2`；关键子模块见 `BASELINE.md`
+- 当前阶段：**H98b 诊断完成（2026-10-31）。H91 仍是最佳 Probe 基线；H98b 已直接确认 SystemOS 窗口基址 `0x17f540000`，最后完成 SystemOS 4 KiB 读；H98b 本次未创建 cryptexd/eligibilityd，且 `H97_SNAPSHOT` 未出现，因此 H96a18 的 cryptexd/eligibilityd 进程状态仍未知。H96a18 的到达结果存在 run-to-run 差异，不能作为稳定基线。**
+- 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）；H91/H96a18 过 mount-phase-1；H98b 停在 `driverkitd is active`，未到 cryptexd/eligibilityd**
+- 基线提交：H91 构建提交未记录；本地 UniXNU `main` `f357cb4`，设备仓库 `main` `5ad54e2`
+- 当前代码提交：本地 `f357cb4`（H96 只读审计）；H98b 干净构建树为 XNU `d8b8029` + 原始 patches + 仅远程 H98b 插桩；H96 脏源码保留在 `.cache/xnu-work.h96dirty-20261031`；设备仓库 `5ad54e2`；关键子模块见 `BASELINE.md`
 - 远程仓库：
   - UniXNU `https://github.com/lss717/UniXNU`（`main`）
   - UEFI fork `https://github.com/lss717/edk2-msm8998`（分支 `unixnu-cheeseburger`）
@@ -1882,6 +1882,22 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
 - 下一步只读检查：补 SHNGROOT `window[1]=SystemOS off=...` 日志、
   launchd job/exit 观测、cryptexd syscall/mach wait 跟踪；不要直接
   patch cryptexd、改 userdata 或继续 skip。
+
+## H98b 用户态 / UFS / owner 诊断（2026-10-31）
+
+- 报告：`plans/oneplus5-cheeseburger/diagnostics/H98b-process-ufs-diagnosis-2026-10-31.md`
+- H98b 最终屏（`221.jpg`）：
+  - `NATIVE_UFS_WINDOW: SystemOS ... abs=17f540000 lba=187bc5`；
+  - `NATIVE_UFS_PROGRESS ... lastWin=SystemOS abs=17f540000 ... ufsWin=SystemOS base=17f540000`；
+  - 最后完成 `SystemOS block=0x43420 count=8 done=4096 ok=1`；
+  - 最后可见 `NATIVE_EXEC alsd pid=63 ppid=1`，随后 `driverkitd is active`；
+  - **没有 cryptexd/eligibilityd，也没有 `NATIVE_EXIT`/`H97_SNAPSHOT`。**
+- H96a18 曾创建 `cryptexd` PID 80、`eligibilityd` PID 87（xpcproxy 87/88），但旧日志没有 ppid/退出/快照；因此其运行/退出状态仍未知。
+- H98b 与 H96a18 使用同一 skip 列表却未到 cryptexd/eligibilityd，说明存在 run-to-run 差异；不能把 H96a18 的进程集合当稳定结果。
+- UFS 映射：H98b 确认 SystemOS 基址 `0x17f540000`；H96a23 `lba=0x1b1bca` 对应偏移 `0x3268a000`，但旧日志 `lastWin=0x93450`（偏移 `0x1268a000`）不一致，旧日志无法精确归因该 UFS 请求；H96a22 最后有标签读为 `block=0x13fcf0` / 偏移 `0x27f9e000` / `done=4096`。
+- owner 信任链：H98b 仍是 `XNU_OWNER_BOOT_MANIFEST=0`、`XNU_OWNER_ROOT_TRUST=0`、`XNU_VERIFIED_ROOT_PROBE=0`、`XNU_NATIVE_VIRTIO_BLOCK=0`、`XNU_NATIVE_UFS_PROBE=1`；NativeUfsProbe root 授权桩只检查设备；ADT `boot-manifest-hash` 仍为 48 字节全零；不是真实VerifiedRoot/owner 认证。
+- IM4M/AuthAPFS：H98b 未到 cryptexd，未观测 AuthAPFS/Image4 调用；IPSW 只有 229-byte IM4P root-hash，`personalized_im4m_present=False`；cryptexd 字符串只作线索，当前 **未知**，不能标记为已证明根因。
+- 下一步建议 H99：修复/确认 H98b 快照触发，重复 H96a18 路径确认 cryptexd/eligibilityd 到达稳定性，并增加 launchd job/exit 与 cryptexd syscall/mach wait 观测；不再增加 skip，不修改完整性验证。
 
 ## 更新规则
 
