@@ -540,6 +540,78 @@ H96_AMFI_REJECT: func=int _check_cdhash_in_trustcache(struct proc *, user_addr_t
 拿到 PID/comm 后即可判断拒绝方是 launchd、amfid、pkd、xpcproxy 还是其他
 进程；随后沿该进程的签名/entitlement 来源继续，而不是继续改 TrustCache。
 
+### 6.11 H96a5 结果：拒绝方是 driverkitd，且原版 driverkitd 本就没有该 entitlement
+
+H96a5 panic 屏幕给出：
+
+```text
+NATIVE_AMFI_SYSCALL: pid=63 comm=driverkitd target=AppleF... call=95
+  csflags=0x2202331 blob=0xfffffff6dfe23050 platform=1 cdhash=... cdhash_valid=1
+
+H96_AMFI_REJECT: func=int _check_cdhash_in_trustcache(struct proc *, user_addr_t)
+  pid=63 comm=driverkitd
+```
+
+因此调用方确定为 **driverkitd（PID 63）**，selector 为 95（0x5f），
+`platform=1`、`blob` 非空、`csflags=0x2202331`，说明它的 code signing
+blob 是被 AMFI 识别为 platform binary 的；但 entitlement 门仍然拒绝。
+
+在 macOS 构建机上挂载原版 iPad7,1 17.7.11 OS DMG，
+`/usr/libexec/driverkitd` 的签名是 **adhoc**，CDHash
+`2811f83446d213b1b14a8f7b0e81b79063fadf77`，entitlements 只有：
+
+```text
+com.apple.private.kernel.get-kext-info
+com.apple.private.sandbox.profile:embedded = com.apple.driverkitd
+com.apple.private.security.iocatalog-management
+com.apple.private.security.kext-collection-management
+com.apple.private.security.storage.driverkitd
+com.apple.private.spawn-driver
+com.apple.private.xpc.launchd.job-manager = com.apple.driverkitd
+com.apple.runningboard.launch_dexts
+```
+
+**没有** `com.apple.private.amfi.can-check-trust-cache`。所以在当前
+签名状态下，AMFI 拒绝 driverkitd 是符合策略的；问题变成：
+**driverkitd 为什么在本次 bring-up 中会走到这个未授权的 AMFI MAC
+syscall 路径？**
+
+最可能的解释不再是“TrustCache blob 缺失”，而是：
+
+1. driverkitd 正常应该通过 DriverKit/AMFI 的 IOKit user client 或
+   SystemOS/Cryptex 信任链处理 driver approval；当前环境中该路径不可用，
+   于是回退到 `__mac_syscall`，而 driverkitd 没有该 entitlement；
+2. driverkitd 被错误的 launchd/SystemOS 状态或被注入的
+   ExtensionFoundation/Security 路径带入了 trust-cache 查询；
+3. 当前 AMFI 的 IOKit service/user client 未启动或未匹配，导致回退。
+
+这些都需要在 H96a6 中进一步区分。
+
+### 6.12 H96a6：跳过权限门并打印 TrustCache 查询结果
+
+H96a6 在 H96a3 基础上做两个二进制诊断改动：
+
+- 把 AMFI 权限门的 `tbz`（`VM 0xfffffff00aab73b8`）改成 `nop`，让
+  driverkitd 的请求进入实际查询；
+- 在 AMFI 查询完成、copyout 之前（`VM 0xfffffff00aab7424`）跳到代码洞，
+  读取 `p_pid`、`p_comm`、查询结果位图 `[sp+0x58]` 和 cdhash
+  `[sp+0x40..0x50]`，然后 `panic()`：
+  ```text
+  H96_TC_RESULT: pid=%d comm=%s mask=0x%llx cdhash=%016llx%016llx
+  ```
+
+`mask=0` 表示 AMFI 的两次查询都命中；`mask=3` 表示两次都 miss。
+这能区分“driverkitd 只是没有 entitlement，但它要查的 cdhash 已在
+TrustCache 中”与“cdhash 本身也不在 TrustCache 中”。
+
+H96a6 产物：
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a6-kernel.macho` | 52,088,832 | `d06f6e695cc21093c8ffb0acc4dec0d3458738bf69ed2359c7f430d9d139026e` |
+| `H96a6-payload.img` | 79,691,776 | `aec14df75054b80832399301ef2289a9902fe2c0f07e5732d492163975db7881` |
+| `boot-H96a6-tcresult.img` | 81,147,904 | `3ac690a0e083202668173215e68b942eb94310118f098169c1646af616dbd46b` |
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。

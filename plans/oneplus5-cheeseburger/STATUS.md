@@ -1676,6 +1676,15 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   `panic("H96_AMFI_REJECT: func=%s pid=%d comm=%s")`。kernel
   `2994ae9d...`、payload `2ed839d3...`、boot
   `c2a18350...`。这是诊断 panic，不改变 AMFI 策略/权限门。
+- H96a5 panic 确认拒绝方：`pid=63 comm=driverkitd`，selector `0x5f`，
+  `platform=1`、`blob` 非空、`csflags=0x2202331`。原版 iPad7,1 17.7.11
+  `/usr/libexec/driverkitd` 是 adhoc 签名，entitlements 中**没有**
+  `com.apple.private.amfi.can-check-trust-cache`；因此 AMFI 拒绝符合策略，
+  真正问题是 driverkitd 为什么走了这个未授权的 MAC syscall 路径
+  （可能缺少 AMFI IOKit user client/SystemOS 路径而回退）。
+- H96a6（跳过权限门 + panic 查询结果）已构建：kernel `d06f6e69...`、
+  payload `aec14df7...`、boot `3ac690a0...`；`mask=0` 表示命中，
+  `mask=3` 表示两次查询都 miss。等待上机。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户
