@@ -207,7 +207,7 @@ SystemOS 大小按原始窗口为 **3,303,014,400 bytes = `0xc4e00000`**，基�
 H96a23 的说明：
 
 - `0x1b1bca * 4096 = 0x1b1bca000`；
-- 减去 H98b 确认的 SystemOS 基址 `0x17f540000`，得到偏移 `0x3268a000`（842.6 MiB），仍在 `0xc4e00000` 的 SystemOS 大小内；
+- 减去 H98b 确认的 SystemOS 基址 `0x17f540000`，得到偏移 `0x3268a000`（806.5 MiB），仍在 `0xc4e00000` 的 SystemOS 大小内；
 - 但旧日志的 `lastWin=0x93450` 对应偏移 `0x1268a000`（294.5 MiB），与 `0x3268a000` 不同。旧日志没有 `ufsWin` 字段，无法判断 `lba=0x1b1bca` 是哪个 window 请求的 read-ahead，还是另一个未显示的请求。
 - 只有 H98b 的新字段 `ufsWin=SystemOS`/`base=17f540000` 才能完成该归因。
 
