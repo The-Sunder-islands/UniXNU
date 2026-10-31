@@ -373,8 +373,8 @@ XNU_SHENG_PMGR=1
 | --- | ---: | --- |
 | H96a raw kernel | 19,445,640 | `92e55a7076cac782429d7ca3c60e88fabbf44d8d55e3d1b5ccb9647683160045` |
 | `H96a-kernel.macho` | 52,088,832 | `f5dbbe1c6a15a8f6fbfbccbb7cbf562edc385769a30845c68112bc9e324e466c` |
-| `H96a-payload.img` | 79,691,776 | `dd723c78f0ddc645a3f68395b8623ad9c8c3171477219418b816afbed33ecea4` |
-| `boot-H96a-amfitrace.img` | 81,147,904 | `d2d509819ff6fa34919b6473691e75e646623f619ab5e65d0195ac1cfd7d1e85` |
+| `H96a-payload.img` | 79,691,776 | `8c92f8c85ccaed52ced0693242c5acd98285ae857cfc15f7d8859c6d4f7be14e` |
+| `boot-H96a-amfitrace.img` | 81,147,904 | `790de81156545c2fa64c4271f92207ade01d0019ca8af35ca538f5d6fbeb98b5` |
 
 `H96a-kernel.macho` 已用 `strings` 确认包含
 `NATIVE_AMFI_SYSCALL`、`NATIVE_TC_QUERY` 和两个 trace boot arg 字符串。
@@ -383,8 +383,11 @@ payload 从 H91 payload 复制，只替换 `Payloads/kernel.macho` 和
 boot image 从 H91 boot image 复制，只在 ramdisk 偏移 `1456128` 处
 替换为同尺寸的 H96a payload；UEFI kernel 和 header 未改。
 
-`fastboot boot boot-H96a-amfitrace.img` 返回 `Booting OKAY`。设备已启动
-H96a；日志采集结果待补。
+第一次 `fastboot boot` 返回 `Booting OKAY`，但设备停在 UEFI Shell，未进入
+UniXNU/XNU。原因：用 `mcopy` 覆盖 `UNIXNU~1.TOM` / `KERNEL~1.MAC` 时
+指定了 8.3 短名，导致 VFAT 长名 `unixnu.toml` / `kernel.macho` 丢失；
+UniXNU 按长名查找配置/内核失败，回到 shell。已删除旧目录项并用长名重新
+写入，修正后 payload/boot 哈希为上表值。raw kernel 和 kernel.macho 未变。
 
 注意：构建脚本在本次重编译了 12 个 object（trace 两处，加上它每次都会
 重新应用的 late patches 所触及的对象）。环境变量按 H91 stamp 匹配，但

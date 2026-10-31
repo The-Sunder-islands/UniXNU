@@ -1639,11 +1639,14 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   也**未上机**。H91 产物未覆盖。
 - H96a 构建完成（macOS 15.8.2 / Xcode 26.3，H91 对象树 +
   `xnu-10063.141.1`）：raw kernel `92e55a70...`、kernel.macho
-  `f5dbbe1c...`、payload `dd723c78...`、boot
-  `d2d50981...`。payload/ADT/TrustCache/Data seed 沿用 H91，只替换
+  `f5dbbe1c...`、payload `8c92f8c8...`、boot
+  `790de811...`。payload/ADT/TrustCache/Data seed 沿用 H91，只替换
   kernel 与两个 trace boot arg。
-- `fastboot boot boot-H96a-amfitrace.img` 返回 `Booting OKAY`；设备已启动
-  H96a。`NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
+- 第一次 H96a `fastboot boot` 返回 `Booting OKAY`，但停在 UEFI Shell：
+  用 `mcopy` 覆盖 8.3 短名时丢失 VFAT 长名 `unixnu.toml` /
+  `kernel.macho`，UniXNU 找不到配置/内核。已删除旧目录项并用长名重建
+  payload；修正版 boot `790de811...` 等待再次上机。
+- `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户
   `fastboot boot`；用 `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 确认调用方
