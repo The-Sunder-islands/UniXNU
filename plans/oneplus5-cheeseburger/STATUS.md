@@ -1736,6 +1736,13 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
 - H96a11（exec trace 增加 argv0/argv1 + UFS timeout + gate bypass +
   cpus=2）已构建：kernel `b12e0480...`、payload `20751860...`、boot
   `d225ad4b...`；用于确认最后 xpcproxy 的目标服务。等待上机。
+- H96a11 已上机：最后 `NATIVE_EXEC pid=90 comm=xpcproxy
+  argv1=com.apple.nsurlsessiond`；目标服务未 exec，系统停在启动
+  `com.apple.nsurlsessiond` 这一步；无 UFS timeout。
+- H96a12 复用 H96a11 kernel，仅追加
+  `sheng-disable-jobs=com.apple.nsurlsessiond`：payload
+  `bd9a85b3...`、boot `90812e49...`。用于跳过该服务并观察是否继续到
+  backboardd/SpringBoard。等待上机。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户

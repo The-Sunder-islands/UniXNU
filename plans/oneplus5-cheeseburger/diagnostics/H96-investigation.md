@@ -857,6 +857,36 @@ H96a11：在 H96a10 基础上把 `NATIVE_EXEC` 扩展为打印 `argv0`/`argv1`�
 | `H96a11-payload.img` | 79,691,776 | `20751860174d85f75c59f36d71006a89a764666f810b5de395e17b98903dbb5b` |
 | `boot-H96a11-exargv.img` | 81,147,904 | `d225ad4bcea345d4310acb37f227fbadbdda524d51fdef3b3ef81310cf6ceeb4` |
 
+### 6.21 H96a11 结果：最后卡在 xpcproxy 启动 com.apple.nsurlsessiond
+
+H96a11 屏幕最后：
+
+```text
+NATIVE_EXEC: pid=82 comm=routined argv0=/usr/libexec/routined argv1=LAUNCHED_BY_LAUNCHD
+NATIVE_EXEC: pid=89 comm=accountsd argv0=/System/Library/Frameworks/Accounts.framework/accountsd argv1=
+NATIVE_UFS_PROGRESS: ... winBytes=3220086528
+NATIVE_EXEC: pid=90 comm=xpcproxy argv0=xpcproxy argv1=com.apple.nsurlsessiond
+NATIVE_UFS_PROGRESS: ... winBytes=3224810496 ...
+```
+
+之后没有新的 `NATIVE_EXEC`、`KextLog` 或错误行；没有 UFS timeout。
+因此当前停点是 launchd/xpcproxy 启动 **`com.apple.nsurlsessiond`**
+这一步，目标服务还没有真正 exec 出来。
+
+H96a12：复用 H96a11 kernel，只在 payload 参数追加：
+
+```text
+sheng-disable-jobs=com.apple.nsurlsessiond
+```
+
+用于跳过这个已知卡住的服务，观察系统是否能继续到后面的服务
+（尤其是 backboardd/SpringBoard）。
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a12-payload.img` | 79,691,776 | `bd9a85b3377e2dd7fa0e5fa423bcb4026c82a23ebe79809d76defa7207b48e30` |
+| `boot-H96a12-no-nsurl.img` | 81,147,904 | `90812e490461cb0040619b419779e1f8bbbafde9864de4050c375ff641621204` |
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。
