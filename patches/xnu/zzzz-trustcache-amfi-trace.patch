@@ -61,7 +61,7 @@
 +
 +	/* Keep the first of each selector, and a bounded trace of 0x5f. */
 +	if (call == 0x5f) {
-+		if (native_amfi_tc_budget++ >= 64) {
++		if (native_amfi_tc_budget++ >= 100000) {
 +			return;
 +		}
 +	} else {
@@ -146,7 +146,7 @@
 +		native_trace_tc_query = value;
 +	}
 +	if (native_trace_tc_query == 0 ||
-+	    native_trace_tc_query_budget++ >= 64) {
++	    native_trace_tc_query_budget++ >= 4096) {
 +		return;
 +	}
 +

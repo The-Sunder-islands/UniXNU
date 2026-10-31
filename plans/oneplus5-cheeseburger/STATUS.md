@@ -1646,6 +1646,14 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   用 `mcopy` 覆盖 8.3 短名时丢失 VFAT 长名 `unixnu.toml` /
   `kernel.macho`，UniXNU 找不到配置/内核。已删除旧目录项并用长名重建
   payload；修正版 boot `790de811...` 等待再次上机。
+- H96a 修正版已进入 XNU：屏幕可见 `NATIVE_UFS_PROGRESS`、
+  `_check_cdhash_in_trustcache ... Only allowed processes` 循环、
+  `KextLog: driverkitd is active`；未看到 `NATIVE_AMFI_SYSCALL`。
+  可能是 64 次 trace 已滚屏，或 boot arg 未被解析。
+- H96a2（强制 trace，不依赖 boot arg）已构建：kernel
+  `918cdbe1...`、payload `da268d87...`、boot `8c58b138...`；
+  仅构建树把 trace 默认打开并把限频提高到 100000/4096，仓库默认补丁
+  仍保持 boot-arg 关闭。等待再次上机。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户

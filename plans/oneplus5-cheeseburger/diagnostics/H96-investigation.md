@@ -394,6 +394,54 @@ UniXNU 按长名查找配置/内核失败，回到 shell。已删除旧目录项
 尚未做“去掉 trace 补丁后重建并比对 H91 哈希”的严格 control。H96a 的
 结论只应归因于 trace 两处，除非后续 control 证明其他 object 未改变。
 
+### 6.7 H96a 首次 XNU 结果与 H96a2 强制 trace
+
+H96a（修正长名后）成功进入 XNU，屏幕可见：
+
+```text
+NATIVE_UFS_PROGRESS: ...
+NATIVE_UFS_WINDOW: SystemOS ...
+_check_cdhash_in_trustcache(struct proc *, user_addr_t): Only allowed processes can check the trustcache
+KextLog: Loading FileSet KC(s)
+KextLog: driverkitd is active
+```
+
+这确认了三点：
+
+1. H96a 的 XNU/payload 链正常，长名修复有效；
+2. UFS 仍在持续完成 SystemOS 读，没有 `NATIVE_UFS_STALL`；
+3. AMFI 的 `_check_cdhash_in_trustcache` 拒绝循环在 `driverkitd` 阶段真实存在。
+
+但该帧没有看到 `NATIVE_AMFI_SYSCALL`。两种解释：
+
+- 64 次 trace 预算在截图前已经滚出屏幕；
+- `native-trace-amfi-syscall=1` 没有被 `PE_parse_boot_argn` 解析到。
+
+因此构建 H96a2：**强制打开 trace**，不依赖 boot arg，并把 selector
+`0x5f` 预算提高到 100000、query 预算提高到 4096，使屏幕任意时刻都应能
+看到 trace 与 AMFI 拒绝行交替出现。H96a2 只用于诊断；仓库默认补丁仍
+保持 boot-arg 关闭。
+
+H96a2 产物：
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a2-kernel.macho` | 52,088,832 | `918cdbe11a638e7a603b902850b4aa3372543a941e5596971eef654629303a18` |
+| `H96a2-payload.img` | 79,691,776 | `da268d87a7c0bd267a4b09d92f7c27bbb03afb5cb910bdbf71fda85bf05c019e` |
+| `boot-H96a2-amfitrace.img` | 81,147,904 | `8c58b13832c14d6bf2a8f27fcc6a98aad4323ef1aebb03ae00db427883bc062d` |
+
+H96a2 源码差异（仅构建树）：
+
+```diff
+-static int native_amfi_syscall_trace = -1;
++static int native_amfi_syscall_trace = 1;
+-static int native_trace_tc_query = -1;
++static int native_trace_tc_query = 1;
+```
+
+并分别把 `0x5f`/query 的限频从 64 提高到 100000/4096。除 trace 外，
+H96a2 的配置、ADT、TrustCache、Data seed 与 H96a/H91 相同。
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。
