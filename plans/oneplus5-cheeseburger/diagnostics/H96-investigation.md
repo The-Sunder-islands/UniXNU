@@ -746,6 +746,42 @@ H96a8：只把 H96a4 的启动参数 `cpus=1` 改成 `cpus=2`，用于让
 | `H96a8-payload.img` | 79,691,776 | `5c9a40056dcd10b477a52c7236c610fcd8fa5d6d849e765d9f0af63baa5ace12` |
 | `boot-H96a8-cpus2.img` | 81,147,904 | `53f8cfcf8a9c71fa051c9a85e6d53d2d91bb1b36de7f426494e153b5ffa36d6c` |
 
+### 6.17 H96a8 结果：cpus=2 消除早期停点，但仍停在 driverkitd 之后
+
+H96a8（H96a4 + `cpus=2`）屏幕显示：
+
+```text
+KextLog: driverkitd is not active
+KextLog: Loading FileSet KC(s)
+KextLog: driverkitd is active
+NATIVE_UFS_PROGRESS: ... winBytes=3222082432 winFlight=1
+NATIVE_TC_QUERY: pid=35 comm=xpcproxy ...
+NATIVE_TC_QUERY: pid=1 comm=launchd ...
+NATIVE_TC_QUERY: pid=80 comm=xpcproxy ...
+```
+
+随后日志不再变化：
+
+- 没有 `NATIVE_UFS_STALL` panic；
+- 没有继续出现新的 `KextLog` 服务；
+- SystemOS 读取到约 3.22 GB 后停止；
+- heartbeat 是否打印仍需确认，但至少没有硬 UFS stall 证据。
+
+因此 H96a4 的早期停点与 `cpus=1` 调度有关；`cpus=2` 后系统越过了
+AMFI gate 和早期 UFS 停点，停在 **driverkitd/FileSet KC 之后**。新的
+阻塞点不在 AMFI entitlement，也不一定是 UFS 传输本身，需要看
+`launchd` 最后尝试启动/等待哪个服务。
+
+H96a9：在 H96a8 基础上加入 `NATIVE_EXEC` trace（`set_proc_name()` 里
+打印 pid/comm），并保留 AMFI gate 跳过；预期最后屏幕显示最后执行的
+进程，从而定位 driverkitd 之后停住的 userland 任务。
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a9-kernel-gatebypass.macho` | 52,088,832 | `84312b766832e5f63ad786a4fa5576a8940b2abbffb0f2c9c60e8275c387412c` |
+| `H96a9-payload.img` | 79,691,776 | `0e714fa8a08ec1c07591cf9a6f7aac5312e91ae7b9f0af5483c9a58bc0459105` |
+| `boot-H96a9-exectrace.img` | 81,147,904 | `697536ff2e60feccf0d37238593579196570ce0f93b58fc280d41d1d8c1bfa8a` |
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。

@@ -1714,6 +1714,13 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
 - H96a8（H96a4 + `cpus=2`，只改 CPU 数）已构建：payload
   `5c9a4005...`、boot `53f8cfcf...`；用于让 heartbeat/stall
   watchdog 运行并捕获停点快照。
+- H96a8（H96a4 + `cpus=2`）已上机：越过 AMFI gate 和早期 UFS 停点，
+  到 `KextLog: driverkitd is active`、SystemOS 读取约 3.22 GB 后日志
+  停止；无 `NATIVE_UFS_STALL`，但未见后续服务。新阻塞点在 driverkitd/
+  FileSet KC 之后，需定位最后 exec/等待任务。
+- H96a9（H96a8 + `NATIVE_EXEC` trace + gate bypass）已构建：kernel
+  `84312b76...`、payload `0e714fa8...`、boot
+  `697536ff...`；用于显示最后执行的进程。等待上机。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户
