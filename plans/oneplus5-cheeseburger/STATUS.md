@@ -1663,6 +1663,14 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
 - H96a3 取消 target 过滤、打印实际 target、删除 entitlement 查询调用：
   kernel `b36ec3a8...`、payload `d5030ee5...`、boot
   `98192bb0...`。等待再次上机。
+- H96a3 仍无 `NATIVE_AMFI_SYSCALL`，但 `NATIVE_TC_QUERY ... ret=0`
+  正常；说明 AMFI 检查不是从 XNU `__mac_syscall` 进入的，而不是 boot arg
+  或滚屏问题。
+- H96a4 一次性诊断镜像：把 AMFI 拒绝分支
+  `VM 0xfffffff00aab73b8` 的 `tbz` 改成 `nop`，只跳过权限门，TrustCache
+  查询仍执行；用于获取 `Process %d` 调用方和 query hit/miss。kernel
+  `86a7e63a...`、payload `6d6f4935...`、boot
+  `f745b54f...`。这是受控诊断绕过，不是默认配置或最终修复。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户

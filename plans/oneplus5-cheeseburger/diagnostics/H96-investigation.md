@@ -478,6 +478,35 @@ H96a3 产物：
 | `H96a3-payload.img` | 79,691,776 | `d5030ee552dc9627a000d6ddc8d2eaa9ccd6310ac3c4b6dfc062f5a152d9887d` |
 | `boot-H96a3-amfitrace.img` | 81,147,904 | `98192bb07988871506eaa49a1a43c98644ef562243853923b0c277be84fa22e1` |
 
+### 6.9 H96a3 结果与 H96a4 受控绕过
+
+H96a3 屏幕可见多次 `NATIVE_TC_QUERY ... ret=0`（UserEventAgent、
+launchd、xpcproxy），但仍完全没有 `NATIVE_AMFI_SYSCALL`。H96a3 已强制
+trace 并取消 target 过滤，因此结论是：**AMFI 的
+`_check_cdhash_in_trustcache` 检查不是从 XNU `__mac_syscall` 进入的**
+（至少 H96a3 的可见窗口内没有 `0x5a..0x66` 调用），而不是 boot arg 或
+滚屏问题。
+
+为直接拿到拒绝点的调用方和查询结果，制作 H96a4 一次性诊断镜像：
+
+- 在 H96a3 prelinked kernel 的 AMFI 拒绝分支，把
+  `VM 0xfffffff00aab73b8` 的 `tbz w0, #0, reject` 改成 `nop`；
+- 只跳过 `com.apple.private.amfi.can-check-trust-cache` 的权限门，
+  TrustCache 查询本身仍然执行；
+- 预期 AMFI 自己的 `Process %d is checking...` 日志会打印调用方 PID，
+  同时 `NATIVE_TC_QUERY` 会给出 cdhash 和 hit/miss。
+
+这是**受控诊断绕过**，只存在于独立镜像 H96a4，不是仓库默认配置，也不是
+最终修复；它没有把任意 hash 无条件加入 TrustCache，也没有永久关闭 AMFI。
+
+H96a4 产物：
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a4-kernel.macho` | 52,088,832 | `86a7e63abf3e32725e5665c3c538bc21c541845a542d2a9fbcfb9194a4e0feb6` |
+| `H96a4-payload.img` | 79,691,776 | `6d6f49355ca1b1f09e70f39ded35fdeda7ba0064d5ceac29db89501f45a22ec0` |
+| `boot-H96a4-tcbypass.img` | 81,147,904 | `f745b54f551ab6473fe8e6aeee68951d592e8d128ed5eb7facce5308bf3f6be0` |
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。
