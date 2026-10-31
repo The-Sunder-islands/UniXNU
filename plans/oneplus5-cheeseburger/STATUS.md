@@ -1839,6 +1839,10 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   (2) 一次性 kernel-side AuthAPFS/Image4 诊断绕过（非最终修复）；
   (3) 停在 H96a18/H91。当前安全边界不允许重新 flash 修改后的 OS/
   userdata，H93 的直接 patch cryptexd 二进制方案不再采用。
+- H96a22 的基线已跳过 eligibilityd，不能隔离“只跳 cryptexd”；因此
+  另建 H96a23：H96a18 skip 列表（保留 eligibilityd）+ 只加
+  `com.apple.security.cryptexd`，使用 H96a20 无 panic 内核。payload
+  `23b29bda...`、boot `4d23038e...`。等待 fastboot 上机。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户

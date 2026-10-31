@@ -1375,6 +1375,11 @@ NATIVE_UFS_WINDOW: SystemOS req=52224 done=4096 ok=1 ticks=95 read=0 write=02
 - 因此 cryptexd/eligibilityd 不是可随意跳过的 daemon，skip 迭代到此
   为止。剩余问题回到 H92/H93 已记录的 SystemOS Cryptex1/AuthAPFS/
   owner manifest 链路。
+- **实验设计说明**：H96a22 的基线 H96a19 已经跳过 eligibilityd，因此
+  它相对 H96a19 只加了 cryptexd，但基线本身已经回退到
+  `driverkitd is active`；H96a22 不能单独证明“只跳 cryptexd”的效果。
+  为单变量隔离 cryptexd，另建 H96a23：H96a18 的 skip 列表（保留
+  eligibilityd）+ 只加 `com.apple.security.cryptexd`。
 
 下一步只有三类选择：
 
@@ -1386,6 +1391,34 @@ NATIVE_UFS_WINDOW: SystemOS req=52224 done=4096 ok=1 ticks=95 read=0 write=02
 
 当前安全边界不允许重新 flash 修改后的 OS/userdata，因此 H93 那种
 直接 patch `cryptexd` 二进制的方案不再采用。
+
+### 6.37 H96a23：单变量隔离 cryptexd（H96a18 基线 + 只跳 cryptexd）
+
+H96a22 的基线 H96a19 已跳过 eligibilityd，不能隔离“只跳 cryptexd”。
+H96a23 回到 H96a18 的 skip 列表：
+
+```text
+nsurlsessiond,routined,nehelper,chronod,accountsd,alsd,pfd
+```
+
+只追加：
+
+```text
+com.apple.security.cryptexd
+```
+
+保留 eligibilityd，不跳过它；内核继续使用 H96a20 的无 panic gate
+bypass 版本。这样如果系统停在 `driverkitd is active`，才能把原因归到
+cryptexd；如果能继续到 backboardd/SpringBoard，说明 cryptexd 是当前
+关键阻塞。
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a23-payload.img` | 79,691,776 | `23b29bdaa78e9069a5a78c6d446472b8a68abe8f56796bcceefd79258f0af66b` |
+| `boot-H96a23-skipcryptexd-only.img` | 81,147,904 | `4d23038ecc56823c391b04d31f913d7afb566cf34bcba2cc21df5ebbd451ce22` |
+
+该实验仍是一次性诊断，不是最终修复；如果 cryptexd 不能跳过，则回到
+H96a18 的 cryptexd/eligibilityd 停点，转向 owner manifest/AuthAPFS。
 
 ### 6.5 回滚
 
