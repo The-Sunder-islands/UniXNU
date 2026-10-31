@@ -1219,6 +1219,53 @@ cryptexd/eligibilityd 停住；当前剩余阻塞是 SystemOS/Cryptex1 信任链
 driverkitd 检查 panic，打印完整 20 字节 cdhash + `[sp+0x58]` mask；
 不再扩大 boot-arg/skip 列表。
 
+### 6.33 H96a21：AMFI 内部 panic，打印完整 cdhash 与真实 mask
+
+H96a21 在 H96a20 源码基础上加入一个仅由二进制补丁调用的诊断函数：
+
+```c
+__attribute__((noinline, used))
+void native_amfi_tc_diag(proc_t p, const uint8_t *cdhash, uint64_t mask);
+```
+
+- 函数只在 `p->p_comm == "driverkitd"` 时计数/打印；
+- 从 AMFI 成功路径的 `sp+0x40` 读取完整 20 字节 cdhash；
+- 从 `sp+0x58` 读取两次查询的真实结果位图；
+- 前三次 `printf`，第四次 `panic`，使屏幕停留：
+
+```text
+H96A21_TC: n=1 pid=... comm=driverkitd mask=0x... cdhash=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+...
+H96A21_TC: n=4 ...
+panic: H96a21: fourth driverkitd trust-cache check
+```
+
+二进制补丁（相对 H96a21 原始内核）：
+
+- gate：`0x1ac73b8` 的 `tbz w0,#0,reject` 改为 `nop`；
+- 成功路径：`0x1ac7424` 的 `add x0,sp,#0x40` 改为
+  `b 0x197b400`；
+- code cave `0x197b400`：
+  ```asm
+  mov x0, x21              ; proc
+  add x1, sp, #0x40        ; cdhash
+  ldr x2, [sp, #0x58]      ; mask
+  bl  native_amfi_tc_diag
+  add x0, sp, #0x40
+  b   0x1ac7428
+  ```
+
+注意：这是**诊断镜像**，不是最终修复；panic 只为固定屏幕取证。
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a21-kernel.macho`（未打补丁） | 52,088,832 | `6c60e6e889eb5d1af9f9cf1527d4ecbe171926e16568f62ede117b5d08c2d69f` |
+| `H96a21-kernel-gatebypass-hook.macho` | 52,088,832 | `b9cd4c9b44a0d5c977b50d1de8f861483797d4a362062e025d3fd8bce47b95d3` |
+| `H96a21-payload.img` | 79,691,776 | `bc3ea90e8eb733e1658a4f5c6e170036b264550a65ca12e8b43a605ef70819f9` |
+| `boot-H96a21-tcpanic.img` | 81,147,904 | `f7e9a2f051f6cc446d2a775d799b489bd2297f92ef043b516f40d7b9ee88eb67` |
+
+H96a21 已通过 `fastboot boot` 启动，等待第四次 driverkitd 检查触发 panic 后拍照。
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。
