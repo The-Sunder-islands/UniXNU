@@ -108,7 +108,15 @@
  		return error;
 --- a/bsd/kern/kern_trustcache.c
 +++ b/bsd/kern/kern_trustcache.c
-@@ -683,6 +683,44 @@
+@@ -37,6 +37,7 @@
+ #include <libkern/amfi/amfi.h>
+ #include <sys/vm.h>
+ #include <sys/proc.h>
++#include <sys/proc_internal.h>
+ #include <sys/codesign.h>
+ #include <sys/trust_caches.h>
+ #include <IOKit/IOBSD.h>
+@@ -683,6 +684,44 @@
  	return ret;
  }
  
@@ -153,7 +161,7 @@
  kern_return_t
  query_trust_cache(
  	TCQueryType_t query_type,
-@@ -702,6 +740,9 @@
+@@ -702,6 +741,9 @@
  	ret = xnu_query_trust_cache(query_type, cdhash, query_token);
  #endif
  
