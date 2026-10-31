@@ -3,14 +3,14 @@
 - 计划：`plans/oneplus5-cheeseburger/PLAN.md`
 - 线路：B — UniXNU / 4K
 - 路线/目标：iPad7,1 / iPadOS 17.7.11（21H461）
-- 当前阶段：**H95 基线之后的 H96 只读调查。H91 仍是当前最佳 Probe 镜像；循环的直接拒绝点已定位到 AMFI selector `0x5f` 的调用方 entitlement 门（`com.apple.private.amfi.can-check-trust-cache`），不是 XNU TrustCache 查询未命中。H96a trace 补丁已加入仓库，尚未完成实际 XNU 编译和上机。**
-- 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）；H91 过 mount-phase-1 到 driverkitd**
-- 基线提交：H91 构建提交未记录；当前 UniXNU `main` `93c7fb6`，设备仓库 `main` `5ad54e2`
-- 当前代码提交：UniXNU H96 提交 `6102287` / `072b18d` / `ecaf7ab`；设备仓库 `5ad54e2`；关键子模块见 `BASELINE.md`
+- 当前阶段：**H96a23 之后的只读源码审计完成（2026-10-31）。H91 仍是最佳 Probe 基线；H96a18 是唯一到达 cryptexd/eligibilityd 的路径；H96a21 四次 driverkitd 检查均为 loadable hit；H96a22/H96a23 的 skip 实验是回归。当前根因未由源码确认，重点候选是 cryptexd/AuthAPFS/IM4M 与 launchd/FileSet KC 等待；H91 ADT 的 48 字节 `boot-manifest-hash` 仍是全零 bring-up 占位。**
+- 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）；H91/H96a18 过 mount-phase-1，H96a18 到 cryptexd/eligibilityd**
+- 基线提交：H91 构建提交未记录；当前 UniXNU `main` `59fecce`，设备仓库 `main` `5ad54e2`
+- 当前代码提交：本地 UniXNU `59fecce`；实际 H96 构建树 `9f3daad`（XNU 基础 `d8b8029`，工作区含 H96 未提交 trace/diagnostic 修改）；设备仓库 `5ad54e2`；关键子模块见 `BASELINE.md`
 - 远程仓库：
   - UniXNU `https://github.com/lss717/UniXNU`（`main`）
   - UEFI fork `https://github.com/lss717/edk2-msm8998`（分支 `unixnu-cheeseburger`）
-  - 设备仓库 `https://github.com/lss717/UniXNU-cheeseburger`（`main`，`f09609c`）
+  - 设备仓库 `https://github.com/lss717/UniXNU-cheeseburger`（`main`，`5ad54e2`）
   - NativeRamBlock fork `https://github.com/lss717/RamBlock`（submodule 路径仍为
     `drivers/NativeRamBlock`，fork 提交 `bc079a5`；`upstream` 指回 `UniXNU/RamBlock`）
 - UEFI 分支：`edk2-msm8998` 的 `unixnu-cheeseburger`，提交 `0471194`、`708fa06`、`7f34479`、`91e17a8`、`8ef28f1`、`1ffb934`
@@ -1851,12 +1851,37 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
 - 当前阻塞回到 cryptexd/SystemOS Cryptex1/AuthAPFS/owner manifest。
   可选：真实 owner manifest/IM4M（不可得）、一次性 kernel-side
   AuthAPFS/Image4 诊断绕过（非最终修复）、或停在 H96a18/H91。
-- `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
-- 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
-  `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户
-  `fastboot boot`；用 `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 确认调用方
-  身份、`entitled`、`csflags`、`blob`、`platform` 和是否到达查询。
-  在拿到这组日志前不要继续叠加 boot-args 或修改 TrustCache blob。
+- H96a18/H96a21/H96a22/H96a23 的屏幕日志已采集；完整串口日志、SHNGROOT SystemOS offset 和 cryptexd/AuthAPFS syscall 级证据仍缺。
+- 上述 H96a 任务已由 2026-10-31 只读源码审计取代；审计报告：
+  `diagnostics/H96-readonly-source-audit-2026-10-31.md`。在完成真实
+  owner/VerifiedRoot 路径或 cryptexd/AuthAPFS 只读跟踪前，不再叠加
+  boot-args、skip 或 TrustCache/完整性验证修改。
+
+## H96 只读源码审计（2026-10-31）
+
+- 报告：`plans/oneplus5-cheeseburger/diagnostics/H96-readonly-source-audit-2026-10-31.md`
+- 审计边界：只读源码/日志；未修改完整性验证逻辑，未新增 launchd skip，未刷写设备。
+- 结论：H96a21 的四个 driverkitd 检查均为 loadable hit，AMFI/这些
+  cdhash 的 TrustCache 命中不是当前阻塞；H96a18 是最远路径，H96a19/
+  H96a22/H96a23 的 skip 更早停在 `driverkitd is active`。
+- 关键源码发现：H96 使用 NativeUfsProbe 的
+  `native_verified_block_root_authorized()` 桩（仅检查 `device != NODEV`），
+  不链接完整 VerifiedRoot；H96 的 `XNU_OWNER_BOOT_MANIFEST=0`，
+  ADT `boot-manifest-hash` 是 `make-cheeseburger-adt.py` 写入的 48 字节
+  全零占位，内核不生成真实 hash。
+- `winBytes` 是所有 NativeUfsWindow 共享的累计上层请求字节，不是
+  磁盘位置/实际 UFS 字节；H96a23 的 `315523184` 约 300.9 MiB，最后
+  成功 UFS 命令为 `lba=0x1b1bca, bytes=0x20000`，没有
+  `NATIVE_UFS_TIMEOUT`/`NATIVE_UFS_STALL`。
+- 材料区分：SHNGROOT 是 UniXNU 用户态容器；owner boot manifest 是
+  VerifiedRoot/SHA-384 派生；Image4/IM4M 是 Apple personalization；
+  TrustCache 是 cdhash allowlist。当前 `Cryptex1,SystemTrustCache`
+  实际加载 module 和 cryptexd 的 IM4M/AuthAPFS 要求仍为“待确认”，
+  不能按源码证明标记为缺失。历史 H92/H93 的“不可得”是当时输入结论，
+  本次审计将其降级为“待确认（强二进制证据）”。
+- 下一步只读检查：补 SHNGROOT `window[1]=SystemOS off=...` 日志、
+  launchd job/exit 观测、cryptexd syscall/mach wait 跟踪；不要直接
+  patch cryptexd、改 userdata 或继续 skip。
 
 ## 更新规则
 
