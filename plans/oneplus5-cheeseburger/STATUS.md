@@ -3,10 +3,10 @@
 - 计划：`plans/oneplus5-cheeseburger/PLAN.md`
 - 线路：B — UniXNU / 4K
 - 路线/目标：iPad7,1 / iPadOS 17.7.11（21H461）
-- 当前阶段：**H99 诊断完成（2026-10-31）。H91 仍是最佳 Probe 基线；H99 直接确认 OS 窗口基址 `0x15040000`、SystemOS 基址 `0x17f540000`，最后完成 SystemOS 4 KiB 读；H99 仍未创建 cryptexd/eligibilityd，且 `H99_SNAPSHOT` 没有输出，进程状态仍未知。H96a18 的 cryptexd/eligibilityd 到达存在 run-to-run 差异，不能作为稳定基线。**
-- 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）；H91/H96a18 过 mount-phase-1；H99 停在 `driverkitd is active`，未到 cryptexd/eligibilityd**
-- 基线提交：H91 构建提交未记录；本地 UniXNU `main` `4029db2`（H98b 文档提交），设备仓库 `main` `5ad54e2`
-- 当前代码提交：本地 `4029db2`；H99 干净构建树为 XNU `d8b8029` + 原始 patches + 仅远程 H99 插桩；H96 脏源码保留在 `.cache/xnu-work.h96dirty-20261031`；设备仓库 `5ad54e2`；关键子模块见 `BASELINE.md`
+- 当前阶段：**H100 无 skip 对照完成（2026-10-31）。H91 仍是最佳 Probe 基线；H100 移除 7 项 `sheng-disable-jobs` 后更早停在 pfd/accountsd/nsurlsessiond/routined，说明这些 skip 在掩盖上游等待，并非 cryptexd 缺失的唯一原因；H99/H100 的进程快照仍无输出，cryptexd/eligibilityd 状态未知。**
+- 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）；H91/H96a18 过 mount-phase-1；H99 停在 driverkitd active；H100 停在 pfd/accountsd/nsurlsessiond/routined**
+- 基线提交：H91 构建提交未记录；本地 UniXNU `main` `9c89475`（H99 文档提交），设备仓库 `main` `5ad54e2`
+- 当前代码提交：本地 `9c89475`；H99/H100 干净构建树为 XNU `d8b8029` + 原始 patches + 远程诊断插桩；H96 脏源码保留在 `.cache/xnu-work.h96dirty-20261031`；设备仓库 `5ad54e2`；关键子模块见 `BASELINE.md`
 - 远程仓库：
   - UniXNU `https://github.com/lss717/UniXNU`（`main`）
   - UEFI fork `https://github.com/lss717/edk2-msm8998`（分支 `unixnu-cheeseburger`）
@@ -1913,6 +1913,18 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
 - H96a18 曾创建 cryptexd PID 80、eligibilityd PID 87；H99 同 skip 列表仍未创建，说明 run-to-run 差异；旧 H96a18 没有 ppid/退出/快照，目标进程运行状态仍未知。
 - H99 没有观测到 AuthAPFS/Image4 调用；owner 链仍是 bring-up：`XNU_OWNER_BOOT_MANIFEST=0`、`XNU_OWNER_ROOT_TRUST=0`、`XNU_VERIFIED_ROOT_PROBE=0`、`XNU_NATIVE_VIRTIO_BLOCK=0`、`XNU_NATIVE_UFS_PROBE=1`，ADT `boot-manifest-hash` 仍为 48 字节全零。IM4M/AuthAPFS 是否是后续根因仍未知。
 - 下一项 H100：先确认 `h97_start_snapshot` 是否被调用、`PE_parse_boot_argn("h97-snapshot")` 是否成功、线程是否启动；再用短周期/exec 触发快照，重复 H96a18 路径确认 cryptexd/eligibilityd 是否稳定出现。不得新增 skip，不修改完整性验证。
+
+## H100 无 skip 对照（2026-10-31）
+
+- 报告：`plans/oneplus5-cheeseburger/diagnostics/H100-noskip-control-2026-10-31.md`
+- 产物：H100 payload `c325a545...`、boot `f831d259...`；kernel 沿用 H99 `512b5f90...`。
+- 变量：只移除 H96a18 的 7 项 `sheng-disable-jobs`，保留 `sheng-lite=1`、`h97-snapshot=360` 和其他参数。
+- 结果：最终停在 `pfd`/`accountsd`/`nsurlsessiond`/`routined` 一带，更早于 H99 的 `driverkitd is active`；没有 cryptexd/eligibilityd，没有 `NATIVE_EXIT`，没有 `H99_SNAPSHOT` 输出。
+- 结论：
+  - 跳过 eligibilityd/cryptexd 仍已证明会造成更早停止；
+  - 7 项 skip 在掩盖 pfd/accountsd/nsurlsessiond/routined 的上游等待，不是 cryptexd 缺失的唯一原因；
+  - H99 与 H96a18 的差异仍有 run-to-run/未观测成分，不能归因于单一 skip。
+- 下一步 H101：不增加 skip；修复快照（无条件打印入口/参数解析/线程启动），在 cryptexd/eligibilityd exec 时触发短快照；逐项记录 pfd/accountsd/nsurlsessiond/routined 的等待对象。
 
 ## 更新规则
 
