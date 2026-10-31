@@ -1828,6 +1828,17 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   `com.apple.security.cryptexd`；payload `7e2c37c9...`、boot
   `1b76aac0...`。用于一次性判断 cryptexd 自身等待还是更深层
   SystemOS/AuthAPFS；不是最终修复。等待 fastboot 上机。
+- H96a22 已上机：跳过 cryptexd 后反而停在 `driverkitd is active`，
+  没有 cryptexd/eligibilityd、没有 backboardd/SpringBoard，3 分钟无
+  变化；说明 cryptexd/eligibilityd 不是可跳过的 daemon。结合 H96a19
+  屏幕也停在 driverkitd active，确认 **H96a18（不跳过
+  eligibilityd/cryptexd）才是目前最远路径**，可达 cryptexd/
+  eligibilityd 后停住。skip 迭代到此为止。
+- 当前剩余阻塞回到 SystemOS Cryptex1/AuthAPFS/owner manifest。仅剩：
+  (1) 真实 `Cryptex1,SystemVolume` owner manifest/IM4M（不可得）；
+  (2) 一次性 kernel-side AuthAPFS/Image4 诊断绕过（非最终修复）；
+  (3) 停在 H96a18/H91。当前安全边界不允许重新 flash 修改后的 OS/
+  userdata，H93 的直接 patch cryptexd 二进制方案不再采用。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户

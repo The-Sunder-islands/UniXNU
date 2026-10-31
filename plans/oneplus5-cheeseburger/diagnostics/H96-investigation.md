@@ -1303,9 +1303,13 @@ panic(cpu 0 caller ...): H96a21: fourth driverkitd trust-cache check
 - 每次启动 driverkitd 检查的目标集合可能不同（H96a19/H96a20/H96a21
   的 cdhash 不完全相同），但本次 H96a21 的四个目标均已 loadable hit。
 - H96a21 的 panic 发生在检查阶段，因此看不到之后的日志；结合
-  H96a19/H96a20，四次检查后仍进入 `FileSet KC`，随后
-  cryptexd/eligibilityd 停住。**当前阻塞不在 AMFI entitlement，也不在
-  这四个 driver 的 trust-cache 命中。**
+  H96a19/H96a20，四次检查后仍进入 `FileSet KC`。但 H96a19 的屏幕实际
+  停在 `KextLog: driverkitd is active`，没有 cryptexd/eligibilityd；
+  这是因为 H96a19/H96a20/H96a21 的 skip 列表包含
+  `com.apple.eligibilityd`。真正到达 cryptexd/eligibilityd 的是
+  **H96a18**（skip 列表不含 eligibilityd/cryptexd）。**当前阻塞不在
+  AMFI entitlement，也不在这四个 driver 的 trust-cache 命中；但也不能
+  用 H96a19 的 skip 列表继续推进。**
 
 下一步应把变量放在 FileSet KC 之后的 **cryptexd/SystemOS/launchd
 等待**，而不是继续补 AMFI/静态 sidecar。可选的最小诊断：
@@ -1341,6 +1345,47 @@ SystemOS/AuthAPFS 或显示依赖。
 
 内核沿用 `H96a20-kernel-gatebypass.macho`：
 `e7538cb9e022fcc5bad5241fb9e7610cd352dec0214c6fe7cdfc07afa398d90a`。
+
+### 6.36 H96a22 结果：跳过 cryptexd 反而停在 driverkitd active
+
+H96a22 在 H96a19 skip 列表基础上再加
+`com.apple.security.cryptexd`，使用 H96a20 无 panic 内核。屏幕最后：
+
+```text
+KextLog: driverkitd is not active
+KextLog: Loading FileSet KC(s)
+KextLog: driverkitd is active
+NATIVE_CACHE_SIG: ...
+NATIVE_I66_FONT: ...
+NATIVE_UFS_WINDOW: SystemOS req=52224 block=13fcf0 count=0
+NATIVE_UFS_WINDOW: SystemOS req=52224 done=4096 ok=1 ticks=95 read=0 write=02
+```
+
+之后 3 分钟无变化；没有 cryptexd/eligibilityd 的 `NATIVE_EXEC`，也没有
+`backboardd`/SpringBoard，没有 UFS stall/panic。
+
+判读：
+
+- 跳过 cryptexd 没有让系统越过它，反而让 launchd 更早停在
+  `driverkitd is active`；
+- 同样，H96a19 跳过 `com.apple.eligibilityd` 后也停在
+  `driverkitd is active`，没有 cryptexd；
+- **H96a18（不跳过 eligibilityd/cryptexd）才是目前最远路径**：它确实
+  启动到 `cryptexd`/`eligibilityd`，然后停住；
+- 因此 cryptexd/eligibilityd 不是可随意跳过的 daemon，skip 迭代到此
+  为止。剩余问题回到 H92/H93 已记录的 SystemOS Cryptex1/AuthAPFS/
+  owner manifest 链路。
+
+下一步只有三类选择：
+
+1. 提供真实 `Cryptex1,SystemVolume` owner manifest/IM4M（当前
+   IPSW/仓库不可得，需要 Apple TSS/personalization）；
+2. 做一次性的 **kernel-side** AuthAPFS/Image4 诊断绕过（不改 OS 镜像，
+   但属于安全策略绕过，必须明确不是最终修复）；
+3. 停在 H96a18/H91，保留当前诊断结论。
+
+当前安全边界不允许重新 flash 修改后的 OS/userdata，因此 H93 那种
+直接 patch `cryptexd` 二进制的方案不再采用。
 
 ### 6.5 回滚
 
