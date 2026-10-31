@@ -3,10 +3,10 @@
 - 计划：`plans/oneplus5-cheeseburger/PLAN.md`
 - 线路：B — UniXNU / 4K
 - 路线/目标：iPad7,1 / iPadOS 17.7.11（21H461）
-- 当前阶段：**B5 用户态入口。H81 已让 system-wide shared cache 映射成功并越过 per-process jetsam；launchd 停在 `OS_REASON_LIBXPC` assertion（`namespace 7 subcode 0x1`）。H82f 已用 16 MiB Data skeleton / 76 MiB payload 构建并启动，当前未回 fastboot；等待 `NATIVE_H82_DATA` 屏幕确认 Data mount 状态。**
-- 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）**
-- 基线提交：UniXNU `e95b37d`（main）
-- 当前代码提交：UniXNU `810ac08`；设备仓库 `dcff488`；fork 子模块 `lss717/RamBlock` `bc079a5`
+- 当前阶段：**H95 基线之后的 H96 只读调查。H91 仍是当前最佳 Probe 镜像；循环的直接拒绝点已定位到 AMFI selector `0x5f` 的调用方 entitlement 门（`com.apple.private.amfi.can-check-trust-cache`），不是 XNU TrustCache 查询未命中。H96a trace 补丁已加入仓库，尚未完成实际 XNU 编译和上机。**
+- 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）；H91 过 mount-phase-1 到 driverkitd**
+- 基线提交：H91 构建提交未记录；当前 UniXNU `main` `93c7fb6`，设备仓库 `main` `5ad54e2`
+- 当前代码提交：UniXNU `93c7fb6`；设备仓库 `5ad54e2`；关键子模块见 `BASELINE.md`
 - 远程仓库：
   - UniXNU `https://github.com/lss717/UniXNU`（`main`）
   - UEFI fork `https://github.com/lss717/edk2-msm8998`（分支 `unixnu-cheeseburger`）
@@ -14,7 +14,7 @@
   - NativeRamBlock fork `https://github.com/lss717/RamBlock`（submodule 路径仍为
     `drivers/NativeRamBlock`，fork 提交 `bc079a5`；`upstream` 指回 `UniXNU/RamBlock`）
 - UEFI 分支：`edk2-msm8998` 的 `unixnu-cheeseburger`，提交 `0471194`、`708fa06`、`7f34479`、`91e17a8`、`8ef28f1`、`1ffb934`
-- 最近更新：2026-10-28
+- 最近更新：2026-10-31
 
 > 本文件是 B 线（UniXNU / 4K）唯一的计划与状态记录。A 线（在 OP5 上用
 > 自建 shim 引导 16K XNU）是另一个独立项目，与本线没有代码依赖。
@@ -1597,6 +1597,48 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   循环。H91 boot `cd81c5b8...` 是当前最佳镜像。
 
 最终恢复真实 owner boot manifest、VerifiedRoot/AMFI/TrustCache，移除 ADT 占位。
+
+### H96：AMFI selector 0x5f 权限门定位与独立诊断补丁（只读调查）
+
+- 新增 `plans/oneplus5-cheeseburger/BASELINE.md`：记录 H91 boot/payload/
+  kernel/ADT/TrustCache 哈希、payload 原始启动参数、仓库/子模块状态和缺口。
+- 新增 `plans/oneplus5-cheeseburger/diagnostics/H96-investigation.md`：
+  启动链路、证据表、3 个根因假设、H96a/H96u 区分实验和缺失证据。
+- 从 H91 payload 内 FAT 卷直接读出 `kernel.macho`
+  `7f02891c...`、`kernel.macho.adt` `83d733d7...`、
+  `kernel.macho.trustcache` `7416ca4f...` 和完整 boot args；H91 的
+  kernel/ADT/TrustCache 哈希与 STATUS 原有记录一致。
+- 对原始 iPad7,1 21H461 kernelcache 的 AMFI kext 做只读反汇编：
+  `_check_cdhash_in_trustcache` 的 MAC syscall selector 为 `0x5f`；
+  入口在 `0xfffffff005ab73a8` 检查
+  `com.apple.private.amfi.can-check-trust-cache`，失败直接打印
+  `%s: Only allowed processes can check the trustcache` 并返回 `13`
+  (`EACCES`)，发生在 XNU `query_trust_cache()` 之前。当前循环因此是
+  调用方权限/签名状态问题，不是 TrustCache 查询未命中。
+- 原始 SystemOS 中该 entitlement 及 `Unable to find AMFI`、
+  `cdhash ... is not in trust cache` 字符串位于 ExtensionKit/
+  ExtensionFoundation 相关二进制；循环候选调用方是使用 ExtensionKit 的
+  宿主/服务进程，具体 PID/comm 仍需 H96a 运行日志确认。
+- H90d `HCS=0x10`：按 UFSHCI，bit 4 是 `HOST_ERROR_INDICATOR`，
+  `HCS & 3 == 0` 表示 `DEVICE_PRESENT` 与
+  `UTP_TRANSFER_REQ_LIST_READY` 都未置位；不是 idle/live 编码差异。
+  放宽 `(HCS & 3) == 3` 不解决问题，H96u 需先清 error/重建队列。
+- 新增诊断补丁 `patches/xnu/zzzz-trustcache-amfi-trace.patch`：
+  - `native-trace-amfi-syscall=1`：在 `__mac_syscall()` 记录 AMFI
+    selector `0x5a..0x66` 的 pid/comm/csflags/blob/platform/entitled/
+    cdhash；selector `0x5f` 限 64 次。
+  - `native-trace-trust-cache=1`：在 `query_trust_cache()` 记录 query
+    type、20 字节 cdhash、返回值和限频。
+  - 默认 boot arg 缺失时两个函数立即返回；不改变 AMFI、TrustCache、
+    root auth 或 VerifiedRoot 策略。
+- 验证：补丁已对干净的 `xnu-10063.141.1` 源树通过
+  `git apply --check`；本机无 macOS/Xcode 内核工具链，**尚未实际编译**，
+  也**未上机**。H91 产物未覆盖。
+- 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
+  `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户
+  `fastboot boot`；用 `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 确认调用方
+  身份、`entitled`、`csflags`、`blob`、`platform` 和是否到达查询。
+  在拿到这组日志前不要继续叠加 boot-args 或修改 TrustCache blob。
 
 ## 更新规则
 

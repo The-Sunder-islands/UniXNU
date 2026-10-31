@@ -1,0 +1,445 @@
+# H96 只读调查：AMFI TrustCache 拒绝路径与 UFS 诊断分离
+
+- 日期：2026-10-31
+- 范围：H91/H95 基线之后的只读调查；未刷写设备、未改 userdata、未改正式签名策略。
+- 基线：`plans/oneplus5-cheeseburger/BASELINE.md`。
+- 目标：回答 `_check_cdhash_in_trustcache` 循环究竟卡在“可信数据缺失”、
+  “注册/加载失败”、“查询未命中”还是“调用方权限拒绝”。
+
+## 1. 结论摘要
+
+1. **当前循环的直接拒绝点是 AMFI 的调用方权限门，不是 TrustCache 查询未命中。**
+   原始 iPad7,1 21H461 kernelcache 中，AMFI 的
+   `_check_cdhash_in_trustcache()` 对应 MAC policy syscall selector `0x5f`。
+   它在读取 cdhash、调用 XNU `query_trust_cache()` 之前，先检查调用进程是否
+   具有 `com.apple.private.amfi.can-check-trust-cache`。检查失败时打印
+   `%s: Only allowed processes can check the trustcache` 并返回 `13`
+   （`EACCES`）。这和 STATUS 中观察到的循环文本完全一致。
+2. 因此，**继续改 TrustCache blob、继续加 boot-args、或直接把查询改成
+   “永不拒绝”都不能解释当前循环**。下一步必须先确认调用方是谁，以及它的
+   code signing/entitlement 状态为什么不可用。
+3. 原始 SystemOS 镜像中，`com.apple.private.amfi.can-check-trust-cache` 及
+   `Unable to find AMFI`、`Unable to connect to AMFI`、
+   `cdhash: %@ is not in trust cache` 等字符串位于一个
+   ExtensionKit/ExtensionFoundation 相关二进制里。循环的候选调用方是
+   ExtensionKit 的宿主/服务进程（例如 `pkd`/`extensiond` 一类），但在没有
+   H96a 运行日志前不能把具体进程名当成已证实事实。
+4. H91 的 payload 确实携带 `kernel.macho.trustcache`（61,356 字节），
+   DarwinBoot 会把它填入 `/chosen/memory-map/TrustCache`；H91 也没有触发
+   “missing external trust caches” panic。因此“完全没有交付 TrustCache”
+   不是当前循环的首要解释，但静态 cache 是否覆盖目标进程仍需单独验证。
+5. H90d 的 `HCS=0x10` 不是“另一种 idle/live 编码”。按 UFSHCI 的 HCS 定义，
+   bit 4 是 `HOST_ERROR_INDICATOR`；`HCS & 3 == 0` 表示
+   `DEVICE_PRESENT` 和 `UTP_TRANSFER_REQ_LIST_READY` 都未置位。把
+   `(HCS & 3) == 3` 放宽并不会让控制器进入可运行状态；应先解释并清除
+   host error/控制器未 ready 的原因。UFS 与 TrustCache 必须继续分开。
+
+## 2. 本轮读取与核验
+
+### 2.1 仓库
+
+- 主仓 `UniXNU`：`main` / `93c7fb6`，工作区干净。
+- 设备仓 `UniXNU-cheeseburger`：`main` / `5ad54e2`，工作区干净。
+- 关键子模块：`NativeUfs 43a4bc7`、`NativeRamBlock f3cffc9`、
+  `DarwinBoot d099354`、`VerifiedRoot 2854c61`、`NativePrelink 2b6ffb5`。
+- 没有执行 `git reset --hard`、`git clean -fdx`，没有覆盖任何未提交文件。
+
+### 2.2 H91 产物
+
+- boot：`cd81c5b8ec91f103f3e3c0fd7de7bfb26633f4fbabecd34490e5627dd6f3ff9b`
+- payload：`e7fa5cdff58217886ebf269b30683c78da83c409ae179c356650f69869f08942`
+- payload 内 `kernel.macho`：
+  `7f02891c32825b75fcb76f2969ea2c1a541662d4c369d29fc85732b19f0e532d`
+- payload 内 `kernel.macho.adt`：
+  `83d733d770a9ec6961f60c1af13f4eeeb8552c776098241c0c536d13f810e54a`
+- payload 内 `kernel.macho.trustcache`：
+  `7416ca4f8377146626bb284e2133c76bee6cb4e3ee0af5d648b186235a7323a7`
+
+H91 的 payload 启动参数已从 FAT 卷内 `unixnu.toml` 原样读出，见
+`BASELINE.md` 第 3 节。当前 H91 是 Probe/窗口 UFS + 真实 PMGR
+（`sheng-pmgr=2`），没有 `native-ufs-root=1`。
+
+### 2.3 原始 iPad7,1 21H461 kernelcache
+
+从 IPSW 的 `kernelcache.release.ipad7` 解出 46,415,900 字节 Mach-O；
+其中的 AMFI kext 是原始未修改代码，用来对照当前 H91 内核里的同一段
+AMFI。分析只读取二进制，不运行、不修改。
+
+## 3. 实际启动链路与证据
+
+| 阶段 | 现有证据 | 缺失证据 |
+| --- | --- | --- |
+| UEFI / DarwinBoot | G1 已实测菜单、按键、payload、DarwinBoot、屏幕日志；H91 payload 含 `kernel.macho`、ADT、TrustCache、Data seed | H91 本次启动的完整串口/屏幕日志 |
+| XNU 进入 BSD/IOKit | H91 `kernel.macho` 可启动到用户态；STATUS H91 记录 | 精确构建提交、CFLAGS、kernel.json |
+| NativeRamBlock / UFS | H91 为 Probe；STATUS 记录 SystemOS 读持续完成、无 `NATIVE_UFS_STALL` | 请求级 ID/OCB/OCS/中断日志 |
+| APFS root | H87a 成功挂载；H89b 过 `mount-phase-1`；H91 沿用 | 本次挂载的 UUID/manifest 校验明细 |
+| launchd / boot tasks | H87c/H89b/H91 已到 launchd 和 `mount-phase-1` | 任务退出码、等待点、失败任务名 |
+| FileSet KC / driverkitd | `KextLog: Loading FileSet KC(s)`、`KextLog: driverkitd is active` | driverkitd 之后的首个失败点、Cryptex1 挂载结果 |
+| AMFI / TrustCache | 循环文本 `_check_cdhash_in_trustcache ... Only allowed processes`；H91 payload 有静态 TrustCache | 调用方 PID/进程名、entitlement 状态、cdhash、返回码 |
+| display / WindowServer | 未到达 | 任何显示初始化证据 |
+
+关键判断：H91 的 UFS 读没有硬卡死；`FileSet KC`/`driverkitd` 是当前最后的
+可见阶段。不要把 H89b/H90d 的 UFS 停住当成 H91 当前根因，也不要用 UFS
+问题解释 AMFI 循环。
+
+## 4. 关键发现：AMFI selector `0x5f` 的权限门
+
+### 4.1 原始 AMFI 二进制中的位置
+
+原始 21H461 kernelcache 中 AMFI kext：
+
+- `_PrelinkExecutableLoadAddr`：`0xfffffff0052db6c0`
+- `_PrelinkExecutableSize`：`0xb153`
+- AMFI `__TEXT_EXEC,__text`：`0xfffffff005aaa000`，大小 `0x1fa90`
+- AMFI `__TEXT,__cstring`：`0xfffffff0052dbd68`，大小 `0x9247`
+
+`_check_cdhash_in_trustcache()` 的 MAC policy syscall dispatcher 在
+`0xfffffff005ab72a8`。它以 `w1 - 0x5a` 查 13 项跳表
+（`0xfffffff0052e5e40`），selector `0x5f` 跳到
+`0xfffffff005ab73a8`。
+
+### 4.2 selector `0x5f` 的执行顺序
+
+从反汇编可直接读出：
+
+```text
+0xfffffff005ab73a8  adrp/add  x1, "com.apple.private.amfi.can-check-trust-cache"
+0xfffffff005ab73b4  bl        0xfffffff005ab138c        ; 查询进程 entitlement
+0xfffffff005ab73b8  tbz       w0, #0, 0xfffffff005ab75cc ; 无权限 -> 拒绝
+0xfffffff005ab73bc  ...       copyin 32 bytes from user arg
+0xfffffff005ab73f0  bl        0xfffffff005aad100        ; query type 1
+0xfffffff005ab7410  bl        0xfffffff005aad100        ; query type 2
+0xfffffff005ab7424  ...       copyout 32 bytes
+0xfffffff005ab75cc  ...       print rejection message
+0xfffffff005ab75e4  mov       w19, #0xd                 ; EACCES
+```
+
+拒绝路径使用的字符串：
+
+```text
+0xfffffff0052e18ad  "%s: Only allowed processes can check the trustcache\n"
+0xfffffff0052e18e2  "int _check_cdhash_in_trustcache(struct proc *, user_addr_t)"
+```
+
+权限字符串：
+
+```text
+0xfffffff0052dc597  "com.apple.private.amfi.can-check-trust-cache"
+```
+
+这条路径在 XNU `query_trust_cache()` 之前结束。也就是说：
+
+- 如果日志只出现 `Only allowed processes...`，**XNU 的 TrustCache
+  查询根本没有被调用**；
+- 这时看到的是调用方身份/entitlement 问题，不是 cdhash 不在静态/加载
+  trust cache 中的问题；
+- 只有权限检查通过后，selector `0x5f` 才会 copyin 32 字节参数并向
+  XNU 查询 type 1/2，随后把结果位图 copyout。
+
+这解释了为什么 H93 修改 `cryptexd` 后循环重新出现：被修改的二进制不再
+具有可信签名/entitlement，调用 AMFI 时在权限门就被拒绝，而不是因为
+SystemOS trust cache 内容不对。
+
+### 4.3 调用方候选
+
+在原始 SystemOS 镜像中搜索
+`com.apple.private.amfi.can-check-trust-cache`，命中偏移
+`0x178e...` 附近的 ExtensionKit/ExtensionFoundation 二进制。同一区域包含：
+
+```text
+Unable to find AMFI
+Unable to connect to AMFI [%ld]
+cdhash: %@ is not in trust cache
+Unknown error (%ld) checking cdhash %@
+com.apple.private.amfi.can-check-trust-cache
+```
+
+因此循环的调用方很可能是使用 ExtensionKit 的宿主/服务进程（`pkd`、
+`extensiond` 一类），而不是 XNU 或 APFS 本身。**具体进程名尚未证实**；
+必须用 H96a 的 `pid/comm` 日志确定。
+
+### 4.4 H91 的 TrustCache 状态
+
+- `kernel.macho.trustcache` 存在且为 61,356 字节，DarwinBoot 的
+  `ValidTrustCaches` 会校验并填入 ADT 的 16 字节 `TrustCache` 属性。
+- H91 内核字符串包含 `NATIVE_TRUSTCACHE_LOAD_START`、
+  `NATIVE_TRUSTCACHE_PROP`、`NATIVE_TRUSTCACHE: missing external trust
+  caches`。反汇编 H91 的 `_load_static_trust_cache` 可见：range 长度为 0
+  会走 panic cold path，静态 module `loadModule` 失败也会走 panic cold
+  path。H91 能启动到 `driverkitd`，因此这次启动中静态 TrustCache range
+  非零且静态 module 至少成功加载。
+- 但 H91 的完整日志没有保存，静态 module 的 cdhash 列表是否覆盖目标
+  进程仍未验证。这仍是 H3 假设，不是当前循环的直接原因。
+
+## 5. 根因假设（按置信度排序）
+
+### H1（高）：调用方权限门拒绝，不是 TrustCache 查询未命中
+
+`_check_cdhash_in_trustcache` 在 selector `0x5f` 的入口检查
+`com.apple.private.amfi.can-check-trust-cache`，调用方没有该 entitlement
+（或 AMFI 无法从它的 code signature 取得 entitlement 对象）时直接返回
+`EACCES`，用户态循环重试。
+
+**区分方法**：H96a 同时记录
+`NATIVE_AMFI_SYSCALL ... call=0x5f` 和 `NATIVE_TC_QUERY`。若循环期间只有
+前者、没有后者，且 `entitled=0`，H1 成立。
+
+### H2（中）：调用方本身处于“能运行但签名状态不可信”的 bring-up 状态
+
+当前 H91 使用 permissive AMFI（`amfi_get_out_of_my_way=1`、
+`amfi=0x94`、`amfi_allow_any_signature=1`、
+`native-skip-exec-signature=1`）。这些开关可能让进程越过 exec 拒绝，
+但进程的 `CS_VALID`/`CS_SIGNED`/entitlements 并未按正常路径建立；或者
+调用方来自 SystemOS cryptex，而对应的 `Cryptex1,SystemTrustCache` 尚未
+加载。结果是进程能跑，但 AMFI 不承认它的 entitlement。
+
+**区分方法**：H96a 日志中的 `csflags`、`blob`、`platform`、`entitled`
+四个字段：
+
+- `blob=NULL` 或 `csflags` 缺 `CS_VALID`：签名/entitlement 没有被保留；
+- `blob!=NULL`、`platform=0`、`entitled=0`：签名在，但未被当作可信
+  platform binary；
+- `entitled=1` 但 AMFI 仍拒绝：AMFI 内部的 entitlement 查询与 XNU
+  查询不一致，需继续追 AMFI 的 proc/cred 路径。
+
+### H3（低，但对最终 boot 仍重要）：静态 TrustCache 不覆盖 SystemOS/Cryptex 调用方
+
+H91 的静态 cache 来自 `kernel.macho.trustcache`，主要覆盖 OS root；
+SystemOS/Cryptex1 有独立的 `Cryptex1,SystemTrustCache`。即使 H1/H2 的
+权限门被正确满足，目标 cdhash 仍可能在 XNU 查询中 miss，导致
+`driverkitd`/FileSet KC 无法继续。
+
+**区分方法**：权限门通过后，看 H96a 的 `NATIVE_TC_QUERY` 是否出现、
+`ret` 是否为 `KERN_NOT_FOUND`，以及静态/SystemOS cache 的 module 数与
+目标 cdhash 是否匹配。不要在权限门未通过时用 H3 解释循环。
+
+## 6. H96a 最小诊断补丁
+
+### 6.1 补丁
+
+`patches/xnu/zzzz-trustcache-amfi-trace.patch`
+
+修改两个文件，全部由 boot arg 控制，默认关闭：
+
+1. `security/mac_base.c`
+   - 在 `__mac_syscall()` 入口，对
+     `com.apple.driver.AppleMobileFileIntegrity` 的 selector `0x5a..0x66`
+     打点。
+   - selector `0x5f` 最多记录 64 次；其他 selector 每个只记录第一次。
+   - 记录：`pid`、`comm`、`call`、`arg`、`proc_getcsflags(p)`、
+     `csproc_get_blob(p)`、`csblob_get_platform_binary(blob)`、
+     `IOCurrentTaskHasEntitlement("com.apple.private.amfi.can-check-trust-cache")`、
+     以及 copyin 的 20 字节 cdhash。
+   - boot arg：`native-trace-amfi-syscall=1`。
+2. `bsd/kern/kern_trustcache.c`
+   - 在 `query_trust_cache()` 返回前记录 query type、完整 20 字节 cdhash
+     和返回值；最多 64 次。
+   - boot arg：`native-trace-trust-cache=1`。
+
+没有修改 AMFI 二进制，没有改变 trust cache 注册/查询逻辑，没有改变
+AMFI 策略、签名校验、root auth 或 VerifiedRoot。默认 boot arg 缺失时
+两个函数都立即返回。
+
+### 6.2 构建集成
+
+`scripts/build-xnu-4k-baseline.sh` 会自动应用
+`patches/xnu/*.patch`，新补丁无需额外 CFLAGS。已用干净的
+`xnu-10063.141.1` 源树执行：
+
+```text
+git apply --check patches/xnu/zzzz-trustcache-amfi-trace.patch  -> PASS
+```
+
+本机没有 macOS/Xcode 内核工具链，**尚未完成实际 XNU 编译**；这属于
+本轮未完成项，不能把“补丁 apply 成功”当成“已能启动”。
+
+构建后必须检查产物确实包含两处诊断字符串（不是只看补丁文件）：
+
+```sh
+strings build/.../kernel.macho | grep -F 'NATIVE_AMFI_SYSCALL'
+strings build/.../kernel.macho | grep -F 'NATIVE_TC_QUERY'
+strings build/.../kernel.macho | grep -F 'native-trace-amfi-syscall'
+strings build/.../kernel.macho | grep -F 'native-trace-trust-cache'
+```
+
+四条都存在，才说明 `security/mac_base.c` 和 `bsd/kern/kern_trustcache.c`
+的改动进入了最终链接产物；任何一条缺失都先查 object 是否被缓存跳过或
+被后续 CFLAGS 覆盖，不要上机。
+
+### 6.3 H96a 启动参数
+
+在 H91 的 payload 参数基础上，只追加：
+
+```text
+native-trace-amfi-syscall=1 native-trace-trust-cache=1
+```
+
+其余 H91 参数、ADT、TrustCache、Probe/PMGR 配置保持不变。不要同时改
+UFS、AMFI 策略或 root auth。
+
+### 6.4 预期日志与判定
+
+权限门拒绝（H1）：
+
+```text
+NATIVE_AMFI_SYSCALL: pid=<N> comm=<name> call=95 arg=0x... csflags=0x... blob=0x... platform=... entitled=0 cdhash=... cdhash_valid=1
+_check_cdhash_in_trustcache: Only allowed processes can check the trustcache
+```
+
+随后循环重复，但**不应出现** `NATIVE_TC_QUERY`。
+
+权限门通过、查询 miss（H3）：
+
+```text
+NATIVE_AMFI_SYSCALL: ... call=95 ... entitled=1 ...
+NATIVE_TC_QUERY: type=... cdhash=... ret=<...>
+```
+
+若 `ret` 为 `KERN_NOT_FOUND`，再比较静态 cache module 与 cdhash；
+若 `ret=0`，问题在 AMFI 之后的策略/调用方逻辑。
+
+判定：
+
+- 出现 `call=95` 且 `entitled=0`：H1 成立，停止改 TrustCache blob，
+  转向“调用方为什么没有 entitlement / 签名状态为什么不可信”。
+- 出现 `call=95` 且 `entitled=1`，但 AMFI 仍拒绝：需要继续反汇编/对照
+  AMFI 的 entitlement 查询路径；不要通过删除检查来推进。
+- 完全没有 `call=95`：当前循环不是这条 AMFI 路径，重新核对日志来源，
+  不要继续按 H1 处理。
+
+### 6.5 回滚
+
+- 不覆盖 H91 boot/payload/kernel。
+- H96a 使用独立文件名，例如 `boot-H96a-amfitrace.img`。
+- 回退：重新 `fastboot boot boot-H91-stallpanic.img`。
+- 补丁默认关闭；即使留在树里，不带两个 trace boot arg 时行为与 H91
+  相同（仅多出未执行的静态函数）。
+
+## 7. UFS 独立诊断设计（H96u，不与 H96a 同镜像）
+
+H91 没有 UFS 硬 stall，因此 UFS 不是当前第一优先；但 P2 要求可证伪的
+请求级诊断，且不能把 H89b/H90d 的停住与 AMFI 混为一谈。
+
+### 7.1 先解释 `HCS=0x10`
+
+按 UFSHCI 的 HCS（Host Controller Status，0x30）定义：
+
+| bit | 名称 |
+| ---: | --- |
+| 0 | `DEVICE_PRESENT` |
+| 1 | `UTP_TRANSFER_REQ_LIST_READY` |
+| 2 | `UTP_TASK_REQ_LIST_READY` |
+| 3 | `UIC_COMMAND_READY` |
+| 4 | `HOST_ERROR_INDICATOR` |
+| 5 | `DEVICE_ERROR_INDICATOR` |
+| 8..10 | `UIC_POWER_MODE_CHANGE_REQ_STATUS` |
+
+因此 H90d 的 `HCS=0x10` 表示 **host error indicator 置位**，同时
+`DEVICE_PRESENT`、`UTP_TRANSFER_REQ_LIST_READY` 都未置位；
+`(HCS & 3) == 3` 为假不是“驱动假设错了”，而是控制器没有进入可运行
+状态。H90e 放宽检查后仍无法建立队列，与这个解释一致。
+
+正确方向不是删除 profile 校验或把任意 HCS 当成 ready，而是：
+
+1. 读 `IS`/`IE`/`HCE`/`HCS`/`UIC` 错误位；
+2. 确认是初始化顺序、时钟/电源、复位、还是此前 H89b/H90 的控制器
+   残留状态导致 host error；
+3. 在确认 DMA 停止后，按 UFSHCI 顺序清 error/重新 enable，并验证
+   `UTP_TRANSFER_REQ_LIST_READY` 与 `UIC_COMMAND_READY`。
+
+### 7.2 请求生命周期字段
+
+在 `NativeUfsProbe`（当前 Probe 路径，不是 warm-link）中为每个请求记录：
+
+- request ID、LUN、LBA、block count、byte count；
+- UTRD slot/tag、UTRD/command descriptor 地址；
+- PRDT 条目数、DMA buffer 地址/长度；
+- submit 时间戳；
+- doorbell 前后 `HCS`/`IS`/`IE`/`UTRLDBR` 快照；
+- 中断或轮询是否观察到完成；
+- OCS/transfer response/status；
+- completion callback 是否执行；
+- outstanding 数量变化；
+- 超时后一次性限频快照，并进入可恢复 timeout/error 路径。
+
+### 7.3 测试顺序
+
+1. 单请求、同一 LBA 重复读；
+2. 连续小块读；
+3. 不同长度读；
+4. 多 LUN 交替读；
+5. 长时间重复读；
+6. 最后才测并发/read-ahead。
+
+每步用已知原始窗口 hash 校验读回数据；只统计“读到字节”不算正确性
+证明。H96u 必须先独立构建、独立镜像，不要与 H96a 的 AMFI trace 混在
+同一个 boot image 里。
+
+## 8. 安全边界与风险
+
+- H96a 只增加默认关闭的观测日志；不改变 AMFI 决策、不改变 TrustCache
+  注册、不改变 root auth、不改变 VerifiedRoot digest。
+- `IOCurrentTaskHasEntitlement` 是只读查询；不会授予权限。
+- 不把 `entitled=0` 的检查删除或改成 `entitled=1`；不把 48 字节占位
+  manifest 当成真实 owner manifest；不把 8 字节 digest 当成最终方案。
+- 不自动刷写 userdata、GPT、ABL/XBL/modem/persist。
+- 若 H96a 证明调用方是修改过的二进制，必须回到原始签名二进制或真实
+  owner manifest/trust cache，而不是永久关闭 AMFI。
+
+## 9. 缺失证据
+
+1. H91 的完整启动日志和循环首发 PID/进程名。
+2. H91 的精确构建提交、CI run、kernel.json、CFLAGS。
+3. H91 静态 TrustCache 的 module 数、cdhash 列表，以及目标进程 cdhash
+   是否在其中。
+4. `Cryptex1,SystemTrustCache` 是否已加载、加载到哪一层。
+5. AMFI 内部 entitlement 查询失败的具体原因（需要 H96a 的
+   `csflags`/`blob`/`entitled` 组合）。
+6. UFS 请求级日志；当前只能确认 H91 没有硬 stall。
+
+## 10. 下一步唯一优先事项
+
+**H96a：用 `native-trace-amfi-syscall=1` 和 `native-trace-trust-cache=1`
+启动 H91 配置的独立诊断镜像，确认 `_check_cdhash_in_trustcache` 的调用方
+PID/comm、`entitled`、`csflags`、`blob`、`platform` 和 cdhash，并确认
+循环期间是否出现 `NATIVE_TC_QUERY`。**
+
+在拿到这组日志前，不要：
+
+- 继续叠加 amfi/boot-args；
+- 修改 TrustCache blob；
+- 修改 AMFI/trustcache 二进制；
+- 把 UFS 问题与 AMFI 循环合并处理。
+
+## 11. 需要用户执行的设备测试
+
+先构建（用户/CI，不在本次自动执行）：
+
+1. 使用与 H91 相同的构建配置，确认补丁已应用：
+   ```sh
+   git -C .cache/xnu-work apply --check patches/xnu/zzzz-trustcache-amfi-trace.patch
+   ```
+2. 构建 H96a kernel/payload，payload 参数只追加：
+   ```text
+   native-trace-amfi-syscall=1 native-trace-trust-cache=1
+   ```
+3. 生成独立 boot image，例如
+   `out/cheeseburger/boot/boot-H96a-amfitrace.img`，记录 boot/kernel/payload
+   SHA-256。
+
+上机（用户明确授权后）：
+
+```sh
+fastboot boot out/cheeseburger/boot/boot-H96a-amfitrace.img
+```
+
+只做 `fastboot boot`，不要 `fastboot flash userdata`，不要刷写固件分区。
+采集：
+
+- 屏幕/串口完整日志；
+- 所有 `NATIVE_AMFI_SYSCALL` 行；
+- 所有 `NATIVE_TC_QUERY` 行；
+- AMFI `_check_cdhash_in_trustcache` 拒绝行；
+- 最后到达的 `KextLog` 阶段。
+
+若设备未授权或构建未完成，停在本文的只读结论，不要自行上机。

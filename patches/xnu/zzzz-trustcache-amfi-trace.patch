@@ -1,0 +1,163 @@
+--- a/security/mac_base.c
++++ b/security/mac_base.c
+@@ -87,6 +87,9 @@
+ #include <sys/proc.h>
+ #include <sys/proc_internal.h>
+ #include <sys/kauth.h>
++#include <sys/codesign.h>
++#include <IOKit/IOBSD.h>
++#include <pexpert/pexpert.h>
+ #include <sys/sysproto.h>
+ 
+ #include <mach/exception_types.h>
+@@ -1548,6 +1551,85 @@
+ 	return error;
+ }
+ 
++#if CONFIG_MACF
++/*
++ * H96 bring-up diagnostic only.  Disabled unless the boot argument is present.
++ *
++ * AMFI selector 0x5f is _check_cdhash_in_trustcache().  The original AMFI
++ * binary rejects the request before it reaches the XNU trust-cache query when
++ * the caller lacks com.apple.private.amfi.can-check-trust-cache.  This trace
++ * records the caller identity, its code-signing state and the requested
++ * cdhash so the rejection can be attributed without changing policy.
++ */
++static int native_amfi_syscall_trace = -1;
++static unsigned int native_amfi_tc_budget;
++static uint32_t native_amfi_seen_calls;
++
++static boolean_t
++native_amfi_syscall_trace_enabled(void)
++{
++	if (native_amfi_syscall_trace < 0) {
++		int value = 0;
++
++		if (!PE_parse_boot_argn("native-trace-amfi-syscall", &value,
++		    sizeof(value))) {
++			value = 0;
++		}
++		native_amfi_syscall_trace = value;
++	}
++	return native_amfi_syscall_trace != 0;
++}
++
++static void
++native_trace_amfi_syscall(proc_t p, const char *target, int call,
++    user_addr_t arg)
++{
++	struct cs_blob *blob;
++	uint8_t cdhash[20] = { 0 };
++	uint64_t low = 0;
++	uint64_t high = 0;
++	int copied = 0;
++
++	if (!native_amfi_syscall_trace_enabled() ||
++	    strcmp(target, "com.apple.driver.AppleMobileFileIntegrity") != 0 ||
++	    call < 0x5a || call > 0x66) {
++		return;
++	}
++
++	/* Keep the first of each selector, and a bounded trace of 0x5f. */
++	if (call == 0x5f) {
++		if (native_amfi_tc_budget++ >= 64) {
++			return;
++		}
++	} else {
++		uint32_t bit = 1U << (call - 0x5a);
++
++		if (native_amfi_seen_calls & bit) {
++			return;
++		}
++		native_amfi_seen_calls |= bit;
++	}
++
++	blob = csproc_get_blob(p);
++	if (call == 0x5f && arg != 0 &&
++	    copyin(arg, cdhash, sizeof(cdhash)) == 0) {
++		memcpy(&low, cdhash, sizeof(low));
++		memcpy(&high, cdhash + sizeof(low), sizeof(high));
++		copied = 1;
++	}
++
++	printf("NATIVE_AMFI_SYSCALL: pid=%d comm=%s call=%d arg=0x%llx "
++	    "csflags=0x%llx blob=%p platform=%d entitled=%d "
++	    "cdhash=%016llx%016llx cdhash_valid=%d\n",
++	    proc_getpid(p), p->p_comm, call, (unsigned long long)arg,
++	    (unsigned long long)proc_getcsflags(p), blob,
++	    blob != NULL ? csblob_get_platform_binary(blob) : -1,
++	    IOCurrentTaskHasEntitlement(
++	    "com.apple.private.amfi.can-check-trust-cache") ? 1 : 0,
++	    (unsigned long long)low, (unsigned long long)high, copied);
++}
++#endif /* CONFIG_MACF */
++
+ /*
+  * __mac_syscall: Perform a MAC policy system call
+  *
+@@ -1579,6 +1661,9 @@
+ 	AUDIT_ARG(value32, uap->call);
+ 	AUDIT_ARG(mac_string, target);
+ 
++#if CONFIG_MACF
++	native_trace_amfi_syscall(p, target, uap->call, uap->arg);
++#endif
+ 	error = mac_proc_check_mac_syscall(p, target, uap->call);
+ 	if (error) {
+ 		return error;
+--- a/bsd/kern/kern_trustcache.c
++++ b/bsd/kern/kern_trustcache.c
+@@ -683,6 +683,42 @@
+ 	return ret;
+ }
+ 
++#if CONFIG_MACF
++/*
++ * H96 bring-up diagnostic only.  Disabled unless the boot argument is present.
++ * A rejected AMFI selector 0x5f never reaches this function; therefore a
++ * repeated AMFI rejection with no NATIVE_TC_QUERY line proves the loop is in
++ * the caller-authorization gate, not in a trust-cache lookup miss.
++ */
++static int native_trace_tc_query = -1;
++static unsigned int native_trace_tc_query_budget;
++
++static void
++native_trace_trust_cache_query(TCQueryType_t query_type,
++    const uint8_t cdhash[kTCEntryHashSize], kern_return_t result)
++{
++	uint32_t words[5];
++	int value = 0;
++
++	if (native_trace_tc_query < 0) {
++		if (!PE_parse_boot_argn("native-trace-trust-cache", &value,
++		    sizeof(value))) {
++			value = 0;
++		}
++		native_trace_tc_query = value;
++	}
++	if (native_trace_tc_query == 0 ||
++	    native_trace_tc_query_budget++ >= 64) {
++		return;
++	}
++
++	memcpy(words, cdhash, sizeof(words));
++	printf("NATIVE_TC_QUERY: type=%u cdhash=%08x%08x%08x%08x%08x ret=%d\n",
++	    query_type, words[0], words[1], words[2], words[3], words[4],
++	    result);
++}
++#endif /* CONFIG_MACF */
++
+ kern_return_t
+ query_trust_cache(
+ 	TCQueryType_t query_type,
+@@ -702,6 +738,9 @@
+ 	ret = xnu_query_trust_cache(query_type, cdhash, query_token);
+ #endif
+ 
++#if CONFIG_MACF
++	native_trace_trust_cache_query(query_type, cdhash, ret);
++#endif
+ 	return ret;
+ }
+ 
