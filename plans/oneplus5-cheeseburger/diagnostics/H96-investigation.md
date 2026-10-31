@@ -1316,6 +1316,32 @@ panic(cpu 0 caller ...): H96a21: fourth driverkitd trust-cache check
 2. 若不跳过 cryptexd，则需要在 launchd/XPC 或 cryptexd 的
    SystemOS/AuthAPFS 路径上加日志，确认它等待的对象。
 
+### 6.35 H96a22：只跳过 cryptexd job 的一次性诊断
+
+H96a21 证明四次 driverkitd 检查全部 `mask=0x1`（loadable hit），因此
+下一步不再改 AMFI。H96a22 用回 H96a20 的无 panic 内核（同一 gate
+bypass），只改变 launchd skip 列表：
+
+```text
+sheng-disable-jobs=com.apple.nsurlsessiond,com.apple.routined,
+com.apple.nehelper,com.apple.chronod,com.apple.accountsd,
+com.apple.alsd,com.apple.pfd,com.apple.eligibilityd,
+com.apple.security.cryptexd
+```
+
+目的：区分“cryptexd 自身同步等待/启动”与更深的 SystemOS/AuthAPFS
+依赖。跳过 cryptexd 是**一次性诊断**，不是最终修复；如果系统仍不到
+backboardd/SpringBoard，则说明 cryptexd 不是唯一阻塞，需转向
+SystemOS/AuthAPFS 或显示依赖。
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a22-payload.img` | 79,691,776 | `7e2c37c9c50203e7fa92a20b95a65c1bab4fbea2aa2415c2a4ee239323317801` |
+| `boot-H96a22-skipcryptexd.img` | 81,147,904 | `1b76aac07fc3e68830a91069e18d98008b177c745345bab289e51acc16f728f9` |
+
+内核沿用 `H96a20-kernel-gatebypass.macho`：
+`e7538cb9e022fcc5bad5241fb9e7610cd352dec0214c6fe7cdfc07afa398d90a`。
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。

@@ -1824,6 +1824,10 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   下一步最小诊断：H96a22 只跳过 `com.apple.security.cryptexd` job
   （一次性诊断，不是最终修复），观察是否到 backboardd/SpringBoard；
   或在 cryptexd/launchd 路径加日志。
+- H96a22 已构建：沿用 H96a20 无 panic 内核，只在 skip 列表加入
+  `com.apple.security.cryptexd`；payload `7e2c37c9...`、boot
+  `1b76aac0...`。用于一次性判断 cryptexd 自身等待还是更深层
+  SystemOS/AuthAPFS；不是最终修复。等待 fastboot 上机。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户
