@@ -1024,6 +1024,36 @@ H96a16 在 skip 列表中再加入 `com.apple.chronod`，观察下一服务。
 | `H96a16-payload.img` | 79,691,776 | `646bdae098cdea2b18f01121c58abc9caa3ba6c073cae9cad86b10f771e39d7c` |
 | `boot-H96a16-skipchronod.img` | 81,147,904 | `49fc80be16dd61a60a0cddbf745359a7f1039360eedf295b77326052c0e17126` |
 
+### 6.27 H96a16 结果：停在 log_helper，启动点仍在漂移
+
+H96a16 最后可见：
+
+```text
+NATIVE_EXEC: IOMFB_FDR_Loader
+NATIVE_EXEC: distnoted
+NATIVE_EXEC: xpcproxy argv1=com.apple.log_helper
+NATIVE_EXEC: log_helper
+NATIVE_UFS_PROGRESS: ... winBytes=3138565120 ...
+```
+
+之后无变化；没有 UFS timeout。与 H96a14/H96a15 的 routined/chronod
+相比，最后停点继续漂移，说明不是单一 daemon，而是某类同步 XPC/
+launchd 等待。
+
+H96a17：扩大 skip 列表到：
+
+```text
+nsurlsessiond,routined,nehelper,chronod,log_helper,accountsd,alsd,pfd
+```
+
+用于一次性排除已观察到的网络/位置/日志 daemon，观察是否能稳定到
+backboardd/SpringBoard。
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a17-payload.img` | 79,691,776 | `9fdc58c01dd4cfa53e76684e300f2ab0f88e096427c6b1fc7d5301181366f589` |
+| `boot-H96a17-broadskip.img` | 81,147,904 | `6906c32e2bab290b08a4e0b767904515f4251fed1260f9a5e7bffea6c2ffa997` |
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。
