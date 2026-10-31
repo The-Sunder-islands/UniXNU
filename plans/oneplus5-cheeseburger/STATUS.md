@@ -1654,6 +1654,15 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   `918cdbe1...`、payload `da268d87...`、boot `8c58b138...`；
   仅构建树把 trace 默认打开并把限频提高到 100000/4096，仓库默认补丁
   仍保持 boot-arg 关闭。等待再次上机。
+- H96a2 屏幕出现多次 `NATIVE_TC_QUERY ... ret=0`（UserEventAgent/
+  launchd/spracy），说明 XNU TrustCache 查询和命中正常；仍无
+  `NATIVE_AMFI_SYSCALL`。原因是 `__mac_syscall` trace 的 target 过滤用了
+  bundle ID，而 AMFI 的 MAC policy 名很可能是
+  `AppleMobileFileIntegrity`。旧 trace 还调用了
+  `IOCurrentTaskHasEntitlement()`，可能提前初始化 entitlement，构成副作用。
+- H96a3 取消 target 过滤、打印实际 target、删除 entitlement 查询调用：
+  kernel `b36ec3a8...`、payload `d5030ee5...`、boot
+  `98192bb0...`。等待再次上机。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户

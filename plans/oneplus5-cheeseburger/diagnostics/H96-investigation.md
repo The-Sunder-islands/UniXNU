@@ -442,6 +442,42 @@ H96a2 源码差异（仅构建树）：
 并分别把 `0x5f`/query 的限频从 64 提高到 100000/4096。除 trace 外，
 H96a2 的配置、ADT、TrustCache、Data seed 与 H96a/H91 相同。
 
+### 6.8 H96a2 结果与 H96a3 修正
+
+H96a2 屏幕可见 `NATIVE_TC_QUERY` 多次成功返回：
+
+```text
+NATIVE_TC_QUERY: pid=24 comm=UserEventAgent type=1 cdhash=... ret=0
+NATIVE_TC_QUERY: pid=1 comm=launchd type=0 cdhash=34f3216e... ret=0
+NATIVE_TC_QUERY: pid=80 comm=spracy type=0/1 cdhash=... ret=0
+KextLog: driverkitd is active
+```
+
+说明 XNU 的 TrustCache 查询本身工作，且能命中；但这帧仍没有
+`NATIVE_AMFI_SYSCALL`。原因已定位：`__mac_syscall` 的 target 过滤写成了
+bundle ID `com.apple.driver.AppleMobileFileIntegrity`，而 AMFI 注册的
+MAC policy 名更可能是 `AppleMobileFileIntegrity`，导致 trace 直接 return。
+
+另外，旧 trace 在 `printf` 参数里调用 `IOCurrentTaskHasEntitlement()`。
+这不仅是只读观测，可能提前初始化/缓存调用方的 entitlement，从而改变
+AMFI 后续判断。H96a2 中没有再看到 `Only allowed` 循环，不能排除这个
+副作用。
+
+因此 H96a3：
+
+- 取消 target 过滤，`0x5a..0x66` 的调用都会记录，并打印实际 `target`；
+- 删除 `IOCurrentTaskHasEntitlement()` 调用，只保留 pid/comm/target/
+  csflags/blob/platform/cdhash，避免改变策略状态；
+- `0x5f` 仍强制、限频 100000；query trace 强制、限频 4096。
+
+H96a3 产物：
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a3-kernel.macho` | 52,088,832 | `b36ec3a89e05f4fa9e364b7f7a3191951c9bb0c60bd21dffd6eed99fed0e648e` |
+| `H96a3-payload.img` | 79,691,776 | `d5030ee552dc9627a000d6ddc8d2eaa9ccd6310ac3c4b6dfc062f5a152d9887d` |
+| `boot-H96a3-amfitrace.img` | 81,147,904 | `98192bb07988871506eaa49a1a43c98644ef562243853923b0c277be84fa22e1` |
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。

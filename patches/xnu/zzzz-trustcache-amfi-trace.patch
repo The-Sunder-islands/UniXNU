@@ -10,7 +10,7 @@
  #include <sys/sysproto.h>
  
  #include <mach/exception_types.h>
-@@ -1548,6 +1551,85 @@
+@@ -1548,6 +1551,83 @@
  	return error;
  }
  
@@ -54,7 +54,6 @@
 +	int copied = 0;
 +
 +	if (!native_amfi_syscall_trace_enabled() ||
-+	    strcmp(target, "com.apple.driver.AppleMobileFileIntegrity") != 0 ||
 +	    call < 0x5a || call > 0x66) {
 +		return;
 +	}
@@ -81,14 +80,13 @@
 +		copied = 1;
 +	}
 +
-+	printf("NATIVE_AMFI_SYSCALL: pid=%d comm=%s call=%d arg=0x%llx "
-+	    "csflags=0x%llx blob=%p platform=%d entitled=%d "
++	printf("NATIVE_AMFI_SYSCALL: pid=%d comm=%s target=%s call=%d "
++	    "arg=0x%llx csflags=0x%llx blob=%p platform=%d "
 +	    "cdhash=%016llx%016llx cdhash_valid=%d\n",
-+	    proc_getpid(p), p->p_comm, call, (unsigned long long)arg,
++	    proc_getpid(p), p->p_comm, target, call,
++	    (unsigned long long)arg,
 +	    (unsigned long long)proc_getcsflags(p), blob,
 +	    blob != NULL ? csblob_get_platform_binary(blob) : -1,
-+	    IOCurrentTaskHasEntitlement(
-+	    "com.apple.private.amfi.can-check-trust-cache") ? 1 : 0,
 +	    (unsigned long long)low, (unsigned long long)high, copied);
 +}
 +#endif /* CONFIG_MACF */
@@ -96,7 +94,7 @@
  /*
   * __mac_syscall: Perform a MAC policy system call
   *
-@@ -1579,6 +1661,9 @@
+@@ -1579,6 +1659,9 @@
  	AUDIT_ARG(value32, uap->call);
  	AUDIT_ARG(mac_string, target);
  
