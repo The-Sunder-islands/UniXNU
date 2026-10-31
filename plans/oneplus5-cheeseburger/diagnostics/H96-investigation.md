@@ -1420,6 +1420,37 @@ cryptexd；如果能继续到 backboardd/SpringBoard，说明 cryptexd 是当前
 该实验仍是一次性诊断，不是最终修复；如果 cryptexd 不能跳过，则回到
 H96a18 的 cryptexd/eligibilityd 停点，转向 owner manifest/AuthAPFS。
 
+### 6.38 H96a23 结果：只跳 cryptexd 仍停在 driverkitd active
+
+H96a23 保留 H96a18 的 skip 列表（**不跳过 eligibilityd**），只追加
+`com.apple.security.cryptexd`。屏幕显示多组 driverkitd AMFI 检查
+（`ret=0`），随后：
+
+```text
+KextLog: driverkitd is not active
+KextLog: Loading FileSet KC(s)
+KextLog: driverkitd is active
+NATIVE_UFS_PROGRESS: ... winBytes=315523184 ...
+```
+
+之后 2 分钟无变化；没有 cryptexd/eligibilityd 的 `NATIVE_EXEC`，没有
+backboardd/SpringBoard。
+
+结论：
+
+- 只跳过 cryptexd（保留 eligibilityd）仍然让 launchd 停在
+  `driverkitd is active`；cryptexd 不是可跳过的普通 job，而是后续
+  launchd 阶段需要的服务；
+- H96a22（同时跳过 eligibilityd+cryptexd）和 H96a23（只跳 cryptexd）
+  都没有带来进展；H96a18（不跳二者）仍是唯一到达
+  cryptexd/eligibilityd 的路径；
+- 因此 skip 迭代结束，继续加 skip 只会更早停住。
+
+当前停点回到 H96a18 的 cryptexd/eligibilityd。结合 H92/H93，最可能的
+根因仍是 SystemOS Cryptex1/AuthAPFS/owner manifest；下一步只能：
+真实 owner manifest/IM4M（不可得）、一次性 kernel-side AuthAPFS/
+Image4 诊断绕过（非最终修复），或停在 H96a18/H91。
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。
