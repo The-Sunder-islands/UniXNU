@@ -1755,6 +1755,13 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
 - H96a14（H96a12 参数 + 只记录 driverkitd AMFI 检查目标）已构建：
   kernel `ede3f2b8...`、payload `aa06e6c0...`、boot
   `06bc78c6...`；用于获取第二次 driverkitd 检查的 cdhash。等待上机。
+- H96a14 本次运行停在 `routined`（未到第二次 driverkitd trace），与
+  H96a12 到达 backboardd 存在 run-to-run 差异；`routined` 是新的同步
+  等待候选。
+- H96a15 复用 H96a14 kernel，payload 跳过
+  `nsurlsessiond,routined,nehelper`：payload `4fed1175...`、boot
+  `0b55644d...`。用于排除网络/位置服务同步等待并稳定到达
+  backboardd/SpringBoard。等待上机。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户

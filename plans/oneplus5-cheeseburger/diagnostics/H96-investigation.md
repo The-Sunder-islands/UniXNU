@@ -963,6 +963,38 @@ H96a14 产物：
 | `H96a14-payload.img` | 79,691,776 | `aa06e6c0515f5431cbea4c41c6db26f71230ce1cc68a0e39be07f04b93cd58c8` |
 | `boot-H96a14-driverkitdtrace.img` | 81,147,904 | `06bc78c6f14e5a1819c668fb551040c39643c109d083d55521451e14f1adad62` |
 
+### 6.25 H96a14 结果：本次停在 routined，未看到第二次 driverkitd trace
+
+H96a14 本次运行最后：
+
+```text
+KextLog: Loading FileSet KC(s)
+KextLog: driverkitd is active
+NATIVE_UFS_PROGRESS: ... winBytes=3215934464 ...
+NATIVE_EXEC: pid=55 comm=alsd ...
+NATIVE_EXEC: xpcproxy argv1=com.apple.accountsd
+NATIVE_EXEC: accountsd
+NATIVE_EXEC: pid=32 comm=routined
+```
+
+之后 5 分钟无变化；没有可见的 `NATIVE_AMFI_SYSCALL ... comm=driverkitd`
+（第二次 driverkitd 目标未到达或未打印）。与 H96a12 到达 backboardd
+相比，本次运行停在更早的 `routined`，说明启动顺序/等待点存在
+run-to-run 差异；`routined` 是当前新的同步等待候选。
+
+H96a15：复用 H96a14 kernel，payload 同时跳过：
+
+```text
+com.apple.nsurlsessiond,com.apple.routined,com.apple.nehelper
+```
+
+用于排除网络/位置服务的同步等待，观察能否稳定到 backboardd/SpringBoard。
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a15-payload.img` | 79,691,776 | `4fed1175ec016d610d3dc8d8bf9b37a581bd53a7140cb645ad83cc2a1ec1acb9` |
+| `boot-H96a15-skipjobs.img` | 81,147,904 | `0b55644d33e4fa848e6c458e0450bd2854e754986941c889198f063006ac4aec` |
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。
