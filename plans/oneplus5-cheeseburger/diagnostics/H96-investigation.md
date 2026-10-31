@@ -1082,6 +1082,33 @@ nsurlsessiond,routined,nehelper,chronod,accountsd,alsd,pfd
 | `H96a18-payload.img` | 79,691,776 | `c58640e146c4f7d2a97ceaa511bc88e2382256a44f3bd03a0469fe6b60bb74c7` |
 | `boot-H96a18-skipno-underscore.img` | 81,147,904 | `301d8edd7f2c13b144f8c980fa4364ab1ed89141bac2e52325ea65826ad805b6` |
 
+### 6.29 H96a18 结果：进入 cryptexd/eligibilityd，仍无 SpringBoard
+
+H96a18 最后可见：
+
+```text
+NATIVE_EXEC: pid=87 comm=xpcproxy argv1=com.apple.eligibilityd
+NATIVE_EXEC: pid=88 comm=xpcproxy argv1=com.apple.security.cryptexd
+NATIVE_EXEC: pid=80 comm=cryptexd argv0=/usr/libexec/cryptexd
+NATIVE_EXEC: pid=87 comm=eligibilityd argv0=/usr/libexec/eligibilityd
+process fseventsd[76] crossed thread count high watermark (32), EXC_RESOURCE suppressed...
+NATIVE_UFS_PROGRESS: ... winBytes=3230794752 ...
+```
+
+之后 5 分钟无变化；没有 UFS timeout，没有 SpringBoard/WindowServer。
+此时系统已经进入 **cryptexd/SystemOS** 路径；`cryptexd` 是原始
+Cryptex1/AuthAPFS 链路的一部分，可能再次撞上 H91/H95 记录的
+owner IM4M/AuthAPFS 依赖，而不是一个可随意跳过的普通 daemon。
+
+H96a19：在 skip 列表加入 `com.apple.eligibilityd`，观察 cryptexd
+之后的下一跳；如果仍停在 cryptexd/SystemOS 链路，就不再靠 skip
+推进，转回 owner manifest/AuthAPFS 或显示依赖。
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a19-payload.img` | 79,691,776 | `995d247ce5dfe436bb25211cdf102f6b7256530072af8b042c8be9577694021a` |
+| `boot-H96a19-skipeligibility.img` | 81,147,904 | `0bd34abf97c50979c0f24e58c1f1c1b2c816b74429b6e12d4e3940737ad2b7e9` |
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。

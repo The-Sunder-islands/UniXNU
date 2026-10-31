@@ -1781,6 +1781,14 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
 - H96a18 移除 log_helper，skip 列表改为
   `nsurlsessiond,routined,nehelper,chronod,accountsd,alsd,pfd`：
   payload `c58640e1...`、boot `301d8edd...`。等待上机。
+- H96a18 已上机：启动到 `cryptexd`/`eligibilityd`，fseventsd 线程数
+  达高水位；之后 5 分钟无变化，无 UFS timeout，未到 SpringBoard。
+  系统已进入 cryptexd/SystemOS 路径，可能再次撞上原始
+  Cryptex1/AuthAPFS/owner manifest 依赖。
+- H96a19 在 skip 列表加入 eligibilityd：payload `995d247c...`、boot
+  `0bd34abf...`；用于观察 cryptexd 后下一跳。若仍停在
+  cryptexd/SystemOS，则停止靠 skip 推进，转回 owner manifest/AuthAPFS
+  或显示依赖。等待上机。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户
