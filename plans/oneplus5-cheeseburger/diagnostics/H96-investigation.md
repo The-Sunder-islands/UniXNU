@@ -662,6 +662,37 @@ miss 对 DriverKit driver 是正常。真正的阻塞是：
 而不是正常的 AMFI IOKit user client/DriverKit 路径？** 这比继续补
 TrustCache blob 更能解释循环。
 
+### 6.14 H96a7：AMFI IOKit service / user client 路径打点
+
+H96a7 在 XNU 源码层增加：
+
+- `IOService::registerService()`：当类名为
+  `AppleMobileFileIntegrity` 时置 `h96_amfi_service_registered=1` 并打印
+  `H96_AMFI_SERVICE: registered`；
+- `IOUserClient::externalMethod()`：当类名为
+  `AppleMobileFileIntegrityUserClient` 时累加 `h96_amfi_uc_calls`，
+  前 8 次打印 `H96_AMFI_UC: selector=...`；
+- `security/mac_base.c` 的 AMFI syscall trace：当
+  `pid=... comm=driverkitd` 且 `call=0x5f` 时 panic：
+  ```text
+  H96_AMFI_PATH: pid=%d comm=%s target=%s service=%d uc_calls=%u
+  ```
+
+这能区分：
+
+- `service=0`：AMFI IOService 从未注册/发布，driverkitd 只能回退；
+- `service=1, uc_calls=0`：service 在，但 user client 从未被调用或打开失败；
+- `service=1, uc_calls>0`：user client 路径被使用过（可能由 amfid/其他
+  进程），driverkitd 仍选择 MAC syscall，需要继续看 open 返回/调用条件。
+
+H96a7 产物：
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a7-kernel.macho` | 52,088,832 | `0befa003cccd1642f6581fa1c96818f81681b47a336a7093c83635307dba0322` |
+| `H96a7-payload.img` | 79,691,776 | `0313ac797d974c0ce968f1aecbf2718f3c70abd309c350a43372eba34a9e7336` |
+| `boot-H96a7-amfipath.img` | 81,147,904 | `413e2b50e0708827292aedd84b81b0243cea718f5160d6adbff11e203d3589b6` |
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。

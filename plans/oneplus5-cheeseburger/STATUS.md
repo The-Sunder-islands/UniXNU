@@ -1695,6 +1695,11 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   `__mac_syscall("AMFI",0x5f,...)` 路径；目标 driver 已在 loadable
   cache 命中，下一步优先查 AMFI IOKit user client / amfid / XPC 路径
   为什么不可用或未被 driverkitd 使用，而不是继续补 blob。
+- H96a7 已构建（AMFI IOKit service/user client 打点）：kernel
+  `0befa003...`、payload `0313ac79...`、boot
+  `413e2b50...`。driverkitd 调用 0x5f 时 panic 输出
+  `H96_AMFI_PATH: ... service=<0/1> uc_calls=<N>`，用于判断 AMFI
+  IOService/UserClient 是否可用。等待上机。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户
