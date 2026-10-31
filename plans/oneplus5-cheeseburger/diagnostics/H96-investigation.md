@@ -887,6 +887,45 @@ sheng-disable-jobs=com.apple.nsurlsessiond
 | `H96a12-payload.img` | 79,691,776 | `bd9a85b3377e2dd7fa0e5fa423bcb4026c82a23ebe79809d76defa7207b48e30` |
 | `boot-H96a12-no-nsurl.img` | 81,147,904 | `90812e490461cb0040619b419779e1f8bbbafde9864de4050c375ff641621204` |
 
+### 6.22 H96a12 结果：跳过 nsurlsessiond 后到达 backboardd，但停在第二次 driverkitd
+
+H96a12（`sheng-disable-jobs=com.apple.nsurlsessiond`）屏幕显示：
+
+```text
+NATIVE_EXEC: pid=55 comm=backboardd argv0=/usr/libexec/backboardd
+NATIVE_EXEC: pid=58 comm=sharingd
+NATIVE_EXEC: pid=60 comm=imagent
+NATIVE_EXEC: pid=67 comm=lockdownd
+KextLog: driverkitd is not active
+KextLog: Loading FileSet KC(s)
+KextLog: driverkitd is active
+```
+
+随后不再变化：
+
+- 已经启动 `backboardd`（显示后端）和 `sharingd`/`imagent`/`lockdownd`；
+- 但还没有 `SpringBoard`/`WindowServer`；
+- 停在第二次 `driverkitd is active` 之后，没有 UFS timeout。
+
+这说明跳过 `nsurlsessiond` 有效，系统继续到 backboardd；新的停点是
+**第二次 driverkitd/FileSet KC 阶段**。需要判断它是 launchd 的
+`com.apple.driverkitd` job 在等待，还是内核 kext/DriverKit 驱动加载。
+
+H96a13：复用 H96a11 kernel，只把 `sheng-disable-jobs` 扩展为：
+
+```text
+com.apple.nsurlsessiond,com.apple.driverkitd
+```
+
+如果跳过后能继续到 SpringBoard，说明第二次停点是 driverkitd job；
+如果仍在同样的 `KextLog` 处停住，则是内核 kext/驱动加载，需要转去
+driverkitd/AMFI 的第二目标。
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a13-payload.img` | 79,691,776 | `34573fe97814299d5b46be40692ba96be590f05c5a51a91c3d52e2201c07cdf6` |
+| `boot-H96a13-no-driverkitd.img` | 81,147,904 | `3c5fe7076238fb8794deaf752bedcb28e5ac3d5095fc49be64757a4762f9c697` |
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。

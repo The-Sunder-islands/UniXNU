@@ -1743,6 +1743,12 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   `sheng-disable-jobs=com.apple.nsurlsessiond`：payload
   `bd9a85b3...`、boot `90812e49...`。用于跳过该服务并观察是否继续到
   backboardd/SpringBoard。等待上机。
+- H96a12 已上机：跳过 nsurlsessiond 后启动到 `backboardd`、`sharingd`、
+  `imagent`、`lockdownd`，随后停在第二次 `driverkitd is active`，未到
+  SpringBoard/WindowServer；无 UFS timeout。当前最远用户态进度。
+- H96a13（同时跳过 nsurlsessiond 和 driverkitd job）已构建：payload
+  `34573fe9...`、boot `3c5fe707...`；用于判断第二次停点是 launchd job
+  还是内核 kext/驱动加载。等待上机。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户
