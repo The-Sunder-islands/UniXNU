@@ -1796,6 +1796,10 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
 - 结论：继续加 skip 不能解决；问题回到 SystemOS/Cryptex1/FileSet KC
   的真实 trust cache/owner manifest。下一步应打印完整 cdhash 并确认
   来源 cache，或做一次性 AuthAPFS/cryptexd 受控诊断，不得当作最终修复。
+- H96a20（完整 32 字节 AMFI 输入/返回 trace）已构建：kernel
+  `e7538cb9...`、payload `bef11b85...`、boot
+  `9a409302...`；用于确认 driverkitd 检查的完整 20 字节 cdhash 和
+  AMFI 返回位图。等待上机。
 - `NATIVE_AMFI_SYSCALL`/`NATIVE_TC_QUERY` 日志采集结果待补。
 - 下一步唯一优先事项：构建 H96a 独立镜像，payload 只追加
   `native-trace-amfi-syscall=1 native-trace-trust-cache=1`，由用户

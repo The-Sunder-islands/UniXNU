@@ -1161,6 +1161,32 @@ FileSet KC 的真实 trust cache/owner manifest** 方向：driverkitd 检查
 2. 作为一次性 bring-up 诊断，配合 AuthAPFS/cryptexd 的受控 patch
    验证 UI 路径，但必须明确不是最终安全方案。
 
+### 6.31 H96a20：完整 32 字节 AMFI 参数与返回结果
+
+H96a20 只改 trace，不 panic、不改 skip：
+
+- `NATIVE_AMFI_SYSCALL` 对 driverkitd 的 `call=0x5f` 打印完整 32 字节
+  输入参数，格式为 8 个 `%08x` 词：
+  ```text
+  ... in=wwwwwwwwwwwwwwww copied=1
+  ```
+  前 5 个词（20 字节）是待检查 cdhash，后 3 个词是元数据/结果位图。
+- `NATIVE_AMFI_RESULT` 在 `__mac_syscall` 返回后再次 copyin 同一 32 字节
+  并打印：
+  ```text
+  ... ret=<error> out=wwwwwwwwwwwwwwww copied=1
+  ```
+  这样可以确认 AMFI 实际返回的查询位图，而不是只看输入。
+
+H96a20 使用 H96a19 的 skip 列表（能到达四次 driverkitd 检查）和
+`cpus=2`，继续带 AMFI gate 跳过。
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `H96a20-kernel-gatebypass.macho` | 52,088,832 | `e7538cb9e022fcc5bad5241fb9e7610cd352dec0214c6fe7cdfc07afa398d90a` |
+| `H96a20-payload.img` | 79,691,776 | `bef11b854700493c89dd51792700d00f0b46ce9c802fe044c415baae880c8792` |
+| `boot-H96a20-fullcdhash.img` | 81,147,904 | `9a409302774277cf97c0209694104c7f08c2d16ed1df3193cb617f93ced59b88` |
+
 ### 6.5 回滚
 
 - 不覆盖 H91 boot/payload/kernel。
