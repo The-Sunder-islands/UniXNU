@@ -288,3 +288,64 @@ Finished. Total time: 11.848s
 设备随后离开 fastboot/USB，没有自动回到 fastboot。最终屏幕内容尚未采集，需要现场确认。
 
 观察目标：`NATIVE_PREBOOT: status=0 stage=5`、`NATIVE_H82_DATA: status=0 stage=4`、`NATIVE_ENV`，以及 launchd 是否越过 `driverkitd is active`。
+
+## 12. H103 首次上机结果（2026-11-01）
+
+最终屏关键日志：
+
+```text
+NATIVE_H81_SR: setup pid=1 files=54 mappings=62 ...
+NATIVE_H81_SR: cache mount differs from root mount, checking preboot
+NATIVE_H81_SR: preboot lookup error=0 cache_mount=... preboot_mount=...
+shared_region: ... [1(launchd)] map(... 'dyld_shared_cache_arm64'):
+  not on process' root volume nor preboot volume
+NATIVE_H81_SR: setup error=-1
+shared_region: ... vm_shared_region_start_address() failed
+dyld[1]: dyld cache '(null)' not loaded: syscall to map cache into shared region failed
+dyld[1]: DYLD_SHARED_CACHE_DIR=/System/Cryptexes/OS/System/Library/Caches/com.apple.dyld
+dyld[1]: Library not loaded: /usr/lib/libSystem.B.dylib
+```
+
+结论：
+
+1. **Preboot overlay 和 SystemOS 挂载已经生效**：`preboot lookup error=0`，`preboot_mount` 非空；`DYLD_SHARED_CACHE_DIR` 已是新的 `/System/Cryptexes/OS/...`。
+2. 失败点不是挂载，而是 `native_owner_shared_cache_carrier()`：
+   - 它硬编码 `directory = "/private/preboot/System/Library/Caches/com.apple.dyld"`；
+   - 当前 cache 实际在 `/private/preboot/Cryptexes/OS/System/Library/Caches/com.apple.dyld`；
+   - 因此 `owner_carrier=false`，随后 `preboot_vp` 的 mount 与 cache mount 不同，shared region 拒绝映射。
+3. 其余 launchd 退出是 dyld cache 失败的直接后果，不是新的独立错误。
+
+## 13. H103b 修复与构建
+
+修复：
+
+```c
+#if defined(XNU_OWNER_PREBOOT_LAYOUT) && XNU_OWNER_PREBOOT_LAYOUT
+	const char *directory = "/private/preboot/Cryptexes/OS/System/Library/Caches/com.apple.dyld";
+#else
+	const char *directory = "/private/preboot/System/Library/Caches/com.apple.dyld";
+#endif
+```
+
+同时：
+
+- `vm_unix.o` 增加 `-DXNU_OWNER_PREBOOT_LAYOUT`；
+- `vm_unix.o` 的 stamp 包含 preboot layout，切换时强制重编；
+- `zzzz-owner-preboot-layout.patch` 加入 `LATE_PATCH` 反应用列表，避免先反 `zzz-shared-region-cache-bypass` 后破坏本补丁上下文。
+
+H103b 产物：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| kernel | `399ecaa2fec9ecfab5021df2d7e85cff1017b6d309f8e036e1849881b99ba816` |
+| payload | `d3d7df410cde3134e4bc97469c9a8d2449cf631f6bbca7358443b2f6929596d0` |
+| boot | `3a0f6f196482c382bcb9c82dbf162a046a4dc2d8261682adde8a1fb7329c7566` |
+
+本地路径：
+
+```text
+/home/ls/UniXNU-cheeseburger/out/cheeseburger/boot/boot-H103b-preboot.img
+/home/ls/UniXNU-cheeseburger/out/cheeseburger/boot/payload-H103b-preboot.img
+```
+
+下一次上机重点：确认 `owner_carrier` 放行后 shared region 映射成功，dyld 能加载 `/usr/lib/libSystem.B.dylib`。
