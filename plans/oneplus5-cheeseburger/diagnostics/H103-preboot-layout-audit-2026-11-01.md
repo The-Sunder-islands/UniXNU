@@ -520,3 +520,57 @@ Windows 路径：
 ```text
 D:\Users\ls\Documents\OnePlus5_ios\boot-H103e-preboot.img
 ```
+
+## 19. H103f：tzinit 数据集布局 + Data 诊断（2026-11-01）
+
+H103d 的 `tzinit` 报：
+
+```text
+tzinit: Unable to create directory with attributes: Read-only file system
+tzinit: Last resort force_system_dataset() failed: Read-only file system
+```
+
+为一次拿到两件事的证据，H103f 在 H103e 诊断内核基础上，把 Data seed 的时区布局改成 tzinit 期望的版本化数据集：
+
+```text
+/private/var/db/timezone/
+  tz/44l/zoneinfo/...
+  tz_latest -> tz/44l
+  zoneinfo -> tz_latest/zoneinfo
+  icutz -> /usr/share/icu
+  localtime -> /var/db/timezone/zoneinfo/US/Pacific
+```
+
+数据来自 OS root 的 `/usr/share/zoneinfo.default`（602 个文件，`+VERSION` = `44l`）。
+
+H103f Data seed：
+
+```text
+UUID    1A4CE9DF-34B6-4B52-9744-5052A9D20B23
+packed  699c39b26147386d7cd8adcf7d549d3db318ff4d52512dca00cffa8adb70ca54
+```
+
+H103f 产物：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| kernel | `509800409818abf4ae9ed9c19e694b5c6170bb99d826e668c6da8967c2263275` |
+| payload | `ede0771652453e29fcef0d13c5b86bd68fb7c3a0e0003169ef2bbbe6ed70adfc` |
+| boot | `5b4ed54041d13e27dfa3f69c637087ba0414c1a23ec4c2f918489354337cd613` |
+
+已从 Windows boot：
+
+```text
+fastboot boot "D:\Users\ls\Documents\OnePlus5_ios\boot-H103f-preboot.img"
+Sending ... OKAY
+Booting   OKAY
+```
+
+若 `tzinit` 仍失败，屏幕会出现：
+
+```text
+NATIVE_H103_DATA: status=... ro=... dev=...
+NATIVE_H103_VAR: flags=... fstype=...
+```
+
+据此可直接判断是 Data 挂载问题还是 tzinit 路径问题。

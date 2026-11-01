@@ -59,17 +59,26 @@ if args.skeleton:
                      'containers/Shared', 'containers/Shared/SystemGroup', 'PersonaVolumes'):
             (target / name).mkdir(parents=True, exist_ok=True)
         os.chmod(target / 'tmp', 0o1777)
-        # tzinit needs /private/var/db/timezone/zoneinfo. The OS root has the
-        # read-only zoneinfo.default tree; copy it into the writable Data seed.
-        zoneinfo = target / 'db/timezone/zoneinfo'
+        # tzinit expects the versioned dataset layout below /private/var/db/timezone.
+        # The OS root has the read-only zoneinfo.default tree; copy it into the
+        # writable Data dataset and point the managed symlinks at it.
+        timezone = target / 'db/timezone'
         source_zoneinfo = args.os_mount.resolve() / 'usr/share/zoneinfo.default'
+        version_file = source_zoneinfo / '+VERSION'
+        version = version_file.read_text().strip() if version_file.is_file() else 'system'
+        dataset = timezone / 'tz' / version / 'zoneinfo'
         if source_zoneinfo.is_dir():
-            shutil.copytree(source_zoneinfo, zoneinfo, symlinks=True)
-        elif not zoneinfo.exists():
-            os.symlink('/usr/share/zoneinfo.default', zoneinfo)
-        localtime = target / 'db/timezone/localtime'
-        if not localtime.exists() and not localtime.is_symlink():
-            os.symlink('/var/db/timezone/zoneinfo/US/Pacific', localtime)
+            shutil.copytree(source_zoneinfo, dataset, symlinks=True)
+        elif not dataset.exists():
+            os.symlink('/usr/share/zoneinfo.default', dataset)
+        for link, target_path in (
+                (timezone / 'tz_latest', 'tz/' + version),
+                (timezone / 'zoneinfo', 'tz_latest/zoneinfo'),
+                (timezone / 'icutz', '/usr/share/icu'),
+                (timezone / 'localtime', '/var/db/timezone/zoneinfo/US/Pacific')):
+            if link.exists() or link.is_symlink():
+                link.unlink()
+            os.symlink(target_path, link)
         if args.preboot_overlay:
             source = args.preboot_overlay.resolve()
             if not (source / 'cryptex1/current').is_dir() or not (source / 'Cryptexes').is_dir():
