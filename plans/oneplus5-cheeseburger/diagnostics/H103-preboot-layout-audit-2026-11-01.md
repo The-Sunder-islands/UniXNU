@@ -1110,3 +1110,25 @@ D:\Users\ls\Documents\OnePlus5_ios\boot-H103m3-dkdirs.img
 ```
 
 已 boot。判读：driverkitd 是否不再反复 FileSet KC，或是否出现新的 approvals/state 错误。
+
+## 35. H103m3 结果：driverkitd Data 目录后用户态明显前进（2026-11-02）
+
+H103m3 最终屏出现大量新的 `NATIVE_EXEC`，包括一批此前没有的服务（截图可辨识的有 `pkd`、`securityd`、`authd`、`ctkd`、`cloudpaird`、`mobileassetd`、`distnoted` 等），同时仍有：
+
+```text
+NATIVE_UFS_WINDOW: SystemOS ... caller=driverkitd/62
+```
+
+说明：
+
+- 补 `/private/var/db/driverkitd`、`KernelExtensionManagement/Staging`、`tmp/com.apple.driverkitd/DriverExtensions` 后，launchd 明显继续启动更多用户态服务；
+- `driverkitd/62` 仍在读 SystemOS，FileSet KC 可能仍在后台完成；
+- 最终是否停住、cryptexd 是否出现，需要下一张更清晰的屏幕确认。
+
+H103m3 产物：
+
+```text
+kernel b0fb38e9116c7c941b41ee77bac89f5ed704e58f4acb65a75063f5c35baf77d1
+payload 29fde9c74340df404f6d2e65c2cd6bed475cb3e947e9cf02a3f0edb065d297c5
+boot   62ce9ab467427a8f99ee2f67aeca9b9a689fe972878b8f8a787dfff32edcc435
+```
