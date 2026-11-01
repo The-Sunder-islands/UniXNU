@@ -812,3 +812,50 @@ D:\Users\ls\Documents\OnePlus5_ios\boot-H103j-rootunion.img
 
 - `NATIVE_H103_ROOT_UNION: 0` 且 driverkitd 不再 stall、cryptexd 出现 → root union 是缺失项；
 - root union 失败或 driverkitd 仍 stall → 需要转向 FileSet KC/UFS 读路径。
+
+## 27. H103j 失败原因与 H103k 修复（2026-11-02）
+
+H103j 上机停在：
+
+```text
+NATIVE_H82_DATA: status=2 stage=0 ro=-1 dev=-1 size=0
+panic: offline scratch Data mount failed: 2
+```
+
+原因仍是 UUID：远程 `run-h103-build.sh` 中 `XNU_OWNER_DATA_VOLUME_UUID` 被恢复成旧值：
+
+```text
+95BE5FCF-BCA7-49C2-80C5-A7BE97DEF40A
+```
+
+而 Data seed 是：
+
+```text
+1A4CE9DF-34B6-4B52-9744-5052A9D20B23
+```
+
+H103k 修复：
+
+- 内核 UUID 改为 `1A4CE9DF-34B6-4B52-9744-5052A9D20B23`；
+- 强制重编 `kern_exec.o`；
+- 保留 `XNU_OWNER_PREBOOT_ROOT_UNION=1`。
+
+H103k 产物：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| kernel | `ca2f40bf8d5e96c0d2619098fd11eb62461e15d4e860f1adab148fedae1c809f` |
+| payload | `0fdf0f4d630d6ff3c13c9c41851cbcb8d99cc90f894fb7024a6ddc59ae6ea760` |
+| boot | `235bdd25e322c3f6f086f741d4dda429ee06fab02a6c8db0e4215fe038044882` |
+
+Windows 路径：
+
+```text
+D:\Users\ls\Documents\OnePlus5_ios\boot-H103k-rootunion.img
+```
+
+已 boot，等待：
+
+```text
+NATIVE_H103_ROOT_UNION: 0
+```
