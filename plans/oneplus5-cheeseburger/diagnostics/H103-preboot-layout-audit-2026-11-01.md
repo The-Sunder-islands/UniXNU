@@ -1175,3 +1175,41 @@ kernel b0fb38e9...
 payload 29fde9c7...
 boot   62ce9ab4...
 ```
+
+## 37. H103m3 最终结果：SpringBoard 已启动（2026-11-02）
+
+最终屏明确出现：
+
+```text
+NATIVE_UFS_WINDOW: SystemOS req=33792 block=f8320 count=8
+  abs=17f540000 lba=19d5a4 caller=SpringBoard/27
+
+NATIVE_UFS_WINDOW: SystemOS req=33792 done=4096 ok=1
+  ticks=93 read=0 write=82 abs=17f540000 lba=19d5a4 caller=SpringBoard/27
+```
+
+同时还有：
+
+```text
+NATIVE_UFS_WINDOW: SystemOS ... caller=driverkitd/62
+```
+
+结论：
+
+- **H103m3 首次到达 SpringBoard**，已经越过 H96a18 的 cryptexd/eligibilityd 停点；
+- `driverkitd` 仍在后台读 SystemOS，但不再是唯一停点；
+- 最终没有桌面/UI，是因为当前构建仍关闭显示：
+  ```text
+  XNU_NATIVE_MOBILE_DISPLAY=0
+  XNU_NATIVE_ADRENO=0
+  XNU_NATIVE_LEGACY_DISPLAY=0
+  ```
+- 下一步从 cryptexd/FileSet KC 转向 **显示/WindowServer/backboardd**。
+
+H103m3 是当前最远基线：
+
+```text
+kernel b0fb38e9...
+payload 29fde9c7...
+boot   62ce9ab4...
+```
