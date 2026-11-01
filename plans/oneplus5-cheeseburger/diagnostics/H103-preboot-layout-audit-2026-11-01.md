@@ -1069,3 +1069,44 @@ H103m2 是当前最好的诊断基线：
 kernel b0fb38e9...
 boot   45163f34...
 ```
+
+## 34. H103m3：补齐 driverkitd Data 目录（2026-11-02）
+
+`driverkitd` 二进制配置要求：
+
+```text
+ThirdPartyDriverKitStagingDirectory = /private/var/db/driverkitd/SystemExtensions
+ApprovalsDatabasePath               = /private/var/db/driverkitd/driver-approvals.plist
+ApplicationCachePath                = /private/var/db/driverkitd/applications.plist
+KernelExtensionManagement Staging   = /private/var/db/KernelExtensionManagement/Staging
+```
+
+原 Data skeleton 没有 `db/driverkitd` 和 `db/KernelExtensionManagement`。H103m3 在不改变 Data UUID 的前提下，直接把下面目录加进 `owner-data-fixture3` 的 APFS：
+
+```text
+/private/var/db/driverkitd/SystemExtensions
+/private/var/db/KernelExtensionManagement/Staging
+/private/var/tmp/com.apple.driverkitd/DriverExtensions
+```
+
+新 packed Data seed：
+
+```text
+sha256 af96cfdf13e41bd74c71810da8fe4a1338393d3b766ab39faf0e1bc2402cd475
+```
+
+H103m3 产物（内核沿用 H103m2）：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| kernel | `b0fb38e9116c7c941b41ee77bac89f5ed704e58f4acb65a75063f5c35baf77d1` |
+| payload | `29fde9c74340df404f6d2e65c2cd6bed475cb3e947e9cf02a3f0edb065d297c5` |
+| boot | `62ce9ab467427a8f99ee2f67aeca9b9a689fe972878b8f8a787dfff32edcc435` |
+
+Windows 路径：
+
+```text
+D:\Users\ls\Documents\OnePlus5_ios\boot-H103m3-dkdirs.img
+```
+
+已 boot。判读：driverkitd 是否不再反复 FileSet KC，或是否出现新的 approvals/state 错误。
