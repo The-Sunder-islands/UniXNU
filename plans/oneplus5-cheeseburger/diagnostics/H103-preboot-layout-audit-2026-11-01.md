@@ -427,3 +427,50 @@ H103c 产物（内核沿用 H103b）：
 - 镜像存放目录：`D:\Users\ls\Documents\OnePlus5_ios`。
 - 后续每轮：macOS 构建 → HTTP/文件传输到 Windows 目录 → Windows 上 `fastboot boot`。
 - 不在仓库记录 Windows 密码。
+
+## 17. H103c 上机结果与 H103d 修复（2026-11-01）
+
+H103c 已经越过 root/launchd 前置阶段，但 Data mount 失败：
+
+```text
+NATIVE_ROOT_BYPASS: auth=80
+NATIVE_H82_DATA: status=2 stage=0 ro=-1 dev=-1 size=0
+panic: offline scratch Data mount failed: 2
+```
+
+`status=2` 是 `ENOENT`，`stage=0` 表示还没进入设备查找。原因是 H103c 只重新打了 payload/Data seed，内核仍编译旧 UUID：
+
+```text
+kernel: 95BE5FCF-BCA7-49C2-80C5-A7BE97DEF40A
+Data:   9E4EDD86-20C5-44A5-A964-35D291D7D956
+```
+
+H103d 修复：
+
+- 内核 `XNU_OWNER_DATA_VOLUME_UUID` 改为 `9E4EDD86-20C5-44A5-A964-35D291D7D956`；
+- 强制重编 `kern_exec.o`；
+- 继续使用 H103c 的 timezone Data seed。
+
+H103d 产物：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| kernel | `2fcb8b5f2173e8b39403ed3f80075e984b0baaaeb4eadf728782d646e8514224` |
+| payload | `79240916039008f433b631e1b37575a46a6dae99103a61f89afc966fd71c5692` |
+| boot | `219236da0e7b7336b691e831fd71e844126221b857bbc0d4e37bb998cd130e75` |
+
+Windows 目录：
+
+```text
+D:\Users\ls\Documents\OnePlus5_ios\boot-H103d-preboot.img
+```
+
+已在 Windows 上执行：
+
+```text
+fastboot boot "D:\Users\ls\Documents\OnePlus5_ios\boot-H103d-preboot.img"
+Sending ... OKAY
+Booting   OKAY
+```
+
+等待最终屏幕确认 Data mount 和 tzinit。
