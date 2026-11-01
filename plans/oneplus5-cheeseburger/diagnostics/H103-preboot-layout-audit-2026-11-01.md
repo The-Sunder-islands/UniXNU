@@ -276,10 +276,15 @@ NATIVE_PREBOOT: status=%d stage=%d
 DYLD_SHARED_CACHE_DIR=/System/Cryptexes/OS/System/Library/Caches/com.apple.dyld
 ```
 
-尚未上机。下一步：
+已上机：
 
-```sh
+```text
 fastboot boot out/cheeseburger/boot/boot-H103-preboot.img
+Sending 'boot.img' (79246 KB)  OKAY
+Booting                        OKAY
+Finished. Total time: 11.848s
 ```
 
-观察 `NATIVE_PREBOOT: status=0 stage=5`、`NATIVE_H82_DATA: status=0 stage=4`、`NATIVE_ENV`，以及 launchd 是否越过 `driverkitd is active`。
+设备随后离开 fastboot/USB，没有自动回到 fastboot。最终屏幕内容尚未采集，需要现场确认。
+
+观察目标：`NATIVE_PREBOOT: status=0 stage=5`、`NATIVE_H82_DATA: status=0 stage=4`、`NATIVE_ENV`，以及 launchd 是否越过 `driverkitd is active`。
