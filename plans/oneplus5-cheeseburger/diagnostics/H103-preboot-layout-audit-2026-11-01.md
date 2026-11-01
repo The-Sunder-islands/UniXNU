@@ -574,3 +574,57 @@ NATIVE_H103_VAR: flags=... fstype=...
 ```
 
 据此可直接判断是 Data 挂载问题还是 tzinit 路径问题。
+
+## 20. H103f 上机结果：tzinit 通过，回到 driverkitd（2026-11-01）
+
+H103f 最终屏不再出现 `tzinit` 错误，launchd boot task 序列继续；最后可见：
+
+```text
+KextLog: Loading FileSet KC(s)
+KextLog: driverkitd is active
+NATIVE_UFS_PROGRESS: ... lastWin=OS/SystemOS ...
+```
+
+没有 panic，没有自动回到 fastboot。说明：
+
+- Preboot/Cryptex 布局 + owner carrier + dyld cache + tzinit 都已通过；
+- 新停点回到旧的 `FileSet KC` / `driverkitd is active`；
+- 当前内核没有 `NATIVE_EXEC` 日志，无法确认 `cryptexd`/`eligibilityd` 是否启动、是否退出。
+
+H103f 产物：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| kernel | `509800409818abf4ae9ed9c19e694b5c6170bb99d826e668c6da8967c2263275` |
+| payload | `ede0771652453e29fcef0d13c5b86bd68fb7c3a0e0003169ef2bbbe6ed70adfc` |
+| boot | `5b4ed54041d13e27dfa3f69c637087ba0414c1a23ec4c2f918489354337cd613` |
+
+## 21. H103g：进程/退出观测（2026-11-01）
+
+新增 `zzzzzz-h103-proc-diag.patch`：
+
+- `NATIVE_EXEC: pid=... ppid=... comm=... argv0=... argv1=...`
+- 对 `cryptexd`/`eligibilityd`/`launchd`/`xpcproxy`/`driverkitd`/`backboardd` 记录：
+  ```text
+  NATIVE_EXIT: pid=... ppid=... comm=... status=... ns=... code=...
+  ```
+
+H103g 产物：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| kernel | `397637af7df6841a50f67e841b471d632f56b6e5c67db06980ddf5b11b60d910` |
+| payload | `eef3bea8407ed55d9c8722947cbb3f10f513edb91c19c658b784117ef74710b9` |
+| boot | `7b60d3fdd4d876e69cfd324f562bf87db614fb2d46a6ac8c2de96ee6370e1aa5` |
+
+Windows 路径：
+
+```text
+D:\Users\ls\Documents\OnePlus5_ios\boot-H103g-preboot.img
+```
+
+下一步 boot H103g，确认：
+
+1. `cryptexd`、`eligibilityd` 是否出现 `NATIVE_EXEC`；
+2. 是否出现 `NATIVE_EXIT`；
+3. `driverkitd` 是否在等某个 `FileSet KC` kext。

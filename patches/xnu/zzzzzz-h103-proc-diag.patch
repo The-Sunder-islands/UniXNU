@@ -1,0 +1,68 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -943,6 +943,18 @@
+ 	bcopy((caddr_t)imgp->ip_ndp->ni_cnd.cn_nameptr, (caddr_t)p->p_comm,
+ 	    (unsigned)imgp->ip_ndp->ni_cnd.cn_namelen);
+ 	p->p_comm[imgp->ip_ndp->ni_cnd.cn_namelen] = '\0';
++	{
++		const char *h96_a0 = imgp->ip_startargv;
++		const char *h96_a1 = NULL;
++		if (h96_a0 && h96_a0 < imgp->ip_endargv) {
++			size_t h96_n = strnlen(h96_a0, (size_t)(imgp->ip_endargv - h96_a0));
++			if (h96_a0 + h96_n + 1 < imgp->ip_endargv) {
++				h96_a1 = h96_a0 + h96_n + 1;
++			}
++		}
++		printf("NATIVE_EXEC: pid=%d ppid=%d comm=%s argv0=%s argv1=%s\n",
++		    proc_getpid(p), p->p_ppid, p->p_comm, h96_a0 ? h96_a0 : "", h96_a1 ? h96_a1 : "");
++	}
+ 
+ #if DEVELOPMENT || DEBUG
+ 	/*
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -1508,6 +1509,33 @@
+ }
+ 
+ /*
++ * H103 diagnostic only: record selected process exits. This does not alter
++ * exit status, signals, launchd behavior or any verification path.
++ */
++static void
++native_trace_process_exit(proc_t p, int rv, struct os_reason *reason)
++{
++	const char *comm = p->p_comm;
++	uint32_t ns = 0;
++	uint64_t code = 0;
++
++	if (strcmp(comm, "cryptexd") != 0 && strcmp(comm, "eligibilityd") != 0 &&
++	    strcmp(comm, "launchd") != 0 && strcmp(comm, "xpcproxy") != 0 &&
++	    strcmp(comm, "driverkitd") != 0 && strcmp(comm, "backboardd") != 0) {
++		return;
++	}
++	if (reason == OS_REASON_NULL) {
++		reason = p->p_exit_reason;
++	}
++	if (reason != OS_REASON_NULL) {
++		ns = reason->osr_namespace;
++		code = reason->osr_code;
++	}
++	printf("NATIVE_EXIT: pid=%d ppid=%d comm=%s status=0x%x ns=%u code=0x%llx\n",
++	    proc_getpid(p), p->p_ppid, comm, rv, ns, (unsigned long long)code);
++}
++
++/*
+  * NOTE: exit_with_reason drops a reference on the passed exit_reason
+  */
+ int
+@@ -1520,6 +1548,8 @@
+ 	int error = 0;
+ 	bool proc_exiting = false;
+ 
++	native_trace_process_exit(p, rv, exit_reason);
++
+ #if DEVELOPMENT || DEBUG
+ 	/*
+ 	 * Debug boot-arg: panic here if matching process is exiting with non-zero code.
