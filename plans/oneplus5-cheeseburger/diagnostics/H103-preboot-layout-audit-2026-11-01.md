@@ -684,3 +684,65 @@ D:\Users\ls\Documents\OnePlus5_ios\boot-H103h-preboot.img
 ```
 
 已在 Windows boot。下一步等待 90 秒后的 `NATIVE_PROC` 输出，确认 `cryptexd`/`eligibilityd`/`driverkitd` 的实际 PID 和父进程。
+
+## 23. H103h 进程快照结果（2026-11-01）
+
+H103h 的 `thread_call` 快照没有在最终屏出现；屏幕在 3 分钟内只持续输出：
+
+```text
+NATIVE_UFS_WINDOW: SystemOS ...
+NATIVE_UFS_PROGRESS: ... lastWin=SystemOS ... winBytes≈3.2 GiB ... winFlight=1
+```
+
+没有 `NATIVE_PROC_BEGIN`/`NATIVE_PROC_END`/panic。可能原因：
+
+- `thread_call` 没有在这个停点执行（或输出被刷掉）；
+- 或系统停在 UFS 读，快照线程也无法输出。
+
+H103g 的 exec 日志已经确认：
+
+```text
+driverkitd
+AppleCredentialManager
+rapportd
+useractivityd
+fseventsd
+IOHFB_FDR_Loader
+xpcproxy/logd_helper
+logd_helper
+```
+
+之后没有 `cryptexd`/`eligibilityd`，也没有 `NATIVE_EXIT`。
+
+## 24. H103i：一次性跳过 driverkitd 的诊断（2026-11-01）
+
+为了判断 launchd 是否卡在 `driverkitd`，H103i 只改 payload，不重建内核：
+
+```text
+sheng-disable-jobs=...,com.apple.driverkitd
+```
+
+内核仍是 H103h：
+
+```text
+kernel f9b73b9c4d268df4224dfd38aa13b50ae048f32ff216b91b76c12f64da7f60c2
+```
+
+H103i 产物：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| payload | `2aefb03b484878d159ed3cb097818c9f1357401f9102b18483d65c2208b1b721` |
+| boot | `7129e8b85a340a0f3ee2eb353486b1041f54f089009e2fb46994e7b54a1a6646` |
+
+Windows 路径：
+
+```text
+D:\Users\ls\Documents\OnePlus5_ios\boot-H103i-skipdk.img
+```
+
+这是**一次性诊断**，不是修复。判读：
+
+- 若跳过 driverkitd 后出现 `cryptexd`/`eligibilityd`，说明 launchd 在等 driverkitd；
+- 若更早 panic/停止，说明 driverkitd 是必需服务，回到 UFS/FileSet KC 路径；
+- 无论结果，后续都不把该 skip 当作最终方案。
