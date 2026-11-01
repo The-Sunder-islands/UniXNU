@@ -978,3 +978,44 @@ D:\Users\ls\Documents\OnePlus5_ios\boot-H103m2-ufscaller.img
 - 若持续 SystemOS 读的 `caller=driverkitd/<pid>`，说明 driverkitd 在扫描/加载 FileSet KC；
 - 若 `caller=launchd/<pid>`，说明 launchd 在等文件；
 - 若 `caller=kernel_task/0`，说明是 pagein/内核预读，不是用户态主动读。
+
+## 32. H103m2 结果：UFS 调用者确认是 driverkitd（2026-11-02）
+
+H103m2 最终屏出现了 caller 字段：
+
+```text
+NATIVE_UFS_WINDOW: SystemOS req=53248 block=c4ea8 count=8 abs=17f540000 lba=19f715 caller=driverkitd/62
+NATIVE_UFS_WINDOW: SystemOS req=53248 done=4096 ok=1 ticks=86
+  read=0 write=73 abs=17f540000 lba=19f715 caller=driverkitd/62
+
+KextLog: driverkitd is not active
+KextLog: Loading FileSet KC(s)
+KextLog: driverkitd is active
+NATIVE_UFS_PROGRESS: ... winBytes=3233879040 winFlight=1 lastWin=SystemOS
+```
+
+同时还能看到：
+
+```text
+caller=MobileGestaltHelper/86
+```
+
+结论：
+
+- **持续读 SystemOS 的是 `driverkitd`（PID 62）**，不是 launchd/kernel_task；
+- `driverkitd` 正在加载 FileSet KC，读的是 SystemOS 窗口；
+- `driverkitd is not active -> Loading FileSet KC(s) -> driverkitd is active` 说明它在 FileSet KC 流程中；
+- 之后没有 `cryptexd`/`eligibilityd`，launchd 很可能在等 FileSet KC/ driverkitd 完成。
+
+H103m2 产物：
+
+```text
+kernel b0fb38e9116c7c941b41ee77bac89f5ed704e58f4acb65a75063f5c35baf77d1
+boot   45163f34c59447802c97826eba48f53ec49e73d2adda114f1842ad72732ffa36
+```
+
+下一步：
+
+- 若 UFS 读仍在推进，等待 FileSet KC 完成；
+- 若停住，需要 UFS 请求级 stall/panic 或定位 FileSet KC 的具体路径/文件；
+- 不再尝试 root union。
