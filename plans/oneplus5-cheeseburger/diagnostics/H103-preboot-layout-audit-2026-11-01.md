@@ -942,3 +942,39 @@ root union 两条路都失败：
 - 在 `NativeUfsProbe::readWindowBulk`/`NATIVE_UFS_WINDOW` 增加调用者 PID/comm；
 - 或在 driverkitd exec 后调度一个 **panic 进程快照**，确保输出不被滚屏；
 - 不再尝试 root union、不再新增 cryptexd/eligibilityd skip。
+
+## 31. H103m2：UFS 调用者 PID/comm 追踪（2026-11-02）
+
+回到 H103g 无 root union 基线，给 `NativeUfsProbe` 的窗口日志加调用者：
+
+```text
+NATIVE_UFS_WINDOW: ... caller=<comm>/<pid>
+```
+
+首次构建时 archive 是旧的（`build/native-ufs-probe` 未重建），预链接内核里仍是旧格式；H103m2 手工执行：
+
+```sh
+python3 scripts/build-arm-driver.py NativeUfsProbe
+```
+
+后重新链接，预链接内核已包含 `caller=%s/%d`。
+
+H103m2 产物：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| kernel | `b0fb38e9116c7c941b41ee77bac89f5ed704e58f4acb65a75063f5c35baf77d1` |
+| payload | `3276752c39055a14013bf1e5ca59f00714349a60f9a1a8cc62b1184739cae153` |
+| boot | `45163f34c59447802c97826eba48f53ec49e73d2adda114f1842ad72732ffa36` |
+
+Windows 路径：
+
+```text
+D:\Users\ls\Documents\OnePlus5_ios\boot-H103m2-ufscaller.img
+```
+
+已 boot。判读：
+
+- 若持续 SystemOS 读的 `caller=driverkitd/<pid>`，说明 driverkitd 在扫描/加载 FileSet KC；
+- 若 `caller=launchd/<pid>`，说明 launchd 在等文件；
+- 若 `caller=kernel_task/0`，说明是 pagein/内核预读，不是用户态主动读。
