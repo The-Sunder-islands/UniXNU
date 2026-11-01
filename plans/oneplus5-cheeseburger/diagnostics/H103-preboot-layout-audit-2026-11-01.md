@@ -1213,3 +1213,60 @@ kernel b0fb38e9...
 payload 29fde9c7...
 boot   62ce9ab4...
 ```
+
+## 38. H103n：OP5 原始 Legacy Framebuffer 首次编入内核（2026-11-02）
+
+### ABI 审计结果
+
+OP5 21H461 原始 kernelcache 中的 `com.apple.iokit.IOMobileGraphicsFamily`：
+
+```text
+__TEXT_EXEC 0xfffffff00676c000 size 0x36f74
+SHA-256    2e044ee68c1650397e1435234ca6459206262e4c7ed709cb7131c6f664f9bd9b
+```
+
+该 executable 与 sheng 参考中的 family 完全相同；OP5 的 prelink slide 为
+`0x5000000`，因此 native kernel 中的地址为原始地址 + `0x5000000`：
+
+```text
+Legacy constructor 0xfffffff0067865d8 -> 0xfffffff00b7865d8
+Legacy vtable      0xfffffff006f38560 -> 0xfffffff00bf38560
+gMetaClass         0xfffffff007b35940 -> 0xfffffff00cb35940
+abstract slots     211,213,245,246,306,307,337,338,345
+instance bytes     0x18a0
+```
+
+### 新增构建
+
+- `board.toml` roots 增加 `com.apple.iokit.IOMobileGraphicsFamily`；prelink 自动拉入
+  `IOSurface`、`IOAVFamily`、`AppleM2ScalerCSCDriver`，共 29 个 component。
+- `scripts/audit-mobile-graphics-legacy-op5.py`：从 21H461 kernelcache 定位
+  constructor/vtable/abstract slots。
+- `scripts/build-op5-legacy-display.py`：生成 `OriginalLegacyFramebufferABI.h`，
+  编译 `NativeLegacyDisplay`/`NativeGOPPresenter`/`LegacyDisplayProbe`，绑定原始
+  family/IOSurface 符号，产出 `libNativeLegacyDisplay.late.a`。
+- `XNU_NATIVE_LEGACY_DISPLAY=1` 链接该 archive。
+- H103n 启动参数新增：
+  ```text
+  offline-mobile-graphics-load=1
+  offline-legacy-gop=1
+  offline-legacy-phase=4
+  offline-legacy-register=1
+  offline-legacy-validate=1
+  offline-legacy-transfer=1
+  offline-legacy-retire=1
+  offline-legacy-pm=1
+  ```
+
+### H103n 产物
+
+```text
+kernel  e3b3c356ff18c98a0365d2fd0b0c225496c181595a77ad87858e9bf8890a395c
+payload f66dcdec71bf1d34ba6b5a22c0876df6e1e19a30b4a779274b7d223feaf02acf
+boot    05e184d1e64a4a2a0a2295d0c1ade10b66e3d82785c98bde62dc9cdb1d58bc21
+archive 0326dcadb64d515b03ecaaf8344dbb593d5dc9afa0ce46477369f94201c42260
+```
+
+boot 镜像已传至 Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H103n-legacy.img`，
+并已 `fastboot boot`。下一步看屏幕是否出现 `NativeLegacyDisplay` stage、
+`backboardd`/`WindowServer`，或 display guard panic。
