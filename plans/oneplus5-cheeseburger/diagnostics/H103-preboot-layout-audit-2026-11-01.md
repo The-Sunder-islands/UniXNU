@@ -898,3 +898,47 @@ D:\Users\ls\Documents\OnePlus5_ios\boot-H103l-rootbindfs.img
 - `NATIVE_H103_ROOT_UNION: 0` 且 driverkitd 不再 stall → root bindfs 是缺失项；
 - 非 0 → bindfs mount 失败，查 entitlement/源路径；
 - 0 但仍 stall → driverkitd 的 FileSet KC 不是 root 视图问题，转 UFS/FileSet KC 调用链。
+
+## 29. H103l 失败：bindfs root union 破坏 dyld/launchd（2026-11-02）
+
+H103l 没有出现 `NATIVE_H103_ROOT_UNION`，而是 launchd 直接退出：
+
+```text
+NATIVE_LAUNCHD_ABORT_DESC: Library not loaded: /usr/lib/libSystem.B.dylib
+  Referenced from: <...>/sbin/launchd
+  Reason: tried: '/usr/lib/libSystem.B.dylib' (no such file, no dyld cache)
+NATIVE_EXIT: pid=1 ppid=0 comm=launchd status=0x6 ns=6 code=0x1
+pid 1 exited -- exit reason namespace 6 subcode 0x1
+```
+
+结论：
+
+- **bindfs root union 不可用**：它破坏了 root `/usr/lib` / dyld cache 的可见性或 root 卷判断；
+- H103l 是回归，不能作为后续基线；
+- 回退到 H103f/H103g（Preboot/Cryptex 挂载，不做 root union）。
+
+H103l 产物仅保留作失败记录：
+
+```text
+kernel eaa1dbd6060a597af4c910b22475a687a37323a7eb9498333ac1bb86d0fae787
+boot   b9163e77b30bd473ace944225663ed3467da38387508836944e1b20bda92f2fa
+```
+
+## 30. 后续方向
+
+root union 两条路都失败：
+
+- APFS 二次 mount：driverkitd 仍停在 FileSet KC；
+- bindfs root union：launchd 找不到 libSystem/dyld cache。
+
+当前应回到 **无 root union 的 H103g 基线**，集中解决：
+
+1. `driverkitd` 的 FileSet KC 到底在等哪个文件/服务；
+2. 为什么它持续读 SystemOS/OS UFS 而没有新的 exec；
+3. `cryptexd` 是否依赖 driverkitd 的 Mach service。
+
+下一步只做读/追踪，不改变挂载布局：
+
+- 在 `NativeUfsProbe::readWindowBulk`/`NATIVE_UFS_WINDOW` 增加调用者 PID/comm；
+- 或在 driverkitd exec 后调度一个 **panic 进程快照**，确保输出不被滚屏；
+- 不再尝试 root union、不再新增 cryptexd/eligibilityd skip。
