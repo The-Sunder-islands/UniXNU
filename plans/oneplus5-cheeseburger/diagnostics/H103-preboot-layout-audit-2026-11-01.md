@@ -746,3 +746,69 @@ D:\Users\ls\Documents\OnePlus5_ios\boot-H103i-skipdk.img
 - 若跳过 driverkitd 后出现 `cryptexd`/`eligibilityd`，说明 launchd 在等 driverkitd；
 - 若更早 panic/停止，说明 driverkitd 是必需服务，回到 UFS/FileSet KC 路径；
 - 无论结果，后续都不把该 skip 当作最终方案。
+
+## 25. H103i 结果：跳过 driverkitd 会继续，但仍无 cryptexd（2026-11-01）
+
+H103i（唯一变量：`sheng-disable-jobs=...,com.apple.driverkitd`）的最终屏：
+
+```text
+NATIVE_EXEC: pid=93 ppid=1 comm=livedriven
+NATIVE_EXEC: pid=94 ppid=1 comm=xpcproxy argv1=com.apple.coresymbolicationd
+NATIVE_EXEC: pid=95 ppid=1 comm=xpcproxy argv1=com.apple.donotdisturbd
+NATIVE_EXEC: pid=97 ppid=1 comm=donotdisturbd
+NATIVE_EXEC: pid=99 ppid=1 comm=... datanator / dataaccess
+NATIVE_H66_FCNTL ...
+NATIVE_CACHE_SIG: ...
+NATIVE_UFS_PROGRESS ...
+```
+
+结论：
+
+- 跳过 `driverkitd` 后 launchd 确实继续启动了一批服务（`coresymbolicationd`、`donotdisturbd`、`datanator` 等）；
+- 但仍没有 `cryptexd`/`eligibilityd`；
+- 这更像 **cryptexd 依赖 driverkitd**，而不是跳过 driverkitd 能解决问题；
+- H103i 只作为对照，不作为最终方案。
+
+## 26. H103j：Preboot 挂载 + SystemOS root union（2026-11-01）
+
+H96a18 曾用 `XNU_OWNER_UNION_SYSTEMOS=1` 把 SystemOS union 到 `/`，到达 cryptexd；H103 只挂到 `/private/preboot/Cryptexes/OS`，launchd/dyld 路径正确，但 driverkitd 可能仍需要 root 上的 `/System/DriverKit` 视图。
+
+H103j 保留 H103 的 Preboot/Cryptex 布局，同时增加一次 **SystemOS root union**：
+
+```c
+if (!error) {
+    struct mount_args root_request = request;
+    root_request.flags = MNT_RDONLY | MNT_UNION;
+    copyout("/", root_request.path, 2);
+    root_error = mount(p, &root_request, &root_result);
+    printf("NATIVE_H103_ROOT_UNION: %d\n", root_error);
+}
+```
+
+构建开关：
+
+```text
+XNU_OWNER_PREBOOT_LAYOUT=1
+XNU_OWNER_PREBOOT_ROOT_UNION=1
+```
+
+boot args 不使用 `com.apple.driverkitd` skip，恢复 driverkitd。
+
+H103j 产物：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| kernel | `e71fe93c3bb882f1d64868b4630046612da7b0294487d05de48fb300961eb7c5` |
+| payload | `b44703e035cd86a912efb871b6150a2b7242080966426c99bf243d8a40d26953` |
+| boot | `59c5ec427b300081e310f98d266c5b73f500b27a12425c122f042fd31de906eb` |
+
+Windows 路径：
+
+```text
+D:\Users\ls\Documents\OnePlus5_ios\boot-H103j-rootunion.img
+```
+
+已 boot。判读：
+
+- `NATIVE_H103_ROOT_UNION: 0` 且 driverkitd 不再 stall、cryptexd 出现 → root union 是缺失项；
+- root union 失败或 driverkitd 仍 stall → 需要转向 FileSet KC/UFS 读路径。

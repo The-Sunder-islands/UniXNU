@@ -1,0 +1,28 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7297,11 +7297,24 @@
+ 	{
+ 		int h80_limit = task_set_phys_footprint_limit_internal(proc_task(p), -1, NULL, TRUE, FALSE);
+ 		printf("NATIVE_H80: tasklimit=%d\n", h80_limit);
+ 	}
+ #endif
+ 	native_owner_cache_checkpoint(error, cache_authorized);
++#if defined(XNU_OWNER_PREBOOT_ROOT_UNION) && XNU_OWNER_PREBOOT_ROOT_UNION
++	if (!error) {
++		struct mount_args root_request = request;
++		int32_t root_result = 0;
++		int root_error;
++		root_request.flags = MNT_RDONLY | MNT_UNION;
++		root_error = copyout("/", root_request.path, 2);
++		if (!root_error) {
++			root_error = mount(p, &root_request, &root_result);
++		}
++		printf("NATIVE_H103_ROOT_UNION: %d\n", root_error);
++	}
++#endif
+ 	return error;
+ }
+ #endif
+ 
+ #if defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT

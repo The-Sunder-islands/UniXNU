@@ -35,7 +35,7 @@ fi
 # Remove them first so earlier independent patches retain their idempotent checks.
 # The same holds for the boot-time GPU addon mount and the staged system apps copy (zzy), which edit the owner Data mount function
 # inside the systemos patch. Reverse newest first; the loop below re-applies them in name order.
-for LATE_PATCH in "$ROOT/patches/xnu/zzzzzzz-h103-snapshot.patch" \
+for LATE_PATCH in "$ROOT/patches/xnu/zzzzzzzz-h103-root-union.patch" \
     "$ROOT/patches/xnu/zzzzzz-h103-proc-diag.patch" \
     "$ROOT/patches/xnu/zzzzz-h103-data-diag.patch" \
     "$ROOT/patches/xnu/zzzz-owner-preboot-layout.patch" \
@@ -72,6 +72,7 @@ if [ "$BOOTSTRAP" = 1 ]; then
   XNU_OWNER_CACHE_CARRIER=0
   XNU_OWNER_UNION_SYSTEMOS=0
   XNU_OWNER_PREBOOT_LAYOUT=0
+  XNU_OWNER_PREBOOT_ROOT_UNION=0
   XNU_OWNER_CRYPTEX_FILES=0
   XNU_OWNER_DATA_MOUNT=0
   XNU_OWNER_BOOT_MANIFEST=0
@@ -490,6 +491,20 @@ if [ "$(cat "$OWNER_PREBOOT_STAMP" 2>/dev/null || echo 0)" != "$OWNER_PREBOOT_LA
   rm -f "$ROOT/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/bsd/DEVELOPMENT/kern_exec.o"
   printf '%s\n' "$OWNER_PREBOOT_LAYOUT" > "$OWNER_PREBOOT_STAMP"
 fi
+OWNER_PREBOOT_ROOT_UNION=${XNU_OWNER_PREBOOT_ROOT_UNION:-0}
+if [ "$OWNER_PREBOOT_ROOT_UNION" != 0 ] && [ "$OWNER_PREBOOT_ROOT_UNION" != 1 ]; then
+  echo 'XNU_OWNER_PREBOOT_ROOT_UNION must be 0 or 1' >&2
+  exit 1
+fi
+if [ "$OWNER_PREBOOT_ROOT_UNION" = 1 ] && [ "$OWNER_PREBOOT_LAYOUT" != 1 ]; then
+  echo 'Root union view requires the Preboot layout mount' >&2
+  exit 1
+fi
+OWNER_ROOT_UNION_STAMP=$ROOT/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/.owner-preboot-root-union-mode
+if [ "$(cat "$OWNER_ROOT_UNION_STAMP" 2>/dev/null || echo 0)" != "$OWNER_PREBOOT_ROOT_UNION" ]; then
+  rm -f "$ROOT/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/bsd/DEVELOPMENT/kern_exec.o"
+  printf '%s\n' "$OWNER_PREBOOT_ROOT_UNION" > "$OWNER_ROOT_UNION_STAMP"
+fi
 # Select the union implementation in the machine config, not through per-file
 # CFLAGS: the config generator turns unselected options into a zero-valued
 # platform header macro that overrides command-line defines.  Keep this on for
@@ -515,7 +530,7 @@ fi
 EXTRA_MAKE_ARGS+=("kern_descrip.o_CFLAGS_ADD=-DXNU_NATIVE_CACHE_SIGNATURE_BYPASS=1")
 EXTRA_MAKE_ARGS+=("kern_mman.o_CFLAGS_ADD=-DXNU_NATIVE_CACHE_SIGNATURE_BYPASS=1")
 EXTRA_MAKE_ARGS+=("ubc_subr.o_CFLAGS_ADD=-DXNU_NATIVE_CS_HASH_CACHE=$CS_HASH_CACHE_MODE -DXNU_NATIVE_CACHE_SIGNATURE_BYPASS=1")
-EXTRA_MAKE_ARGS+=("kern_exec.o_CFLAGS_ADD=-DXNU_NATIVE_AIR_INIT=$NATIVE_AIR_INIT -DXNU_OWNER_CACHE_MOUNT=$OWNER_CACHE_MOUNT -DXNU_OWNER_CACHE_STARTUP=$OWNER_CACHE_STARTUP -DXNU_OWNER_BOOT_MANIFEST=$OWNER_BOOT_MANIFEST -DXNU_OWNER_DATA_MOUNT=$OWNER_DATA_MOUNT -DXNU_NATIVE_RAM_BLOCK=$NATIVE_RAM_BLOCK -DXNU_OWNER_CRYPTEX_FILES=$OWNER_CRYPTEX_FILES -DXNU_OWNER_UNION_SYSTEMOS=$OWNER_UNION_SYSTEMOS -DXNU_OWNER_PREBOOT_LAYOUT=$OWNER_PREBOOT_LAYOUT -include $OWNER_DATA_HEADER")
+EXTRA_MAKE_ARGS+=("kern_exec.o_CFLAGS_ADD=-DXNU_NATIVE_AIR_INIT=$NATIVE_AIR_INIT -DXNU_OWNER_CACHE_MOUNT=$OWNER_CACHE_MOUNT -DXNU_OWNER_CACHE_STARTUP=$OWNER_CACHE_STARTUP -DXNU_OWNER_BOOT_MANIFEST=$OWNER_BOOT_MANIFEST -DXNU_OWNER_DATA_MOUNT=$OWNER_DATA_MOUNT -DXNU_NATIVE_RAM_BLOCK=$NATIVE_RAM_BLOCK -DXNU_OWNER_CRYPTEX_FILES=$OWNER_CRYPTEX_FILES -DXNU_OWNER_UNION_SYSTEMOS=$OWNER_UNION_SYSTEMOS -DXNU_OWNER_PREBOOT_LAYOUT=$OWNER_PREBOOT_LAYOUT -DXNU_OWNER_PREBOOT_ROOT_UNION=$OWNER_PREBOOT_ROOT_UNION -include $OWNER_DATA_HEADER")
 OWNER_CACHE_STAMP=$ROOT/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/.owner-cache-mount-mode
 if [ "$(cat "$OWNER_CACHE_STAMP" 2>/dev/null || echo 0:0)" != "$OWNER_CACHE_MOUNT:$OWNER_CACHE_STARTUP" ]; then
   rm -f "$ROOT/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/bsd/DEVELOPMENT/kern_exec.o"
