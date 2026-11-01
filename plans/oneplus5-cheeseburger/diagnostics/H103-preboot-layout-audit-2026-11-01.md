@@ -1132,3 +1132,46 @@ kernel b0fb38e9116c7c941b41ee77bac89f5ed704e58f4acb65a75063f5c35baf77d1
 payload 29fde9c74340df404f6d2e65c2cd6bed475cb3e947e9cf02a3f0edb065d297c5
 boot   62ce9ab467427a8f99ee2f67aeca9b9a689fe972878b8f8a787dfff32edcc435
 ```
+
+## 36. H103m3 最终结果：SpringBoard 已启动（2026-11-02）
+
+最终屏关键行：
+
+```text
+NATIVE_UFS_WINDOW: SystemOS req=33792 block=f8320 count=8
+  abs=17f540000 lba=19d5a4 caller=SpringBoard/27
+NATIVE_UFS_WINDOW: SystemOS req=33792 done=4096 ok=1
+  ticks=93 read=0 write=82 abs=17f540000 lba=19d5a4 caller=SpringBoard/27
+
+NATIVE_UFS_WINDOW: SystemOS req=34816 ...
+  caller=driverkitd/62
+```
+
+同时可见大量服务已经 exec，包括：
+
+```text
+SpringBoard/27
+logd_helper
+distnoted
+...
+```
+
+结论：
+
+- **H103m3 首次到达 SpringBoard**，已经越过 H96a18 的 cryptexd/eligibilityd 停点；
+- `driverkitd` 仍在后台读 SystemOS，但不再是唯一停点；
+- 当前没有 UI/桌面，因为构建仍是：
+  ```text
+  XNU_NATIVE_MOBILE_DISPLAY=0
+  XNU_NATIVE_ADRENO=0
+  ```
+  且 legacy display 未启用；
+- 下一步是显示/WindowServer/backboardd 链路，而不是继续 cryptexd。
+
+H103m3 是当前最远基线：
+
+```text
+kernel b0fb38e9...
+payload 29fde9c7...
+boot   62ce9ab4...
+```
