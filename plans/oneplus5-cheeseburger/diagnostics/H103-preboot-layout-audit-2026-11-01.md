@@ -214,3 +214,72 @@ XNU_OWNER_PREBOOT_LAYOUT=1
 3. `cryptexd` 是否仍启动但不再阻塞，launchd 是否能继续到 `backboardd`/`SpringBoard`。
 4. `os.dmg` 当前是指向 OS 卷 `/usr/standalone/firmware/Cryptex1/SystemOS.dmg` 的符号链接，而本项目的 21H461 OS 根没有 `Cryptex1` 目录。若 launchd/cryptexd 坚持打开这个文件，需要再加 SystemOS 文件后端或占位方案。
 5. AppOS 只准备了 `Cryptexes/App` 目录和元数据，没有挂载 AppOS；Safari/WebKit 相关 job 可能仍失败，但不应阻塞主屏。
+
+## 11. 远程 macOS 构建结果（2026-11-01）
+
+构建机：`lss@192.168.10.103`（macOS 15.8.2 / Xcode 26.3 / Python 3.12）。
+
+关键配置：
+
+```text
+XNU_OWNER_PREBOOT_LAYOUT=1
+XNU_OWNER_UNION_SYSTEMOS=0
+XNU_OWNER_CACHE_MOUNT=1
+XNU_OWNER_CACHE_STARTUP=1
+XNU_OWNER_CACHE_CARRIER=1
+XNU_OWNER_DATA_MOUNT=1
+XNU_NATIVE_RAM_BLOCK=1
+XNU_OWNER_CRYPTEX_FILES=0
+XNU_OWNER_BOOT_MANIFEST=0
+XNU_OWNER_DATA_VOLATILE=1
+```
+
+Data seed：
+
+```text
+UUID       95BE5FCF-BCA7-49C2-80C5-A7BE97DEF40A
+packed     ~/h103/owner-data-fixture/owner-data.dbr
+sha256     911932c26f4195058d22dc196e0bc928c46b0afb750ade4d8f60f12714be0615
+```
+
+引导参数沿用 H96a18 基线，只增加本实验的挂载布局；没有新增 skip：
+
+```text
+cpus=2 allow-root-hash-mismatch=1 sheng-pmgr=2
+native-trace-amfi-syscall=1 native-trace-trust-cache=1
+sheng-disable-jobs=com.apple.nsurlsessiond,com.apple.routined,
+com.apple.nehelper,com.apple.chronod,com.apple.accountsd,
+com.apple.alsd,com.apple.pfd
+```
+
+产物：
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `kernel.macho` | 52,088,832 | `979260df84f1922726c4e9ce6ac540d023543a16fddee33d50d2f32d86b378fe` |
+| `payload-H103-preboot.img` | 79,691,776 | `5bb75401ea53a2144798f15a917b85b15d74ad33f443088ee195acc0552a74da` |
+| `boot-H103-preboot.img` | 81,147,904 | `aed7e8d8cf2d7af1402a88dfa46183607325a843f8455961293c6dd8fa2ae287` |
+| payload ADT | — | `4b6d2cc33de8af2cc945a3472474ce34d0423bbd48b86e42c00aa1e53775f4d3` |
+
+本地产物：
+
+```text
+/home/ls/UniXNU-cheeseburger/out/cheeseburger/boot/boot-H103-preboot.img
+/home/ls/UniXNU-cheeseburger/out/cheeseburger/boot/payload-H103-preboot.img
+```
+
+内核中已确认包含：
+
+```text
+NATIVE_PREBOOT: status=%d stage=%d
+/private/preboot/Cryptexes/OS
+DYLD_SHARED_CACHE_DIR=/System/Cryptexes/OS/System/Library/Caches/com.apple.dyld
+```
+
+尚未上机。下一步：
+
+```sh
+fastboot boot out/cheeseburger/boot/boot-H103-preboot.img
+```
+
+观察 `NATIVE_PREBOOT: status=0 stage=5`、`NATIVE_H82_DATA: status=0 stage=4`、`NATIVE_ENV`，以及 launchd 是否越过 `driverkitd is active`。

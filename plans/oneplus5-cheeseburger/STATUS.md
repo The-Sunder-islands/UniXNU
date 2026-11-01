@@ -3,8 +3,8 @@
 - 计划：`plans/oneplus5-cheeseburger/PLAN.md`
 - 线路：B — UniXNU / 4K
 - 路线/目标：iPad7,1 / iPadOS 17.7.11（21H461）
-- 当前阶段：**H103 Preboot/Cryptex 布局审计完成（2026-11-01）。H91 仍是最佳 Probe 基线；H101/H102 快照仍未工作；审计确认 OS 根 `/System/Cryptexes/OS` 指向 `/private/preboot/Cryptexes/OS`，而当前 `/private/preboot` 为空，SystemOS 被挂到 `/` 或 `/private/preboot` 后都没有命中该路径。已准备默认关闭的 Preboot overlay + bindfs + SystemOS 挂载实验。**
-- 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）；H91/H96a18 过 mount-phase-1；H99 停在 driverkitd active；H100 停在 pfd/accountsd/nsurlsessiond/routined；H101/H102 快照未触发；H103 布局审计完成，等待构建验证**
+- 当前阶段：**H103 Preboot/Cryptex 布局审计与首次构建完成（2026-11-01）。H91 仍是最佳 Probe 基线；H101/H102 快照仍未工作；审计确认 OS 根 `/System/Cryptexes/OS` 指向 `/private/preboot/Cryptexes/OS`，而当前 `/private/preboot` 为空，SystemOS 被挂到 `/` 或 `/private/preboot` 后都没有命中该路径。已准备并构建默认关闭的 Preboot overlay + bindfs + SystemOS 挂载实验，等待上机。**
+- 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）；H91/H96a18 过 mount-phase-1；H99 停在 driverkitd active；H100 停在 pfd/accountsd/nsurlsessiond/routined；H101/H102 快照未触发；H103 布局审计完成，boot `aed7e8d8...` 已构建，等待上机验证**
 - 基线提交：H91 构建提交未记录；本地 UniXNU `main` `e4539ae`（H100 文档提交），设备仓库 `main` `5ad54e2`
 - 当前代码提交：本地 `e4539ae`；H99/H100/H101/H102 干净构建树为 XNU `d8b8029` + 原始 patches + 远程诊断插桩；H96 脏源码保留在 `.cache/xnu-work.h96dirty-20261031`；设备仓库 `5ad54e2`；关键子模块见 `BASELINE.md`
 - 远程仓库：
@@ -1953,7 +1953,12 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
   - `patches/xnu/zzzz-owner-preboot-layout.patch`（`XNU_OWNER_PREBOOT_LAYOUT=1`）；
   - workflow input `preboot_layout`。
 - H103 实验路径：Data mount → bindfs `/private/var/preboot` 到 `/private/preboot` → SystemOS 挂到 `/private/preboot/Cryptexes/OS` → `DYLD_SHARED_CACHE_DIR=/System/Cryptexes/OS/System/Library/Caches/com.apple.dyld`。
-- 尚未构建/上机；下一步需要构建 `XNU_OWNER_PREBOOT_LAYOUT=1` 镜像并检查 `NATIVE_PREBOOT`、`NATIVE_ENV` 和 launchd 是否越过 `driverkitd`/cryptexd 等待。
+- 已在远程 macOS 构建 `XNU_OWNER_PREBOOT_LAYOUT=1` 镜像；尚未上机：
+  - kernel `979260df...`
+  - payload `5bb75401...`
+  - boot `aed7e8d8...`
+  - 本地产物 `out/cheeseburger/boot/boot-H103-preboot.img`
+- 下一步 `fastboot boot` 后检查 `NATIVE_PREBOOT: status=0 stage=5`、`NATIVE_H82_DATA`、`NATIVE_ENV`，以及 launchd 是否越过 `driverkitd`/cryptexd 等待。
 - 约束：`XNU_OWNER_PREBOOT_LAYOUT=1` 需要 `OWNER_CACHE_MOUNT=1`、`OWNER_CACHE_STARTUP=1`、`OWNER_DATA_MOUNT=1`、`NATIVE_RAM_BLOCK=1`、`OWNER_UNION_SYSTEMOS=0`。不新增 skip，不修改 AuthAPFS/Image4/TrustCache 验证。
 
 ## 更新规则
