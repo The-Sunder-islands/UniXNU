@@ -34,6 +34,10 @@ on:
         description: Also build the userdata image (needs the Data seed later)
         type: boolean
         default: false
+      preboot_layout:
+        description: Mount SystemOS at /private/preboot/Cryptexes/OS with a staged Preboot overlay
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -97,9 +101,19 @@ jobs:
           fi
 
       - name: Prepare Data skeleton
+        env:
+          IPSW_URL: ${{ inputs.ipsw_url }}
+          PREBOOT_LAYOUT: ${{ inputs.preboot_layout }}
         run: |
           set -euo pipefail
-          python3 scripts/prepare-owner-data-fixture.py --skeleton --size-mib 512 --packed --output build/owner-data-fixture
+          extra=()
+          if [ "$PREBOOT_LAYOUT" = "true" ]; then
+            source="${IPSW_URL:-$(python3 -c 'import tomllib; print(tomllib.load(open("device/board.toml", "rb"))["ipsw"]["url"])')}"
+            python3 scripts/prepare-preboot-overlay.py --ipsw "$source" --output build/preboot-overlay
+            extra+=(--preboot-overlay build/preboot-overlay)
+          fi
+          python3 scripts/prepare-owner-data-fixture.py --skeleton --size-mib 512 --packed \
+            --output build/owner-data-fixture "${extra[@]}"
           uuid="$(python3 -c 'import json; print(json.load(open("build/owner-data-fixture/seed.json"))["volume_uuid"])')"
           test -n "$uuid"
           echo "XNU_OWNER_DATA_VOLUME_UUID=$uuid" >> "$GITHUB_ENV"
@@ -118,6 +132,7 @@ jobs:
           XNU_OWNER_CACHE_CARRIER: 1
           XNU_NATIVE_CS_HASH_CACHE: 1
           XNU_OWNER_UNION_SYSTEMOS: 0
+          XNU_OWNER_PREBOOT_LAYOUT: ${{ inputs.preboot_layout && '1' || '0' }}
           XNU_BRINGUP_CACHE_MOUNT: 1
           # H82: writable Data skeleton at /private/var for launchd.
           XNU_OWNER_DATA_MOUNT: 1

@@ -3,8 +3,8 @@
 - 计划：`plans/oneplus5-cheeseburger/PLAN.md`
 - 线路：B — UniXNU / 4K
 - 路线/目标：iPad7,1 / iPadOS 17.7.11（21H461）
-- 当前阶段：**H101/H102 快照调试完成（2026-10-31）。H91 仍是最佳 Probe 基线；H100 无 skip 对照证明移除 7 项 skip 会更早停在 pfd/accountsd/nsurlsessiond/routined；H101（boot-arg 定时）和 H102（无条件启动）都没有在最终屏产生快照/panic，cryptexd/eligibilityd 运行状态仍未知。**
-- 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）；H91/H96a18 过 mount-phase-1；H99 停在 driverkitd active；H100 停在 pfd/accountsd/nsurlsessiond/routined；H101/H102 快照未触发**
+- 当前阶段：**H103 Preboot/Cryptex 布局审计完成（2026-11-01）。H91 仍是最佳 Probe 基线；H101/H102 快照仍未工作；审计确认 OS 根 `/System/Cryptexes/OS` 指向 `/private/preboot/Cryptexes/OS`，而当前 `/private/preboot` 为空，SystemOS 被挂到 `/` 或 `/private/preboot` 后都没有命中该路径。已准备默认关闭的 Preboot overlay + bindfs + SystemOS 挂载实验。**
+- 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）；H91/H96a18 过 mount-phase-1；H99 停在 driverkitd active；H100 停在 pfd/accountsd/nsurlsessiond/routined；H101/H102 快照未触发；H103 布局审计完成，等待构建验证**
 - 基线提交：H91 构建提交未记录；本地 UniXNU `main` `e4539ae`（H100 文档提交），设备仓库 `main` `5ad54e2`
 - 当前代码提交：本地 `e4539ae`；H99/H100/H101/H102 干净构建树为 XNU `d8b8029` + 原始 patches + 远程诊断插桩；H96 脏源码保留在 `.cache/xnu-work.h96dirty-20261031`；设备仓库 `5ad54e2`；关键子模块见 `BASELINE.md`
 - 远程仓库：
@@ -14,7 +14,7 @@
   - NativeRamBlock fork `https://github.com/lss717/RamBlock`（submodule 路径仍为
     `drivers/NativeRamBlock`，fork 提交 `bc079a5`；`upstream` 指回 `UniXNU/RamBlock`）
 - UEFI 分支：`edk2-msm8998` 的 `unixnu-cheeseburger`，提交 `0471194`、`708fa06`、`7f34479`、`91e17a8`、`8ef28f1`、`1ffb934`
-- 最近更新：2026-10-31
+- 最近更新：2026-11-01
 
 > 本文件是 B 线（UniXNU / 4K）唯一的计划与状态记录。A 线（在 OP5 上用
 > 自建 shim 引导 16K XNU）是另一个独立项目，与本线没有代码依赖。
@@ -1934,6 +1934,26 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
 - 因此 cryptexd/eligibilityd 是否运行/退出仍未确认；不能把“最终屏没有 cryptexd”当作完整进程集合。
 - 产物：H101 kernel `9990f955...`、boot `39f21579...`；H102 kernel `80c30288...`、boot `fe08ad87...`。
 - 下一步 H103：在 `h97_start_snapshot()` 入口直接 panic（或不可滚动标记）确认调用；若入口正常，改为在 `NATIVE_EXEC` 的 cryptexd/eligibilityd/alsd 分支直接 `panic` + `proc_iterate`，绕过线程/定时器。不得新增 skip，不修改完整性验证。
+
+## H103 Preboot/Cryptex 布局审计（2026-11-01）
+
+- 报告：`plans/oneplus5-cheeseburger/diagnostics/H103-preboot-layout-audit-2026-11-01.md`
+- 用本机 21H461 OS 窗口和 SystemOS 原始镜像只读核对：
+  - `/System/Cryptexes/OS -> ../../private/preboot/Cryptexes/OS`；
+  - `/System/Cryptexes/App -> ../../private/preboot/Cryptexes/App`；
+  - `/private/preboot` 为空；
+  - `/System/Library/Caches/com.apple.dyld` 不存在；
+  - SystemOS 根下只有 `System`/`usr`，包含 `System/Library/Caches/com.apple.dyld`、378 个 Frameworks、1681 个 PrivateFrameworks。
+- 结论：H62 挂 `/private/preboot`、H96 `XNU_OWNER_UNION_SYSTEMOS=1` 挂 `/` 都没有命中 launchd 的 `/private/preboot/Cryptexes/OS`；这比“cryptexd 等真实 IM4M”更符合现有证据。
+- SystemOS trust cache module `d121ba89...` 已经在 H91 bundle 中，不是当前缺失项。
+- 已准备默认关闭的 H103 实验：
+  - `scripts/prepare-preboot-overlay.py`；
+  - `scripts/prepare-owner-data-fixture.py --preboot-overlay`；
+  - `patches/xnu/zzzz-owner-preboot-layout.patch`（`XNU_OWNER_PREBOOT_LAYOUT=1`）；
+  - workflow input `preboot_layout`。
+- H103 实验路径：Data mount → bindfs `/private/var/preboot` 到 `/private/preboot` → SystemOS 挂到 `/private/preboot/Cryptexes/OS` → `DYLD_SHARED_CACHE_DIR=/System/Cryptexes/OS/System/Library/Caches/com.apple.dyld`。
+- 尚未构建/上机；下一步需要构建 `XNU_OWNER_PREBOOT_LAYOUT=1` 镜像并检查 `NATIVE_PREBOOT`、`NATIVE_ENV` 和 launchd 是否越过 `driverkitd`/cryptexd 等待。
+- 约束：`XNU_OWNER_PREBOOT_LAYOUT=1` 需要 `OWNER_CACHE_MOUNT=1`、`OWNER_CACHE_STARTUP=1`、`OWNER_DATA_MOUNT=1`、`NATIVE_RAM_BLOCK=1`、`OWNER_UNION_SYSTEMOS=0`。不新增 skip，不修改 AuthAPFS/Image4/TrustCache 验证。
 
 ## 更新规则
 

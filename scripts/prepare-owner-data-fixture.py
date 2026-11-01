@@ -19,6 +19,8 @@ parser.add_argument('--output', type=Path, default=ROOT / 'build/owner-data-fixt
 parser.add_argument('--skeleton', action='store_true', help='Create an empty APFS Data skeleton (CI bring-up; no OS var copy)')
 parser.add_argument('--size-mib', type=int, default=96, help='Skeleton APFS container size in MiB')
 parser.add_argument('--packed', action='store_true', help='Write a DBRDISK1 packed seed (owner-data.dbr) in addition to the raw skeleton')
+parser.add_argument('--preboot-overlay', type=Path,
+                    help='Stage the /private/preboot overlay under the Data seed (skeleton mode only)')
 args = parser.parse_args()
 fixture = args.output.resolve()
 image = fixture / 'owner-data-32.cdr'
@@ -55,6 +57,11 @@ if args.skeleton:
                      'containers/Shared', 'containers/Shared/SystemGroup', 'PersonaVolumes'):
             (target / name).mkdir(parents=True, exist_ok=True)
         os.chmod(target / 'tmp', 0o1777)
+        if args.preboot_overlay:
+            source = args.preboot_overlay.resolve()
+            if not (source / 'cryptex1/current').is_dir() or not (source / 'Cryptexes').is_dir():
+                raise SystemExit('Preboot overlay must contain cryptex1/current and Cryptexes')
+            shutil.copytree(source, target / 'preboot', symlinks=True, dirs_exist_ok=True)
     finally:
         subprocess.run(['hdiutil', 'detach', device], check=True, capture_output=True)
         shutil.rmtree(target, ignore_errors=True)
@@ -63,6 +70,7 @@ if args.skeleton:
         raise SystemExit('Host formatting did not produce an APFS container')
     report = dict(volume_uuid=volume_uuid, bytes=len(data), sha256=hashlib.sha256(data).hexdigest(),
                   seed='Empty APFS Data skeleton for launchd bring-up; directories only',
+                  preboot_overlay=bool(args.preboot_overlay),
                   owner_keybag_created=False, os_inputs_modified=False, production_storage_qualified=False,
                   packed=False, seed_file=image.name)
     if args.packed:

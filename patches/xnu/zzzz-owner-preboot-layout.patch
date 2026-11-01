@@ -1,0 +1,130 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7054,7 +7054,9 @@
+ native_owner_cache_prepare(proc_t p, user_addr_t scratch, user_addr_t *envp)
+ {
+ 	const char *volume = "8846FE78-2910-4297-AF97-D59BB6F8FC16";
+-#if defined(XNU_OWNER_UNION_SYSTEMOS) && XNU_OWNER_UNION_SYSTEMOS
++#if defined(XNU_OWNER_PREBOOT_LAYOUT) && XNU_OWNER_PREBOOT_LAYOUT
++	const char *mountpoint = "/private/preboot/Cryptexes/OS";
++#elif defined(XNU_OWNER_UNION_SYSTEMOS) && XNU_OWNER_UNION_SYSTEMOS
+ #if !CONFIG_UNION_MOUNTS
+ #error The owner composition requires the original native union-mount implementation
+ #endif
+@@ -7063,7 +7065,11 @@
+ 	const char *mountpoint = "/private/preboot";
+ #endif
+ #if !defined(XNU_OWNER_UNION_SYSTEMOS) || !XNU_OWNER_UNION_SYSTEMOS
++#if defined(XNU_OWNER_PREBOOT_LAYOUT) && XNU_OWNER_PREBOOT_LAYOUT
++	const char *environment = "DYLD_SHARED_CACHE_DIR=/System/Cryptexes/OS/System/Library/Caches/com.apple.dyld";
++#else
+ 	const char *environment = "DYLD_SHARED_CACHE_DIR=/private/preboot/System/Library/Caches/com.apple.dyld";
++#endif
+ 	const char *printsegments = "DYLD_PRINT_SEGMENTS=1";
+ 	const char *printsearch = "DYLD_PRINT_SEARCHING=1";
+ 	const char *printlibs = "DYLD_PRINT_LIBRARIES=1";
+@@ -7187,7 +7193,8 @@
+ #endif
+ 	native_owner_cache_authorized = cache_authorized;
+ 	native_owner_cache_status = error;
+-#if !defined(XNU_OWNER_UNION_SYSTEMOS) || !XNU_OWNER_UNION_SYSTEMOS
++#if (!defined(XNU_OWNER_UNION_SYSTEMOS) || !XNU_OWNER_UNION_SYSTEMOS) && \
++    (!defined(XNU_OWNER_PREBOOT_LAYOUT) || !XNU_OWNER_PREBOOT_LAYOUT)
+ 	{
+ 		const char *h62_dir = "/private/preboot/System/Library/Caches/com.apple.dyld";
+ 		const char *h62_file = "/private/preboot/System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64";
+@@ -7950,6 +7957,61 @@
+ }
+ #endif
+ 
++#if defined(XNU_OWNER_PREBOOT_LAYOUT) && XNU_OWNER_PREBOOT_LAYOUT
++extern volatile int native_bindfs_boot_mount;
++volatile int native_preboot_overlay_stage = 0;
++volatile int native_preboot_overlay_status = -1;
++
++/*
++ * The OS root has /System/Cryptexes/OS -> ../../private/preboot/Cryptexes/OS,
++ * but no Preboot volume is present in the current userdata. The Data seed
++ * carries /private/var/preboot (cryptex1/current and Cryptexes/OS) so a
++ * read-only union bindfs gives launchd the native Preboot paths before the
++ * SystemOS volume is mounted at /private/preboot/Cryptexes/OS.
++ */
++static int
++native_preboot_overlay_prepare(proc_t p, user_addr_t scratch)
++{
++	const char *source = "/private/var/preboot";
++	const char *point = "/private/preboot";
++	vnode_t probe = NULLVP;
++	struct mount_args request = {.type = scratch, .path = scratch + 0x40,
++	    .flags = MNT_RDONLY | MNT_UNION, .data = scratch + 0x100};
++	int32_t result = 0;
++	int error;
++
++	native_preboot_overlay_stage = 1;
++	error = vnode_lookup(source, 0, &probe, vfs_context_current());
++	if (error) goto done;
++	vnode_put(probe);
++	probe = NULLVP;
++
++	native_preboot_overlay_stage = 2;
++	if ((error = copyout("bindfs", request.type, 7)) ||
++	    (error = copyout(point, request.path, strlen(point) + 1)) ||
++	    (error = copyout(source, request.data, strlen(source) + 1))) goto done;
++
++	native_preboot_overlay_stage = 3;
++	native_bindfs_boot_mount = 1;
++	error = mount(p, &request, &result);
++	native_bindfs_boot_mount = 0;
++	if (error) goto done;
++
++	native_preboot_overlay_stage = 4;
++	error = vnode_lookup("/private/preboot/Cryptexes/OS", 0, &probe, vfs_context_current());
++	if (!error) {
++		vnode_put(probe);
++		probe = NULLVP;
++		native_preboot_overlay_stage = 5;
++	}
++done:
++	if (probe) vnode_put(probe);
++	native_preboot_overlay_status = error;
++	printf("NATIVE_PREBOOT: status=%d stage=%d\n", error, native_preboot_overlay_stage);
++	return error;
++}
++#endif
++
+ 
+ /*
+  * Temporary launchd bring-up policy, ported from UniXNU-sheng.
+@@ -8263,12 +8325,6 @@
+ 
+ 	(void) mach_vm_allocate_kernel(map, &scratch_addr, map_page_size, VM_FLAGS_ANYWHERE, VM_KERN_MEMORY_NONE);
+ 	user_addr_t init_envp = USER_ADDR_NULL;
+-#if defined(XNU_OWNER_CACHE_MOUNT) && XNU_OWNER_CACHE_MOUNT
+-	boot_progress_stage("SystemOS mount enter");
+-	int cache_error = native_owner_cache_prepare(p, (user_addr_t)scratch_addr, &init_envp);
+-	boot_progress_stage("SystemOS mount returned");
+-	if (cache_error) panic("offline owner SystemOS mount failed: %d", cache_error);
+-#endif
+ #if defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
+ 	boot_progress_stage("Data mount enter");
+ 	int data_error = native_owner_data_prepare(p, (user_addr_t)scratch_addr);
+@@ -8284,6 +8340,18 @@
+ 	boot_progress_stage("temporary watchdog launch policy ready");
+ #endif
+ #endif
++#if defined(XNU_OWNER_PREBOOT_LAYOUT) && XNU_OWNER_PREBOOT_LAYOUT
++	boot_progress_stage("Preboot overlay mount enter");
++	int preboot_error = native_preboot_overlay_prepare(p, (user_addr_t)scratch_addr);
++	boot_progress_stage("Preboot overlay mount returned");
++	if (preboot_error) panic("offline Preboot overlay mount failed: %d", preboot_error);
++#endif
++#if defined(XNU_OWNER_CACHE_MOUNT) && XNU_OWNER_CACHE_MOUNT
++	boot_progress_stage("SystemOS mount enter");
++	int cache_error = native_owner_cache_prepare(p, (user_addr_t)scratch_addr, &init_envp);
++	boot_progress_stage("SystemOS mount returned");
++	if (cache_error) panic("offline owner SystemOS mount failed: %d", cache_error);
++#endif
+ #if CONFIG_MEMORYSTATUS
+ 	(void) memorystatus_init_at_boot_snapshot();
+ #endif /* CONFIG_MEMORYSTATUS */
