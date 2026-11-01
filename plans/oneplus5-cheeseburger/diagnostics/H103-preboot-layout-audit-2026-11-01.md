@@ -474,3 +474,49 @@ Booting   OKAY
 ```
 
 等待最终屏幕确认 Data mount 和 tzinit。
+
+## 18. H103d 上机结果与 H103e 诊断（2026-11-01）
+
+H103d 已经不再报 Data UUID mismatch，launchd 继续执行 boot task；新 `tzinit` 错误变为：
+
+```text
+tzinit: Unable to locate data; resetting to system partition
+tzinit: Unable to create directory with attributes: Read-only file system
+tzinit: Last resort force_system_dataset() failed: Read-only file system
+pid 17 exited -- no exit reason available -- (signal 0, exit 2)
+```
+
+Data seed 中已确认存在：
+
+```text
+db/timezone/zoneinfo      （602 个文件）
+db/timezone/localtime -> /var/db/timezone/zoneinfo/US/Pacific
+```
+
+因此问题收窄为两种可能：
+
+1. `/private/var` 在 tzinit 运行时不是 Data 的 RW 挂载，而是 OS root 的只读目录；
+2. Data 是 RW，但 tzinit 期望的 `/var/db/timezone` 数据集布局（`tz/`、`tz_latest`、`icutz`）不存在，它回退写系统目录时撞上只读。
+
+H103e 只增加诊断，不改变行为：
+
+- `zzzzz-h103-data-diag.patch`；
+- 在 `tzinit` 退出时打印：
+  ```text
+  NATIVE_H103_DATA: status=... ro=... dev=...
+  NATIVE_H103_VAR: flags=... fstype=...
+  ```
+
+H103e 产物：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| kernel | `0ef659ae57587396e24af61699e2d84c5f3854752a689d1500ce35247cf80b73` |
+| payload | `24601447421f6577023506dea68698512bcc04959461a48ac17e99d9ff7d36f2` |
+| boot | `45e5a3ca42db952e30d3291119e6ee7e37860cdccfdbb46aacb251c52fc25bc9` |
+
+Windows 路径：
+
+```text
+D:\Users\ls\Documents\OnePlus5_ios\boot-H103e-preboot.img
+```

@@ -1,0 +1,36 @@
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -90,6 +90,7 @@
+ #include <sys/wait.h>
+ #include <sys/file_internal.h>
+ #include <sys/vnode_internal.h>
++#include <sys/mount.h>
+ #include <sys/syslog.h>
+ #include <sys/malloc.h>
+ #include <sys/resourcevar.h>
+@@ -1878,6 +1879,24 @@
+ 	int i;
+ 
+ 	printf("NATIVE_LAUNCHD_EXIT_DIAG: pid=%d name=%s\n", proc_getpid(p), p->p_name);
++	if (!strcmp(p->p_name, "tzinit")) {
++		extern volatile int native_owner_data_status;
++		extern volatile int native_owner_data_readonly;
++		extern volatile dev_t native_owner_data_device;
++		vnode_t var_vp = NULLVP;
++		int var_error;
++		printf("NATIVE_H103_DATA: status=%d ro=%d dev=%d\n",
++		    native_owner_data_status, native_owner_data_readonly, (int)native_owner_data_device);
++		var_error = vnode_lookup("/private/var", 0, &var_vp, vfs_context_current());
++		if (var_error) {
++			printf("NATIVE_H103_VAR: lookup=%d\n", var_error);
++		} else {
++			mount_t var_mount = vnode_mount(var_vp);
++			printf("NATIVE_H103_VAR: flags=%#x fstype=%s\n",
++			    vfs_flags(var_mount), vfs_statfs(var_mount)->f_fstypename);
++			vnode_put(var_vp);
++		}
++	}
+ 	if (thread_getstatus(current_thread(), ARM_THREAD_STATE64,
+ 	    (thread_state_t)&st, &count) != KERN_SUCCESS) {
+ 		printf("NATIVE_LAUNCHD_EXIT_REGS: unavailable\n");

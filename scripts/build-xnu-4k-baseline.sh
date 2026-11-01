@@ -35,7 +35,9 @@ fi
 # Remove them first so earlier independent patches retain their idempotent checks.
 # The same holds for the boot-time GPU addon mount and the staged system apps copy (zzy), which edit the owner Data mount function
 # inside the systemos patch. Reverse newest first; the loop below re-applies them in name order.
-for LATE_PATCH in "$ROOT/patches/xnu/zzz-shared-region-cache-bypass.patch" \
+for LATE_PATCH in "$ROOT/patches/xnu/zzzzz-h103-data-diag.patch" \
+    "$ROOT/patches/xnu/zzzz-owner-preboot-layout.patch" \
+    "$ROOT/patches/xnu/zzz-shared-region-cache-bypass.patch" \
     "$ROOT/patches/xnu/zzz-root-auth-bypass.patch" \
     "$ROOT/patches/xnu/zzz-native-exec-bypass.patch" \
     "$ROOT/patches/xnu/zzz-boot-progress.patch" "$ROOT/patches/xnu/zzy-staged-system-apps.patch" \
@@ -529,11 +531,11 @@ if { [ "$OWNER_CACHE_CARRIER" = 1 ] && [ "$OWNER_CACHE_STARTUP" != 1 ]; } ||
   echo 'Owner carrier policy requires authenticated owner startup; wrong UUID is an isolated negative control' >&2
   exit 1
 fi
-EXTRA_MAKE_ARGS+=("vm_unix.o_CFLAGS_ADD=-DXNU_OWNER_CACHE_CARRIER=$OWNER_CACHE_CARRIER -DXNU_OWNER_CACHE_CARRIER_WRONG_UUID=$OWNER_CACHE_CARRIER_WRONG_UUID -DXNU_NATIVE_CACHE_SIGNATURE_BYPASS=1")
+EXTRA_MAKE_ARGS+=("vm_unix.o_CFLAGS_ADD=-DXNU_OWNER_CACHE_CARRIER=$OWNER_CACHE_CARRIER -DXNU_OWNER_CACHE_CARRIER_WRONG_UUID=$OWNER_CACHE_CARRIER_WRONG_UUID -DXNU_OWNER_PREBOOT_LAYOUT=$OWNER_PREBOOT_LAYOUT -DXNU_NATIVE_CACHE_SIGNATURE_BYPASS=1")
 OWNER_CARRIER_STAMP=$ROOT/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/.owner-cache-carrier-mode
-if [ "$(cat "$OWNER_CARRIER_STAMP" 2>/dev/null || echo 0:0)" != "$OWNER_CACHE_CARRIER:$OWNER_CACHE_CARRIER_WRONG_UUID" ]; then
+if [ "$(cat "$OWNER_CARRIER_STAMP" 2>/dev/null || echo 0:0)" != "$OWNER_CACHE_CARRIER:$OWNER_CACHE_CARRIER_WRONG_UUID:$OWNER_PREBOOT_LAYOUT" ]; then
   rm -f "$ROOT/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/bsd/DEVELOPMENT/vm_unix.o"
-  printf '%s\n' "$OWNER_CACHE_CARRIER:$OWNER_CACHE_CARRIER_WRONG_UUID" > "$OWNER_CARRIER_STAMP"
+  printf '%s\n' "$OWNER_CACHE_CARRIER:$OWNER_CACHE_CARRIER_WRONG_UUID:$OWNER_PREBOOT_LAYOUT" > "$OWNER_CARRIER_STAMP"
 fi
 DT_PANIC_REGION=${XNU_DT_PANIC_REGION:-0}
 if [ "$DT_PANIC_REGION" != 0 ] && [ "$DT_PANIC_REGION" != 1 ]; then
