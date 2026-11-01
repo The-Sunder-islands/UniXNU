@@ -1935,6 +1935,14 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
 - 产物：H101 kernel `9990f955...`、boot `39f21579...`；H102 kernel `80c30288...`、boot `fe08ad87...`。
 - 下一步 H103：在 `h97_start_snapshot()` 入口直接 panic（或不可滚动标记）确认调用；若入口正常，改为在 `NATIVE_EXEC` 的 cryptexd/eligibilityd/alsd 分支直接 `panic` + `proc_iterate`，绕过线程/定时器。不得新增 skip，不修改完整性验证。
 
+## 设备与构建主机（2026-11-01 起）
+
+- 内核/镜像构建：`lss@192.168.10.103`（macOS 15.8.2 / Xcode 26.3）。
+- 设备连接：手机已改接到 Windows 主机 `ls@192.168.10.225`，该机 PATH 中有 `fastboot.exe`。
+- Windows 镜像目录：`D:\\Users\\ls\\Documents\\OnePlus5_ios`。
+- 后续流程：macOS 构建 → 把 boot/payload/kernel 放到上述 Windows 目录 → 在 Windows 上 `fastboot boot`。
+- 不在仓库记录主机密码。
+
 ## H103 Preboot/Cryptex 布局审计（2026-11-01）
 
 - 报告：`plans/oneplus5-cheeseburger/diagnostics/H103-preboot-layout-audit-2026-11-01.md`

@@ -418,3 +418,12 @@ H103c 产物（内核沿用 H103b）：
 ```
 
 下一步上机确认 `tzinit` 不再退出，并记录下一个 boot task。
+
+
+## 16. 设备连接环境变更（2026-11-01）
+
+- 构建机不变：`lss@192.168.10.103`（macOS）。
+- 设备改接到 Windows：`ls@192.168.10.225`，使用该机 PATH 中的 `fastboot.exe`。
+- 镜像存放目录：`D:\Users\ls\Documents\OnePlus5_ios`。
+- 后续每轮：macOS 构建 → HTTP/文件传输到 Windows 目录 → Windows 上 `fastboot boot`。
+- 不在仓库记录 Windows 密码。
