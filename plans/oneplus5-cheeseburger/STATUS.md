@@ -1938,6 +1938,7 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
 ## H103 Preboot/Cryptex 布局审计（2026-11-01）
 
 - 报告：`plans/oneplus5-cheeseburger/diagnostics/H103-preboot-layout-audit-2026-11-01.md`
+- 说明：H102 文档原建议的 H103 是快照入口 panic；本轮先做 Preboot/Cryptex 布局审计，快照入口实验顺延。
 - 用本机 21H461 OS 窗口和 SystemOS 原始镜像只读核对：
   - `/System/Cryptexes/OS -> ../../private/preboot/Cryptexes/OS`；
   - `/System/Cryptexes/App -> ../../private/preboot/Cryptexes/App`；

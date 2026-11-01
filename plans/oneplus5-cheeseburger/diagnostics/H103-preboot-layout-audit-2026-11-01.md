@@ -1,5 +1,6 @@
 # H103 Preboot/Cryptex 布局审计（2026-11-01）
 
+ - 说明：H102 文档原建议的 H103 是“快照入口 panic”。本轮先做更直接的 Preboot/Cryptex 布局审计；快照入口实验顺延到后续编号。
 - 目的：用本机已有的 21H461 iPad7,1 OS/SystemOS 原始镜像，核对 `/System/Cryptexes`、`/private/preboot` 和 SystemOS 内容，确认 H96a18/`driverkitd` 停点是否只是布局问题。
 - 边界：只读分析；没有刷写设备，没有修改 OS/SystemOS/AuthAPFS/Image4 验证。
 - 参考：`/tmp/opencode/sagit-ios-port`（小米 6、同 SDM835、已进 SpringBoard）。
