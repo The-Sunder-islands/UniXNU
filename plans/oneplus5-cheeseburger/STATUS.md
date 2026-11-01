@@ -3,8 +3,8 @@
 - 计划：`plans/oneplus5-cheeseburger/PLAN.md`
 - 线路：B — UniXNU / 4K
 - 路线/目标：iPad7,1 / iPadOS 17.7.11（21H461）
-- 当前阶段：**H103/H103b Preboot/Cryptex 布局审计、构建与首次上机完成（2026-11-01）。H91 仍是最佳 Probe 基线；H101/H102 快照仍未工作；审计确认 OS 根 `/System/Cryptexes/OS` 指向 `/private/preboot/Cryptexes/OS`，而当前 `/private/preboot` 为空，SystemOS 被挂到 `/` 或 `/private/preboot` 后都没有命中该路径。首次上机证明 Preboot overlay 和 SystemOS 挂载生效；失败点为 owner cache carrier 的旧路径硬编码，H103b 已修复并构建，等待第二次上机。**
-- 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）；H91/H96a18 过 mount-phase-1；H99 停在 driverkitd active；H100 停在 pfd/accountsd/nsurlsessiond/routined；H101/H102 快照未触发；H103 布局审计完成；H103 boot `aed7e8d8...` 上机确认挂载生效但 shared region 路径检查失败；H103b boot `3a0f6f19...` 已构建，等待上机**
+- 当前阶段：**H103/H103b/H103c Preboot/Cryptex 布局审计、构建与上机推进（2026-11-01）。H91 仍是最佳 Probe 基线；H101/H102 快照仍未工作；审计确认 OS 根 `/System/Cryptexes/OS` 指向 `/private/preboot/Cryptexes/OS`，而当前 `/private/preboot` 为空，SystemOS 被挂到 `/` 或 `/private/preboot` 后都没有命中该路径。首次上机证明 Preboot overlay 和 SystemOS 挂载生效；失败点为 owner cache carrier 的旧路径硬编码，H103b 已修复并构建，等待第二次上机。**
+- 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）；H91/H96a18 过 mount-phase-1；H99 停在 driverkitd active；H100 停在 pfd/accountsd/nsurlsessiond/routined；H101/H102 快照未触发；H103 布局审计完成；H103 boot `aed7e8d8...` 上机确认挂载生效但 shared region 路径检查失败；H103b 已越过 dyld cache 和 launchd boot task 序列；新停点 `tzinit` 缺 Data 时区目录；H103c boot `4c86ac17...` 已构建，等待上机**
 - 基线提交：H91 构建提交未记录；本地 UniXNU `main` `e4539ae`（H100 文档提交），设备仓库 `main` `5ad54e2`
 - 当前代码提交：本地 `e4539ae`；H99/H100/H101/H102 干净构建树为 XNU `d8b8029` + 原始 patches + 远程诊断插桩；H96 脏源码保留在 `.cache/xnu-work.h96dirty-20261031`；设备仓库 `5ad54e2`；关键子模块见 `BASELINE.md`
 - 远程仓库：

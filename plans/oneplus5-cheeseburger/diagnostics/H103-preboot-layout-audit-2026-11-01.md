@@ -349,3 +349,72 @@ H103b 产物：
 ```
 
 下一次上机重点：确认 `owner_carrier` 放行后 shared region 映射成功，dyld 能加载 `/usr/lib/libSystem.B.dylib`。
+
+## 14. H103b 上机结果（2026-11-01）
+
+H103b 成功越过 dyld cache：
+
+```text
+msuearlyboottask: doing boot task
+com.apple.xpc.launchd: Doing boot task
+FIPSPOST_USER ... all tests PASSED
+launchd boot tasks: fsck, mount-phase-1, data-protection,
+  finish-obliteration, detect-installed-roots, commit-boot-mode,
+  mount-phase-2, init-with-data-volume, fixup-mobile-tap,
+  MSEarlyBootTask, fips, keybag, useragentd, dirs_cleaner,
+  xpcroleaccountd, init_featureflags, auerlyboot
+```
+
+说明：
+
+- shared region / dyld cache 不再报 `not on process' root volume nor preboot volume`；
+- `/usr/lib/libSystem.B.dylib` 的 `no dyld cache` 错误消失；
+- launchd 已经进入标准 boot task 序列。
+
+新停点：
+
+```text
+tzinit: Unable to locate data; resetting to system partition
+tzinit: Last resort force_system_dataset() failed: No such file or directory
+pid 17 exited -- no exit reason available -- (signal 0, exit 2)
+Please go to https://panic.apple.com
+```
+
+原因是 Data skeleton 缺少：
+
+```text
+/private/var/db/timezone/zoneinfo
+```
+
+OS root 的 `/usr/share/zoneinfo` 是指向 `/var/db/timezone/zoneinfo` 的符号链接；Data 挂到 `/private/var` 后，OS root 的 `/private/var/db/timezone` 被隐藏，而 Data seed 没有补这个目录，所以 `tzinit` 找不到时区数据。
+
+## 15. H103c 修复与构建
+
+`scripts/prepare-owner-data-fixture.py` 的 skeleton 模式新增：
+
+- `db/timezone` 目录；
+- 从 OS mount 的 `usr/share/zoneinfo.default` 复制 602 个文件到 `db/timezone/zoneinfo`（约 364 KiB）；
+- `db/timezone/localtime -> /var/db/timezone/zoneinfo/US/Pacific`。
+
+新 Data seed：
+
+```text
+UUID    9E4EDD86-20C5-44A5-A964-35D291D7D956
+packed  bc0f10d4650fc322ce69d0eb7b7190428f93305292bd0bd03f21588da8c79253
+```
+
+H103c 产物（内核沿用 H103b）：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| kernel | `399ecaa2fec9ecfab5021df2d7e85cff1017b6d309f8e036e1849881b99ba816` |
+| payload | `1318aa1b723f909946440f52c0a3ad6c7620ff725f1063d18985f1edc57a4216` |
+| boot | `4c86ac177500f21b72fc14d41ebf4a2c253922addd69c1142e1f2f2fd85a5333` |
+
+本地产物：
+
+```text
+/home/ls/UniXNU-cheeseburger/out/cheeseburger/boot/boot-H103c-preboot.img
+```
+
+下一步上机确认 `tzinit` 不再退出，并记录下一个 boot task。

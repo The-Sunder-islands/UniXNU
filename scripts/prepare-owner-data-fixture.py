@@ -21,6 +21,8 @@ parser.add_argument('--size-mib', type=int, default=96, help='Skeleton APFS cont
 parser.add_argument('--packed', action='store_true', help='Write a DBRDISK1 packed seed (owner-data.dbr) in addition to the raw skeleton')
 parser.add_argument('--preboot-overlay', type=Path,
                     help='Stage the /private/preboot overlay under the Data seed (skeleton mode only)')
+parser.add_argument('--os-mount', type=Path, default=ROOT / '.cache/firmware/target-volumes/os-mount',
+                    help='Original OS root mount used to seed /private/var (skeleton mode only)')
 args = parser.parse_args()
 fixture = args.output.resolve()
 image = fixture / 'owner-data-32.cdr'
@@ -44,7 +46,7 @@ if args.skeleton:
         volume_uuid = info['VolumeUUID']
         # The first launchd boot only needs the writable skeleton. It creates
         # launchd.db and the per-service state below these directories itself.
-        for name in ('audit', 'buddy', 'datamigrator', 'db', 'db/com.apple.xpc.launchd',
+        for name in ('audit', 'buddy', 'datamigrator', 'db', 'db/com.apple.xpc.launchd', 'db/timezone',
                      'db/dslocal/nodes/Default/users', 'db/dslocal/nodes/Default/groups',
                      'db/dslocal/nodes/Default/config', 'dextcores', 'empty', 'folders',
                      'hardware', 'installd', 'keybags', 'keybags/backup', 'Library',
@@ -57,6 +59,17 @@ if args.skeleton:
                      'containers/Shared', 'containers/Shared/SystemGroup', 'PersonaVolumes'):
             (target / name).mkdir(parents=True, exist_ok=True)
         os.chmod(target / 'tmp', 0o1777)
+        # tzinit needs /private/var/db/timezone/zoneinfo. The OS root has the
+        # read-only zoneinfo.default tree; copy it into the writable Data seed.
+        zoneinfo = target / 'db/timezone/zoneinfo'
+        source_zoneinfo = args.os_mount.resolve() / 'usr/share/zoneinfo.default'
+        if source_zoneinfo.is_dir():
+            shutil.copytree(source_zoneinfo, zoneinfo, symlinks=True)
+        elif not zoneinfo.exists():
+            os.symlink('/usr/share/zoneinfo.default', zoneinfo)
+        localtime = target / 'db/timezone/localtime'
+        if not localtime.exists() and not localtime.is_symlink():
+            os.symlink('/var/db/timezone/zoneinfo/US/Pacific', localtime)
         if args.preboot_overlay:
             source = args.preboot_overlay.resolve()
             if not (source / 'cryptex1/current').is_dir() or not (source / 'Cryptexes').is_dir():
