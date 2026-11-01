@@ -1,7 +1,7 @@
 diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -7297,11 +7297,24 @@
+@@ -7297,11 +7297,35 @@
  	{
  		int h80_limit = task_set_phys_footprint_limit_internal(proc_task(p), -1, NULL, TRUE, FALSE);
  		printf("NATIVE_H80: tasklimit=%d\n", h80_limit);
@@ -10,13 +10,24 @@ diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
  	native_owner_cache_checkpoint(error, cache_authorized);
 +#if defined(XNU_OWNER_PREBOOT_ROOT_UNION) && XNU_OWNER_PREBOOT_ROOT_UNION
 +	if (!error) {
-+		struct mount_args root_request = request;
++		extern volatile int native_bindfs_boot_mount;
++		const char *source = "/private/preboot/Cryptexes/OS";
++		struct mount_args root_request = {.type = scratch + 0x300,
++		    .path = scratch + 0x340, .flags = MNT_RDONLY | MNT_UNION,
++		    .data = scratch + 0x360};
 +		int32_t root_result = 0;
 +		int root_error;
-+		root_request.flags = MNT_RDONLY | MNT_UNION;
-+		root_error = copyout("/", root_request.path, 2);
++		root_error = copyout("bindfs", root_request.type, 7);
 +		if (!root_error) {
++			root_error = copyout("/", root_request.path, 2);
++		}
++		if (!root_error) {
++			root_error = copyout(source, root_request.data, strlen(source) + 1);
++		}
++		if (!root_error) {
++			native_bindfs_boot_mount = 1;
 +			root_error = mount(p, &root_request, &root_result);
++			native_bindfs_boot_mount = 0;
 +		}
 +		printf("NATIVE_H103_ROOT_UNION: %d\n", root_error);
 +	}

@@ -859,3 +859,42 @@ D:\Users\ls\Documents\OnePlus5_ios\boot-H103k-rootunion.img
 ```text
 NATIVE_H103_ROOT_UNION: 0
 ```
+
+## 28. H103k/H103l：root union 改为 bindfs（2026-11-02）
+
+H103k（APFS 二次 mount 到 `/` + MNT_UNION）仍然停在：
+
+```text
+KextLog: Building FileSet KC(s)
+KextLog: Loading FileSet KC(s)
+KextLog: driverkitd is active
+```
+
+`NATIVE_H103_ROOT_UNION` 没有出现在最终可见窗口，无法区分是 mount 失败还是成功但 driverkitd 仍卡。因此 H103l 改为 **bindfs root union**，不再次挂 APFS：
+
+```c
+source = "/private/preboot/Cryptexes/OS";
+mount("bindfs", "/", MNT_RDONLY | MNT_UNION, source);
+```
+
+这样 `/System/DriverKit`、`/System/Library/...` 等路径从已挂载的 SystemOS 视图叠加到 root，同时保留 Preboot/Cryptex 布局。
+
+H103l 产物：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| kernel | `eaa1dbd6060a597af4c910b22475a687a37323a7eb9498333ac1bb86d0fae787` |
+| payload | `fb84ee1102735a1cb64735393cca522ab3d7dd78a5adf71509e1b6a358d5dbd2` |
+| boot | `b9163e77b30bd473ace944225663ed3467da38387508836944e1b20bda92f2fa` |
+
+Windows 路径：
+
+```text
+D:\Users\ls\Documents\OnePlus5_ios\boot-H103l-rootbindfs.img
+```
+
+已 boot。判读：
+
+- `NATIVE_H103_ROOT_UNION: 0` 且 driverkitd 不再 stall → root bindfs 是缺失项；
+- 非 0 → bindfs mount 失败，查 entitlement/源路径；
+- 0 但仍 stall → driverkitd 的 FileSet KC 不是 root 视图问题，转 UFS/FileSet KC 调用链。
