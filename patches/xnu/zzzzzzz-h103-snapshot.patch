@@ -1,0 +1,65 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -1,4 +1,6 @@
+ #include <kern/boot_progress.h>
++#include <kern/thread_call.h>
++#include <kern/clock.h>
+ /*
+  * Copyright (c) 2000-2020 Apple Inc. All rights reserved.
+  *
+@@ -923,6 +925,45 @@
+ extern int use_panic_on_proc_spawn_fail;
+ #endif
+ 
++#if (DEVELOPMENT || DEBUG)
++static thread_call_t native_snapshot_call;
++static bool native_snapshot_queued;
++
++static int
++native_snapshot_proc(proc_t p, void *arg __unused)
++{
++	printf("NATIVE_PROC: pid=%d ppid=%d comm=%s\n",
++	    proc_getpid(p), p->p_ppid, p->p_comm);
++	return 0;
++}
++
++static void
++native_snapshot_run(thread_call_param_t p0 __unused, thread_call_param_t p1 __unused)
++{
++	printf("NATIVE_PROC_BEGIN\n");
++	proc_iterate(PROC_ALLPROCLIST | PROC_ZOMBPROCLIST, native_snapshot_proc, NULL, NULL, NULL);
++	printf("NATIVE_PROC_END\n");
++}
++
++static void
++native_snapshot_schedule(void)
++{
++	uint64_t delay = 0;
++	if (native_snapshot_queued) {
++		return;
++	}
++	native_snapshot_queued = true;
++	native_snapshot_call = thread_call_allocate(native_snapshot_run, NULL);
++	if (native_snapshot_call == NULL) {
++		printf("NATIVE_PROC: thread_call_allocate failed\n");
++		return;
++	}
++	nanoseconds_to_absolutetime(90ULL * NSEC_PER_SEC, &delay);
++	printf("NATIVE_PROC: snapshot armed in 90s\n");
++	thread_call_enter_delayed(native_snapshot_call, mach_absolute_time() + delay);
++}
++#endif
++
+ void
+ set_proc_name(struct image_params *imgp, proc_t p)
+ {
+@@ -955,3 +955,8 @@
+ 		printf("NATIVE_EXEC: pid=%d ppid=%d comm=%s argv0=%s argv1=%s\n",
+ 		    proc_getpid(p), p->p_ppid, p->p_comm, h96_a0 ? h96_a0 : "", h96_a1 ? h96_a1 : "");
++#if (DEVELOPMENT || DEBUG)
++		if (!strcmp(p->p_comm, "launchd") || !strcmp(p->p_comm, "driverkitd")) {
++			native_snapshot_schedule();
++		}
++#endif
+ 	}

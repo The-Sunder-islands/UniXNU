@@ -35,7 +35,8 @@ fi
 # Remove them first so earlier independent patches retain their idempotent checks.
 # The same holds for the boot-time GPU addon mount and the staged system apps copy (zzy), which edit the owner Data mount function
 # inside the systemos patch. Reverse newest first; the loop below re-applies them in name order.
-for LATE_PATCH in "$ROOT/patches/xnu/zzzzzz-h103-proc-diag.patch" \
+for LATE_PATCH in "$ROOT/patches/xnu/zzzzzzz-h103-snapshot.patch" \
+    "$ROOT/patches/xnu/zzzzzz-h103-proc-diag.patch" \
     "$ROOT/patches/xnu/zzzzz-h103-data-diag.patch" \
     "$ROOT/patches/xnu/zzzz-owner-preboot-layout.patch" \
     "$ROOT/patches/xnu/zzz-shared-region-cache-bypass.patch" \

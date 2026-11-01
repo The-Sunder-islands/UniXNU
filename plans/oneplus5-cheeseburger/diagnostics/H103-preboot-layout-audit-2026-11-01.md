@@ -628,3 +628,59 @@ D:\Users\ls\Documents\OnePlus5_ios\boot-H103g-preboot.img
 1. `cryptexd`、`eligibilityd` 是否出现 `NATIVE_EXEC`；
 2. 是否出现 `NATIVE_EXIT`；
 3. `driverkitd` 是否在等某个 `FileSet KC` kext。
+
+## 22. H103g 上机结果与 H103h 进程快照（2026-11-01）
+
+H103g 已经能看到完整 exec 序列：
+
+```text
+NATIVE_EXEC: pid=65 ppid=1 comm=driverkitd
+NATIVE_EXEC: pid=70 ppid=1 comm=AppleCredentialManager...
+NATIVE_EXEC: pid=73 ppid=1 comm=rapportd
+NATIVE_EXEC: pid=74 ppid=1 comm=useractivityd
+NATIVE_EXEC: pid=76 ppid=1 comm=fseventsd
+NATIVE_EXEC: pid=77 ppid=1 comm=IOHFB_FDR_Loader
+NATIVE_EXEC: pid=82 ppid=1 comm=xpcproxy argv1=com.apple.logd_helper
+NATIVE_EXEC: pid=84 ppid=1 comm=logd_helper
+```
+
+之后屏幕停止刷新，停在：
+
+```text
+KextLog: Loading FileSet KC(s)
+KextLog: driverkitd is active
+NATIVE_UFS_PROGRESS: ... winFlight=1 lastWin=SystemOS/OS
+```
+
+可见窗口内没有 `cryptexd`/`eligibilityd`，也没有 `NATIVE_EXIT`/panic。判断：
+
+- `driverkitd` 已启动，launchd 继续拉起一批 daemon；
+- 但 `cryptexd`/`eligibilityd` 之前就停住；
+- 停点仍是 `driverkitd` / `FileSet KC`，需要确认是 launchd 等 driverkitd，还是 UFS 读停住。
+
+H103h 增加一个 **thread_call 进程快照**：
+
+- 在 `launchd`/`driverkitd` exec 时调度；
+- 90 秒后打印：
+  ```text
+  NATIVE_PROC_BEGIN
+  NATIVE_PROC: pid=... ppid=... comm=...
+  ...
+  NATIVE_PROC_END
+  ```
+
+H103h 产物：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| kernel | `f9b73b9c4d268df4224dfd38aa13b50ae048f32ff216b91b76c12f64da7f60c2` |
+| payload | `61198f9d00366b4d1c21156984a255f5cf152934040f8fabdb4bd9ac1cba0953` |
+| boot | `a86c5a6a360cbb3055539141f2ca6165c81e6c2ffff041766dd1c073092aa143` |
+
+Windows 路径：
+
+```text
+D:\Users\ls\Documents\OnePlus5_ios\boot-H103h-preboot.img
+```
+
+已在 Windows boot。下一步等待 90 秒后的 `NATIVE_PROC` 输出，确认 `cryptexd`/`eligibilityd`/`driverkitd` 的实际 PID 和父进程。
