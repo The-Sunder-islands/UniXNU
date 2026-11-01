@@ -1019,3 +1019,53 @@ boot   45163f34c59447802c97826eba48f53ec49e73d2adda114f1842ad72732ffa36
 - 若 UFS 读仍在推进，等待 FileSet KC 完成；
 - 若停住，需要 UFS 请求级 stall/panic 或定位 FileSet KC 的具体路径/文件；
 - 不再尝试 root union。
+
+## 33. H103m2 的关键结论与下一步（2026-11-02）
+
+H103m2 直接证明了：
+
+```text
+NATIVE_UFS_WINDOW: SystemOS ... caller=driverkitd/62
+```
+
+并出现：
+
+```text
+KextLog: driverkitd is not active
+KextLog: Loading FileSet KC(s)
+KextLog: driverkitd is active
+```
+
+同时没有 `NATIVE_UFS_STALL`/panic；心跳线程没有触发 UFS stall。说明：
+
+- 持续读 SystemOS 的是 **driverkitd**；
+- 不是 launchd 随机等待，也不是单纯内核 pagein；
+- driverkitd 正在处理 FileSet KC；
+- launchd 在 cryptexd 之前停住。
+
+`driverkitd` 二进制字符串显示它会加载：
+
+```text
+BootKernelCollection.kc
+AuxiliaryKernelCollection.kc
+SystemKernelCollection
+```
+
+而当前 OS root 没有：
+
+```text
+/System/Library/KernelCollections
+```
+
+SystemOS 也没有 KernelCollections。因此下一步的最高优先级是：
+
+1. 只读确认 driverkitd 的 `KernelPath`/`BootKernelCollection` 配置和它实际打开的文件；
+2. 如果确实缺 `BootKernelCollection.kc`/`AuxiliaryKernelCollection.kc`，考虑从原始 kernelcache 派生一个窄 overlay，只覆盖 `/System/Library/KernelCollections`，不要再次 root union；
+3. 不跳过 driverkitd、不新增 cryptexd/eligibilityd skip。
+
+H103m2 是当前最好的诊断基线：
+
+```text
+kernel b0fb38e9...
+boot   45163f34...
+```
