@@ -1667,3 +1667,114 @@ NATIVE_LEGACY_STATE: load=0 stage=10 reg=1 surface=0/1 probe=1 dt=1 start=1 call
 kernel 3f459752543807b06a2da151799ac6eb984d5188eb771b04ddaf13a24846cbc4
 boot   503a0d567ccec5d999b6d9967d044b76a8cd16f4e4b46d8b7064c5ab6be2d359
 ```
+
+## 43. H103ao–H103at：backboardd 启动确认与 Legacy 显示边界（2026-11-03）
+
+### H103ao：SpringBoard exec 确认
+
+在 `kern_exec` 中对 `SpringBoard` 做目标 panic。
+
+结果：
+
+```text
+NATIVE_EXEC: pid=27 ppid=1 comm=SpringBoard
+  argv0=/System/Library/CoreServices/SpringBoard.app/SpringBoard
+panic: NATIVE_EXEC_TARGET: pid=27 comm=SpringBoard
+```
+
+结论：launchd 已经能拉起 SpringBoard。
+
+### H103ap：backboardd exec 确认
+
+只对 `backboardd` 做目标 panic。
+
+结果：
+
+```text
+NATIVE_EXEC: pid=55 ppid=1 comm=backboardd
+  argv0=/usr/libexec/backboardd
+panic: NATIVE_EXEC_TARGET: pid=55 comm=backboardd
+```
+
+结论：backboardd 也能被 launchd 拉起。
+
+### H103aq/H103as/H103at：显示打开路径
+
+- H103aq：恢复干净配置，不拒绝 loader，不 panic；
+  - 某些启动能到 backboardd；
+  - `display calls=0`；
+  - 没有 `NATIVE_DISPLAY_OPEN`。
+- H103as：改为拒绝真实 loader 名：
+  ```text
+  IOMFB_FDR_Loader
+  ```
+  同时 `NativeSandboxGrantProcess=backboardd`；
+  - backboardd 已 exec；
+  - 仍未出现 `NATIVE_DISPLAY_OPEN`；
+  - `display calls=0`。
+- H103at：`IOClass=IOMobileFramebuffer`（基类）；
+  - backboardd 已 exec；
+  - 显示客户端仍是：
+    ```text
+    calls=1 pid=78 comm=IOMFB_FDR_Loader status=e00002c7
+    ```
+  - `status=e00002c7` 是拒绝 loader 返回的错误；
+  - backboardd 仍然没有打开显示。
+
+### 结论
+
+Legacy framebuffer 后端已经完成：
+
+```text
+load=0 stage=10 reg=1 surface=0/1 probe=1 dt=1 start=1 pattern=1
+```
+
+GOP 自检色块可见，说明：
+
+```text
+IOMobileFramebuffer -> GOP -> 屏幕
+```
+
+完全打通。
+
+但：
+
+```text
+backboardd 已经启动
+却没有调用 IOServiceOpen 打开 Legacy display
+```
+
+因此继续调以下内容没有意义：
+
+- `IOClass`
+- `IOProviderClass`
+- `NativeSandboxGrantProcess`
+- `IOMFB_FDR_Loader` 拒绝
+- `newUserClient`
+
+下一步转向：
+
+```text
+backboardd / CoreAnimation / IOAccelerator / IOGPU / Metal
+```
+
+最可能的情况是 backboardd/CoreAnimation 进入 headless 模式，等待 GPU/Metal 设备。
+
+### 产物
+
+```text
+H103ao kernel b974cebd86409f471c94071ce50cc8c1ccbd5906dd39e4393981ec6a61f0a542
+H103ao boot   6463b0aead15c1d4edb0f4e101971627af2ce32a1f6d50f7ca70f07f1573ac4d
+
+H103ap kernel 725edf18a32c0e1b2ece243ad0c16c08bd728ce571fc2e14aea3ea1ed147feff
+H103ap boot   23dfa2b0d0169e93ae67873663f437fa097cc7e1ca6d0c9ef7840715457992e5
+
+H103aq kernel df417f413bfeae02e5fd9b627342d7670adc1d7ff15437d14baf616db98ae5d1
+H103aq boot   1e75019ea0a27d731947b826242431692eeeef5ff5aceaabcbf13096ad094f76
+
+H103as kernel 37bf0159ca93fad2e538312ec6192966d46a533ef4f56b30e71f8d3de8854a50
+H103as boot   96688b26148d912a238ac43328a39c7ae7567b792cd9cfd524b2b3035e114784
+
+H103at kernel c93b972ce48207ae941b57bb3476e59cc456f1081934fdd723e275113de9ac69
+H103at boot   9e363bef3ee556dd1a3dc6e61509612a10459c09f823592d67acc5908ddf6e43
+```
