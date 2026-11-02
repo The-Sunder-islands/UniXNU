@@ -1431,3 +1431,83 @@ com.apple.iomfb_fdr_loader
 - `calls=1` 的 pid 是否从 70 变成 55（backboardd）；
 - `C0 calls` 是否开始增长；
 - 是否出现 `swap/xfer`。
+
+## 40. H103ae–H103af：IOMFB loader 与客户端身份（2026-11-02）
+
+### H103ae：只禁用 iomfb_fdr_loader（失败）
+
+H103aa 同内核，payload 在 `sheng-disable-jobs` 中只加入：
+
+```text
+com.apple.iomfb_fdr_loader
+```
+
+保留 `com.apple.iomfb_bics_daemon`。
+
+结果仍然 panic：
+
+```text
+panic(cpu 0 caller ...): sheng watchdog timeout failed: 222
+  @kernel_exec.c:...
+Hardware strut ... initialized
+```
+
+结论：
+
+- 不能禁用 `com.apple.iomfb_fdr_loader`；
+- H103ab 同时禁用 fdr_loader 与 bics_daemon 的 panic 不是叠加问题，单独禁用 fdr_loader 也会触发；
+- 该 job 是启动必需路径的一部分，不能通过 disable-jobs 绕过。
+
+产物：
+
+```text
+kernel  b6e6653c44b1fce84534b6cf7186a3748411d096d6d05e5fabd2e949d95b8d8e
+payload b165da287833646a0ae26c7bfac28e18b62e5c55bfa31d741ce9bf332fbab600
+boot    0b421b37b4e453245f5277f877aa0dc176339e5b11bbedbe94946557a690f113
+```
+
+### H103af：客户端进程名诊断
+
+在 H103aa/H103ad 基线上增加：
+
+- `native_legacy_client_comm[64]`；
+- `native_legacy_client_enter` 通过 `proc_name(pid,...)` 记录客户端进程名；
+- `NATIVE_LEGACY_STATE` 增加 `comm=...`；
+- `NATIVE_LEGACY_CLIENTS` 的 `C0 ... comm=...`。
+
+配置保持：
+
+```text
+cpus=1
+IOClass=IOMobileFramebufferLegacy
+无 sheng-vsync
+不修改 sheng-disable-jobs 的 IOMFB 项
+```
+
+产物：
+
+```text
+kernel  a90a4190970e8f33c81afa027e1bad68939ccb68e84502e1d9d148eecbf77234
+payload 454d37fd201bc8ad9fad883978d0ba9086260c85fe45474b14d7a6ac7a37afd4
+boot    221ec5e155fa480ed1087eb9e03e45aa031e1289779acbba38da881f70074986
+```
+
+Windows 路径：
+
+```text
+D:\Users\ls\Documents\OnePlus5_ios\boot-H103af-comm.img
+```
+
+### 当前判断
+
+- H103aa/H103ad 已证明显示后端工作：
+  ```text
+  load=0 stage=10 reg=1 start=1 calls=1 pattern=1
+  ```
+- 客户端能稳定打开（`calls=1`），但 `C0 calls=0`，从未发起 selector。
+- H103ad 中客户端 pid 为 70，而 `backboardd` 是 55、`SpringBoard` 是 27。
+- H103af 用 `comm=` 确认 pid 70 的真实身份。
+- 若确认是 `IOMFB_FOR_Loader`，下一步不能禁 job，只能考虑：
+  - 只拒绝该 loader 的显示 user client（按 comm/pid），让 backboardd 接手；
+  - 或提供 loader 期望的显示固件路径；
+  - 或延迟/绕过 loader，而不触发 watchdog。
