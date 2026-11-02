@@ -1585,3 +1585,85 @@ Filesystem UUID: 33c9e7ae-b978-430c-900a-a10074a9f0dc
 - 分区后 H103 iOS 是否仍能启动；
 - 如果 `RootLayout`/`NativeUfsWarm` 仍硬编码 `userdata`，需要改成优先 `userdata_ios` 或加回退；
 - 后续要做 iOS 持久化 Data 时，再在 `userdata_ios` 上创建 APFS container。
+
+## 42. Userdata 拆分的修正：iOS SHNGROOT 恢复到 userdata_ios（2026-11-02）
+
+### 根因
+
+拆分后 H103ad/H103af 都停在：
+
+```text
+skip attaching fse to iOS using legacy IO matching ...
+UUID 04769D26-2CA0-4825-B443-E2E5F88300F2
+```
+
+原因是把 `userdata` 当成了普通 iOS Data 分区。实际上 `userdata` 是
+iOS 的 SHNGROOT 容器：
+
+```text
+0x000000  manifest
+0x100000  OS window
+0x16a600000 SystemOS window
+```
+
+Android 的 64 GiB `userdata` 格式化后，iOS 的 OS/SystemOS 窗口被覆盖，
+所以根 UUID 匹配失败。
+
+### 恢复
+
+用 `unixnu build userdata` 从原 IPSW DMG 重新生成：
+
+```text
+OS       6,077,580,800 bytes @ 0x100000
+SystemOS 3,303,014,400 bytes @ 0x16a600000
+image    9,382,658,048 bytes (8.74 GiB)
+```
+
+镜像：
+
+```text
+D:\Users\ls\Documents\OnePlus5_ios\userdata-root.img
+```
+
+已由用户手动刷入：
+
+```text
+fastboot flash userdata_ios userdata-root.img
+```
+
+### 代码修改
+
+- `drivers/NativeUfs/RootLayout.h` / tree `scripts/RootLayout.h`：
+  ```text
+  wanted = "userdata_ios"
+  ```
+- `drivers/NativeUfsProbe/NativeUfsProbe.cpp`：
+  - GPT 扫描时捕获 `userdata_ios` 的 first/last LBA；
+  - SHNGROOT manifest 从 `rootFirst` 读取，不再硬编码 `0x14f40`；
+  - OS/SystemOS window 的绝对地址改为 `rootFirst * 4096 + offset`。
+
+### H103ag 结果
+
+H103ag 使用新的 UFS probe，`userdata_ios` 上的 SHNGROOT 被识别，iOS 再次启动到：
+
+```text
+KextLog: driverkitd is active
+```
+
+显示后端状态：
+
+```text
+NATIVE_LEGACY_STATE: load=0 stage=10 reg=1 surface=0/1 probe=1 dt=1 start=1 calls=0 pattern=1
+```
+
+- 品红色 GOP 自检块正常；
+- iOS OS/SystemOS 恢复；
+- Android 的 64 GiB `userdata` 未被触碰；
+- 本次启动显示客户端 `calls=0`，仍需继续查 backboardd/SpringBoard 的显示连接。
+
+产物：
+
+```text
+kernel 3f459752543807b06a2da151799ac6eb984d5188eb771b04ddaf13a24846cbc4
+boot   503a0d567ccec5d999b6d9967d044b76a8cd16f4e4b46d8b7064c5ab6be2d359
+```
