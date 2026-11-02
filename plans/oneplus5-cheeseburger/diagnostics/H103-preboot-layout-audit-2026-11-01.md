@@ -1270,3 +1270,164 @@ archive 0326dcadb64d515b03ecaaf8344dbb593d5dc9afa0ce46477369f94201c42260
 boot 镜像已传至 Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H103n-legacy.img`，
 并已 `fastboot boot`。下一步看屏幕是否出现 `NativeLegacyDisplay` stage、
 `backboardd`/`WindowServer`，或 display guard panic。
+
+## 39. H103w–H103ad：cpus=1、GOP 自检与显示客户端诊断（2026-11-02）
+
+### H103w：cpus=1 对照
+
+H103v 同内核，只把 payload 的 `cpus=2` 改为 `cpus=1`。
+
+结果：
+
+- 每次都能到达：
+  ```text
+  KextLog: driverkitd is active
+  ```
+- 说明之前概率性停在 KextLog 之前主要是 SMP/早期启动时序竞态。
+- 但 userland 显示客户端仍不稳定：
+  - 有时 `display calls=0`；
+  - 有时 `display calls=1`，但 `NATIVE_LEGACY_CLIENTS: C0 calls=0`。
+
+产物：
+
+```text
+boot 79dc3a1720c5e552194f79a709ecf810205c395d331c2fcb9d69f7055d6e51aa
+```
+
+### H103x：GOP 自检图案
+
+在 `NativeLegacyDisplay::startDisplay` 成功后，UFS 心跳每 10 秒在右上角画
+256×256 品红色块。
+
+结果：
+
+- H103y/H103z/aa 均可见品红色块；
+- 证明：
+  ```text
+  GOP mapping -> framebuffer -> 屏幕
+  ```
+  完全打通。
+
+### H103y/H103z/H103aa 的状态行
+
+新增：
+
+```text
+NATIVE_LEGACY_STATE: load=... stage=... reg=... surface=... probe=... dt=... start=... calls=... pattern=...
+```
+
+H103y：
+
+```text
+load=0 stage=10 reg=1 surface=0/1 probe=1 dt=1 start=1 calls=0 pattern=1
+```
+
+H103z 去掉显式 `registerService()` 与 `IOClass` 后：
+
+```text
+load=0 stage=10 reg=1 ... calls=0 pattern=1
+```
+
+说明 base `start` 自己会注册服务，显式注册不是必要动作。
+
+H103aa 只设置：
+
+```text
+IOClass = IOMobileFramebufferLegacy
+```
+
+结果稳定为：
+
+```text
+load=0 stage=10 reg=1 surface=0/1 probe=1 dt=1 start=1 calls=1 pid=78 status=0 pattern=1
+NATIVE_LEGACY_CLIENTS:
+C0 pid=78 calls=0 fails=0 regs=0
+```
+
+结论：`IOClass=IOMobileFramebufferLegacy` 能稳定让 userland 找到并打开服务。
+
+### H103ab：禁用 IOMFB loader jobs（失败）
+
+payload 在 `sheng-disable-jobs` 中加入：
+
+```text
+com.apple.iomfb_fdr_loader
+com.apple.iomfb_bics_daemon
+```
+
+结果：
+
+- panic：
+  ```text
+  sheng watchdog timeout failed: 222
+  ```
+- 不能同时禁用这两个 job；该对照作废。
+
+### H103ac：sheng-vsync=120（失败）
+
+H103aa 同内核，payload 加：
+
+```text
+sheng-vsync=120
+```
+
+结果：
+
+```text
+display calls=0 pid=0 status=ffffffff pattern=1
+```
+
+- `IOMFBDisplayRefresh`/vsync 不是当前阻塞点；
+- 该参数反而改变启动时序，使显示客户端不再打开；
+- 回到 H103aa 配置。
+
+### H103ad：恢复 H103aa 基线
+
+无 `sheng-vsync`，保持 `IOClass=IOMobileFramebufferLegacy`、`cpus=1`。
+
+结果：
+
+```text
+display calls=1 pid=70 status=0
+NATIVE_LEGACY_CLIENTS:
+C0 pid=70 calls=0 fails=0 regs=0
+```
+
+同时 UFS caller 可见：
+
+```text
+caller=SpringBoard/27
+caller=backboardd/55
+```
+
+说明：
+
+- `SpringBoard/27` 和 `backboardd/55` 都活着；
+- 但打开显示的是 **pid 70**，不是 backboardd/55；
+- pid 70 很可能是 `IOMFB_FOR_Loader`；
+- 该客户端打开后没有发起任何 selector（`C0 calls=0`）；
+- backboardd 可能被 loader 挡住，尚未自己打开显示。
+
+### 当前基线
+
+```text
+kernel  b6e6653c44b1fce84534b6cf7186a3748411d096d6d05e5fabd2e949d95b8d8e
+payload 965999e770257c244f1db83a97efc8b91ff8d8398b203de95743f1bb81fc9948
+boot    7c0032f0994fc215aa9963de5e73b5c9d47a564514c86706eb37499ec309b2b9
+cpus    1
+IOClass IOMobileFramebufferLegacy
+```
+
+### 下一步 H103ae
+
+H103aa 同内核，只禁用：
+
+```text
+com.apple.iomfb_fdr_loader
+```
+
+保留 `com.apple.iomfb_bics_daemon`，观察：
+
+- `calls=1` 的 pid 是否从 70 变成 55（backboardd）；
+- `C0 calls` 是否开始增长；
+- 是否出现 `swap/xfer`。
