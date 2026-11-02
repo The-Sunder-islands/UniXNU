@@ -1,36 +1,36 @@
 [submodule "drivers/ArmCpu"]
 	path = drivers/ArmCpu
-	url = https://github.com/UniXNU/ArmCpu.git
+	url = https://github.com/lss717/ArmCpu.git
 [submodule "drivers/ArmDTPlatform"]
 	path = drivers/ArmDTPlatform
-	url = https://github.com/UniXNU/ArmDTPlatform.git
+	url = https://github.com/lss717/ArmDTPlatform.git
 [submodule "drivers/ArmVirtPlatform"]
 	path = drivers/ArmVirtPlatform
-	url = https://github.com/UniXNU/ArmVirtPlatform.git
+	url = https://github.com/lss717/ArmVirtPlatform.git
 [submodule "drivers/DarwinBoot"]
 	path = drivers/DarwinBoot
-	url = https://github.com/UniXNU/DarwinBoot.git
+	url = https://github.com/lss717/DarwinBoot.git
 [submodule "drivers/NativeAES"]
 	path = drivers/NativeAES
-	url = https://github.com/UniXNU/NativeAES.git
+	url = https://github.com/lss717/SoftwareAES.git
 [submodule "drivers/NativeAdreno"]
 	path = drivers/NativeAdreno
-	url = https://github.com/UniXNU/NativeAdreno.git
+	url = https://github.com/lss717/Adreno740.git
 [submodule "drivers/NativeGeniSpi"]
 	path = drivers/NativeGeniSpi
-	url = https://github.com/UniXNU/NativeGeniSpi.git
+	url = https://github.com/lss717/QcomGeniSpi.git
 [submodule "drivers/NativeHidInput"]
 	path = drivers/NativeHidInput
-	url = https://github.com/UniXNU/NativeHidInput.git
+	url = https://github.com/lss717/ShengHidInput.git
 [submodule "drivers/NativeKeyStoreEvents"]
 	path = drivers/NativeKeyStoreEvents
-	url = https://github.com/UniXNU/NativeKeyStoreEvents.git
+	url = https://github.com/lss717/AppleKeyStoreState.git
 [submodule "drivers/NativeMetal"]
 	path = drivers/NativeMetal
-	url = https://github.com/UniXNU/NativeMetal.git
+	url = https://github.com/lss717/AdrenoMetal.git
 [submodule "drivers/NativeMobileDisplay"]
 	path = drivers/NativeMobileDisplay
-	url = https://github.com/UniXNU/NativeMobileDisplay.git
+	url = https://github.com/lss717/GopFramebuffer.git
 [submodule "drivers/NativeRamBlock"]
 	path = drivers/NativeRamBlock
 	url = https://github.com/lss717/RamBlock.git
@@ -39,25 +39,25 @@
 	url = https://github.com/lss717/NativeUfs.git
 [submodule "drivers/NativeVirtioBlock"]
 	path = drivers/NativeVirtioBlock
-	url = https://github.com/UniXNU/NativeVirtioBlock.git
+	url = https://github.com/lss717/VirtioMmioBlock.git
 [submodule "drivers/NativeVirtioConsole"]
 	path = drivers/NativeVirtioConsole
-	url = https://github.com/UniXNU/NativeVirtioConsole.git
+	url = https://github.com/lss717/VirtioMmioConsole.git
 [submodule "kits/AdrenoFirmware"]
 	path = kits/AdrenoFirmware
-	url = https://github.com/UniXNU/AdrenoFirmware.git
+	url = https://github.com/lss717/AdrenoFirmware.git
 [submodule "kits/AdrenoPM4"]
 	path = kits/AdrenoPM4
-	url = https://github.com/UniXNU/AdrenoPM4.git
+	url = https://github.com/lss717/AdrenoPM4.git
 [submodule "kits/AirNir"]
 	path = kits/AirNir
-	url = https://github.com/UniXNU/AirNir.git
+	url = https://github.com/lss717/AirNir.git
 [submodule "kits/ArmSmmu4K"]
 	path = kits/ArmSmmu4K
-	url = https://github.com/UniXNU/ArmSmmu4K.git
+	url = https://github.com/lss717/ArmSmmu4K.git
 [submodule "kits/NativePrelink"]
 	path = kits/NativePrelink
-	url = https://github.com/UniXNU/NativePrelink.git
+	url = https://github.com/lss717/XnuPrelink.git
 [submodule "kits/VerifiedRoot"]
 	path = kits/VerifiedRoot
-	url = https://github.com/UniXNU/VerifiedRoot.git
+	url = https://github.com/lss717/VerifiedRoot.git
