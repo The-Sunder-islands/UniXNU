@@ -128,3 +128,18 @@ diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
  #if CONFIG_MEMORYSTATUS
  	(void) memorystatus_init_at_boot_snapshot();
  #endif /* CONFIG_MEMORYSTATUS */
+diff --git a/bsd/vm/vm_unix.c b/bsd/vm/vm_unix.c
+--- a/bsd/vm/vm_unix.c
++++ b/bsd/vm/vm_unix.c
+@@ -2245,7 +2245,11 @@
+ #else
+ 	const char *cache_uuid = "8846FE78-2910-4297-AF97-D59BB6F8FC16";
+ #endif
++#if defined(XNU_OWNER_PREBOOT_LAYOUT) && XNU_OWNER_PREBOOT_LAYOUT
++	const char *directory = "/private/preboot/Cryptexes/OS/System/Library/Caches/com.apple.dyld";
++#else
+ 	const char *directory = "/private/preboot/System/Library/Caches/com.apple.dyld";
++#endif
+ 	vnode_t expected_parent = NULLVP, device_vnode;
+ 	dev_t root_device = NODEV, cache_device = NODEV, expected = NODEV;
+ 	char device_path[64];

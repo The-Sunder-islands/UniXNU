@@ -1,6 +1,6 @@
 --- a/bsd/kern/bsd_init.c
 +++ b/bsd/kern/bsd_init.c
-@@ -1282,7 +1282,15 @@ bsd_autoconf(void)
+@@ -1282,7 +1282,27 @@ bsd_autoconf(void)
  		}
  	}
  
@@ -12,6 +12,18 @@
 +	 */
 +	extern void native_legacy_display_late_probe(void);
 +	native_legacy_display_late_probe();
++	int native_legacy_diag = 0;
++	if (PE_parse_boot_argn("offline-legacy-diag", &native_legacy_diag, sizeof(native_legacy_diag)) && native_legacy_diag) {
++		extern volatile uint32_t native_legacy_stage, native_legacy_surface_found,
++		    native_legacy_probe_match, native_legacy_dt_attached, native_legacy_start_result;
++		extern volatile int native_legacy_surface_status;
++		extern volatile uint64_t native_legacy_object, native_legacy_nub;
++		panic("NATIVE_LEGACY late stage=%u load=%d surface=%d/%u probe=%u dt=%u start=%u obj=%llx nub=%llx",
++		    native_legacy_stage, native_mobile_graphics_load_status, native_legacy_surface_status,
++		    native_legacy_surface_found, native_legacy_probe_match, native_legacy_dt_attached,
++		    native_legacy_start_result, (unsigned long long)native_legacy_object,
++		    (unsigned long long)native_legacy_nub);
++	}
 +#endif
 +	return result;
  }
