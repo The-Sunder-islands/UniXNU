@@ -1511,3 +1511,77 @@ D:\Users\ls\Documents\OnePlus5_ios\boot-H103af-comm.img
   - 只拒绝该 loader 的显示 user client（按 comm/pid），让 backboardd 接手；
   - 或提供 loader 期望的显示固件路径；
   - 或延迟/绕过 loader，而不触发 watchdog。
+
+## 41. Userdata 一分为二：Android 64 GiB + iOS 49.2 GiB（2026-11-02）
+
+### 分区前审计
+
+临时启动 TWRP（未刷入 recovery）：
+
+```text
+fastboot boot twrp.img
+```
+
+GPT 关键信息：
+
+```text
+UFS LUN0: 119,054,336 KiB ≈ 113.2 GiB
+logical sector: 4096 bytes
+userdata: /dev/block/sda13
+start LBA: 0x14f40
+end LBA:   0x1c627fa
+size:      29,677,755 sectors ≈ 113.2 GiB
+```
+
+原始 GPT 已备份到 Windows：
+
+```text
+D:\Users\ls\Documents\OnePlus5_ios\gpt-primary.bin
+D:\Users\ls\Documents\OnePlus5_ios\gpt-backup-full.bin
+```
+
+### 新 GPT
+
+```text
+userdata       Android   0x14f40  .. 0x1014f3f   64.0 GiB
+userdata_ios   iOS       0x1014f40 .. 0x1c627fa   49.2 GiB
+```
+
+- 新 `userdata_ios` 类型设置为 Apple APFS；
+- primary/backup GPT 的 entries CRC、header CRC 均重新计算并读回校验一致；
+- 通过 TWRP `dd` 写回 `/dev/block/sda`；
+- 重启 TWRP 后内核识别新分区。
+
+确认：
+
+```text
+/dev/block/by-name/userdata      -> /dev/block/sda13
+/dev/block/by-name/userdata_ios  -> /dev/block/sda14
+
+blockdev --getsize64 userdata      = 68719476736   # 64 GiB
+blockdev --getsize64 userdata_ios  = 52840607744   # 49.2 GiB
+```
+
+### Android userdata
+
+Android 的 64 GiB `userdata` 已重新格式化为 ext4：
+
+```text
+Filesystem UUID: 33c9e7ae-b978-430c-900a-a10074a9f0dc
+16777216 个 4K block
+```
+
+重启后 **Android 成功进入系统**。
+
+现在：
+
+- Android 使用标准 `userdata`；
+- Android 的 `fastboot -w` / recovery 只影响 Android 的 64 GiB；
+- iOS 的 49.2 GiB 保留为 `userdata_ios`，暂未格式化 APFS；
+- H103 当前 iOS Data 仍使用 payload 中的 RAM seed（`XNU_OWNER_DATA_VOLATILE=1`），不依赖 `userdata`。
+
+### 待验证
+
+- 分区后 H103 iOS 是否仍能启动；
+- 如果 `RootLayout`/`NativeUfsWarm` 仍硬编码 `userdata`，需要改成优先 `userdata_ios` 或加回退；
+- 后续要做 iOS 持久化 Data 时，再在 `userdata_ios` 上创建 APFS container。
