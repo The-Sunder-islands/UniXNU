@@ -1969,6 +1969,101 @@ FileSet KC 的真实 owner IM4M/AMFI-trustcache，当前输入无法生成。完
 - 已执行 `fastboot boot out/cheeseburger/boot/boot-H103-preboot.img`，ABL 接受并离开 fastboot；最终屏幕待确认。下一步检查 `NATIVE_PREBOOT: status=0 stage=5`、`NATIVE_H82_DATA`、`NATIVE_ENV`，以及 launchd 是否越过 `driverkitd`/cryptexd 等待。
 - 约束：`XNU_OWNER_PREBOOT_LAYOUT=1` 需要 `OWNER_CACHE_MOUNT=1`、`OWNER_CACHE_STARTUP=1`、`OWNER_DATA_MOUNT=1`、`NATIVE_RAM_BLOCK=1`、`OWNER_UNION_SYSTEMOS=0`。不新增 skip，不修改 AuthAPFS/Image4/TrustCache 验证。
 
+## H103au–H103bg：启动前沿、显示参数与颜色面板（2026-11-03）
+
+详细记录见
+`plans/oneplus5-cheeseburger/diagnostics/H103-preboot-layout-audit-2026-11-01.md`
+第 44 节。本段只保留结论和关键产物。
+
+### 对照结果
+
+- **H103au**：H103at + `offline-mobile-graphics-client=1`；
+  `display calls=0`，backboardd 已 exec 但不打开显示。client probe 无效。
+- **H103av**：加入 `NATIVE_ALIVE` 心跳；cpus=1/2 都停在
+  `driverkitd is active`，屏幕没有 `NATIVE_ALIVE`。心跳线程启动/调度
+  本身仍需独立诊断。
+- **H103ax-1g**：Data 512 MiB → 1 GiB；3 次仍为 2 次 `calls=0`、
+  1 次 FDR loader `calls=1`，无 ENOSPC。Data 容量不是唯一原因。
+- **H103ay-4g**：`owned_memory_size` 从实际 1 GiB 改为 4 GiB；
+  1 次出现 `backboardd/55` + `SpringBoard`，但 backboardd 仍不 open；
+  另 2 次停在 driverkitd/eligibilityd 一带。内存也不是稳定修复。
+- **H103az/H103be**：AMFI 权限门 `0x5f` 的 `tbz` NOP；H103be 上机
+  1 次白色、2 次绿色，右上始终没有 backboardd 青色。AMFI 不是
+  backboardd 不 open 的根因。
+- **H103bf**：追加 DinnerABC 的
+  `offline-mobile-graphics-client=1`、`offline-legacy-cpu-present=1`、
+  `unit-scale=2`、`sheng-vsync=60/fixed=1`；仍无 backboardd client。
+- **H103bg**：Data seed 写 BackBoard/CA 软件渲染偏好
+  （`CAEnableDeepFramebuffer=false`、`CAEnableFramebufferCompression=false`、
+  `CAEnableIOSurfaceCompression=false`、`CAForceSoftwareRendering=true`）；
+  仍无右上青色。
+
+### 颜色面板结论
+
+H103ba–H103bd 在 `NativeLegacyDisplay::drawTestPattern()` 增加右上角
+2×2 颜色面板，避免依赖滚屏日志：
+
+- 左上：用户态前沿/退出（H103bd：绿=SpringBoard、白=SpringBoard+backboardd、
+  紫=SpringBoard 退出、品红=backboardd 退出）；
+- 右上：黑=无 client、黄=FDR loader、青=backboardd；
+- 左下：client calls；
+- 右下：swap/transfer；
+- 右下角 16×16 心跳闪烁。
+
+上机结果：
+
+- H103bc：3 次都只有左上绿，backboardd 没有 exec；
+- H103bd：2 次左上绿；1 次左上白、右上黄、左下蓝，等待 10 分钟不变；
+- H103be/bf：最好也只有左上白 + 右上黄，没有右上青。
+
+因此当前不是“backboardd 打开显示失败后立刻退出”，而是：
+
+```text
+backboardd 有时根本不启动
+即使启动，也不调用 Legacy display 的 newUserClient
+```
+
+### 只读 backboardd 分析
+
+`/usr/libexec/backboardd` 导入 `IOMobileFramebuffer`、`Metal`、
+`IOSurface`，包含 `BKDisplayStartWindowServer`、
+`BKDisplayIsHeadless`、`StartWindowServer: headless (display:%d/server:%d)`、
+`IOServiceOpen failed for class ...`、`CADisplay`/`CAWindowServerDisplay`。
+最符合证据的解释是 backboardd 没有拿到它认可的 CADisplay/display
+provider，进入 headless，而不是 Legacy `newUserClient` 的问题。
+
+### 当前阻塞与下一步
+
+已排除：Data 512 MiB/1 GiB、4 GiB 内存、AMFI gate、client probe、
+`offline-legacy-cpu-present`、`sheng-vsync`、unit-scale、Legacy
+`newUserClient` 路径、BackBoard/CA 软件渲染偏好。
+
+下一步二选一：
+
+1. **优先**：对比并移植 DinnerABC 的 CPU display provider/注册路径
+   （`LegacyDisplayProbe.cpp`、`NativeLegacyDisplay.cpp`、
+   `NativeMobileDisplay` 的 service/IORegistry 属性）；DinnerABC CPU
+   路径曾达到 `backboardd calls=77/97`。
+2. 若仍 headless：提供 IOAccelerator/IOGPU/Metal，或走 QcomGPU A540。
+
+不再增加 boot-arg、`sheng-disable-jobs`、Data 容量或 AMFI 诊断。
+
+### 关键产物
+
+```text
+H103au boot      2a263cce4b0ed4fdb7c35ef0e0ae35d39d36ebeef9143b9061865adac1f56288
+H103ax-1g boot   73cf3927771e3191f38ae8cf89daaf10a883e3d35ecdd9ef4780699c0297f84e
+H103ay-4g boot   f148919d96db01302a53d72d6061445a89cfe652a9ca33fdc14f61a1ba41cd3e
+H103az boot      3bb5b2bebe792d0b45ba9823d1e7bbc7adb78ca7adb040d47f63723e327990c5
+H103ba boot      3195072d616d9be0411d73903c6468b9d6aac40423c3d92c342ad807cd8190f2
+H103bb boot      d9b91fc6a29ecb90822da84c31923539b5160b57927ccd1cc60cd24e0b1b2130
+H103bc boot      e5349527c74df987e5e21bcd670febe7be8eac41260a9556e719c34a458a42c6
+H103bd boot      8284f2616412cea7e98cdb9d929802b4b2cdd6bb7b8af536210a38c08c9910f3
+H103be boot      6ce2a1e2584055903edcb383432da9cc6eb478e7f44b21ec3e5059db7a4694ae
+H103bf boot      768f8eb8c01995df59d6cd8eb24d7080d4dd29d0e41400bd2857193f6262aced
+H103bg boot      ae9c39268b5cd4e49ee1dcf4cdbb0e933b673ea63c4016995ab23fd50677e0a6
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

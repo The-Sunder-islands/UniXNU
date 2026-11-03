@@ -1777,4 +1777,268 @@ H103as boot   96688b26148d912a238ac43328a39c7ae7567b792cd9cfd524b2b3035e114784
 
 H103at kernel c93b972ce48207ae941b57bb3476e59cc456f1081934fdd723e275113de9ac69
 H103at boot   9e363bef3ee556dd1a3dc6e61509612a10459c09f823592d67acc5908ddf6e43
+
+## 44. H103au–H103bg：启动随机性、Data/内存/AMFI 对照与颜色状态面板（2026-11-03）
+
+本轮把 H103at 之后的失败从“显示后端”进一步拆成三类，并加入了不依赖
+滚屏日志的右上角颜色状态面板。所有镜像仍使用同一台 OnePlus 5、同一份
+21H461 iPad7,1 OS/SystemOS 和 `userdata_ios` SHNGROOT；未修改 Android
+`userdata`、AuthAPFS/Image4/TrustCache 验证或原始 userland。
+
+### 44.1 H103au：client probe 对照
+
+- 变量：H103at 内核不变，payload 仅追加
+  `offline-mobile-graphics-client=1`。
+- 结果：`display calls=0`、`pid=0`、`comm=`；backboardd 已 exec 但未
+  打开显示。
+- 结论：client probe 不能替代 backboardd 的显示初始化。
+
+产物：
+
+```text
+H103au boot 2a263cce4b0ed4fdb7c35ef0e0ae35d39d36ebeef9143b9061865adac1f56288
+```
+
+### 44.2 H103av：心跳线程与 cpus=1/2 对照
+
+- 在 NativeUfsProbe 中加入独立 `NATIVE_ALIVE` 线程，使用同一 H103at
+  内核构造 cpus=1 与 cpus=2 两个 payload。
+- cpus=1/2 都能到 `driverkitd is active`，但屏幕没有 `NATIVE_ALIVE`；
+  不能再用“缺少心跳”证明内核死亡。
+- 之后 H103aw 进一步加入 `NATIVE_UFS_THREAD: alive rc=...` 和
+  `heartbeat rc=...`，确认线程创建路径必须单独记录；屏幕上仍未稳定
+  显示这两行，说明心跳线程的启动/调度本身还需要独立诊断。
+
+产物：
+
+```text
+H103av cpus1 payload efa95f92b33029365d5dae5d9149573e49f4ad9ccc2b97639e7044fd76742fba
+H103av cpus2 payload 536247d449ea3e047e174fcac11265d0d6dea8519fc5e7142d292c1a885fb13c
+H103av cpus1 boot    b59bfe2682691d6f03378a12cdb769a97c6fa94acc15a42fbe140a3b471cf2ed
+H103av cpus2 boot    07886c18c0ccfd406573b8108fd6315c99c07272b65a33bd15f934ad2cd647a4
+```
+
+### 44.3 H103ax-1g：Data seed 1 GiB 对照
+
+- 变量：H103aw 内核不变，Data seed 从 512 MiB 扩到 1 GiB，UUID
+  `1A4CE9DF-34B6-4B52-9744-5052A9D20B23` 保持不变。
+- 3 次启动仍有不同前沿：
+  - 2 次 `calls=0`，最后是 `logd_helper/83` / `driverkitd`；
+  - 1 次 `calls=1`，`IOMFB_FDR_Loader` 打开显示；
+  - 未观测到 ENOSPC。
+- 结论：1 GiB Data 不能单独消除 run-to-run 差异；Data 容量不是唯一原因。
+
+产物：
+
+```text
+H103ax-1g kernel  a476ac6839e9ef93b3c4129a570ac19e22f2841ea849375ec125982fc9faf2ac
+H103ax-1g payload f4a18517888c77fcf49fa4ee95edc008a00e93dab6a7d424f9346613d3f826b1
+H103ax-1g boot    73cf3927771e3191f38ae8cf89daaf10a883e3d35ecdd9ef4780699c0297f84e
+```
+
+### 44.4 H103ay-4g：4 GiB owned memory 对照
+
+- 变量：Data 仍为 1 GiB；`owned_memory_size` 从 `0x40000000`（实际
+  1 GiB）改为 `0x100000000`（4 GiB）。注意 board.toml 原注释写 4 GiB，
+  但值实际只有 1 GiB。
+- 结果：
+  - 1 次 `calls=0`，trustcache 循环，`driverkitd`；
+  - 1 次 `calls=1`，出现 `backboardd/55`、`SpringBoard`、
+    `DataMigrator`/`IMDPersistence`；
+  - 1 次 `calls=0`，`eligibilityd`/`driverkitd`；
+  - 仍无 ENOSPC。
+- 结论：4 GiB 能让个别 boot 多走一段，但不能稳定让 backboardd
+  打开 Legacy display。
+
+产物：
+
+```text
+H103ay-4g payload 06daedf1f5246fe66beeebcf06faee265b4a5f6b2e1dfc8b464d912b8fe2c195
+H103ay-4g boot    f148919d96db01302a53d72d6061445a89cfe652a9ca33fdc14f61a1ba41cd3e
+```
+
+### 44.5 H103az：AMFI gate 一次性 NOP（仅构建，未单独判定）
+
+- 在 H103ay 内核的 AMFI 拒绝分支把
+  `VM 0xfffffff00aab73b8` 的 `0x360010a0`（`tbz`）改为
+  `0xd503201f`（`nop`），只跳过
+  `com.apple.private.amfi.can-check-trust-cache` 权限门。
+- 这是受控诊断，不是默认策略；后续 H103be 将该绕过与颜色面板一起上机。
+
+产物：
+
+```text
+H103az kernel  8cf5f2e90000eff100f5672b17237829fcef5c38350b5a6b92af3423bee7153d
+H103az payload 75ab9dcf96ff00b93c0982ac249360f92dba1bf12b53ce401a2a96a8c09969f4
+H103az boot    3bb5b2bebe792d0b45ba9823d1e7bbc7adb78ca7adb040d47f63723e327990c5
+```
+
+### 44.6 H103ba–H103bd：右上角颜色状态面板
+
+为避开滚屏日志，在 `NativeLegacyDisplay::drawTestPattern()` 把原来的
+纯品红方块改成右上角 2×2 面板，由 UFS 心跳每 10 秒重绘：
+
+- 左上：用户态前沿 / 显示阶段；
+- 右上：显示客户端；
+- 左下：client calls 计数；
+- 右下：swap/transfer；
+- 右下角另有 16×16 心跳闪烁块。
+
+H103bd 的最终颜色语义：
+
+```text
+左上：
+  红   还没有关键进程 / 早期
+  黄   只有 logd_helper
+  橙   只有 driverkitd
+  青   只有 backboardd
+  绿   SpringBoard 启动、没有 backboardd
+  白   SpringBoard + backboardd 都启动
+  紫   SpringBoard 已退出
+  品红 backboardd 已退出
+
+右上：
+  黑   没有 client
+  黄   IOMFB_FDR_Loader
+  青   backboardd
+  紫   其他 client
+
+左下：黑 0；蓝 1–9；绿 10–99；橙 ≥100
+右下：黑 无；紫 有 swap validation；白 有 transfer
+```
+
+上机结果：
+
+- H103ba（2×2 初版，左上仅表示 display 后端）：3 次都只有左上绿，
+  后代仍无显示客户端。
+- H103bb（左上加入 logd_helper/driverkitd/backboardd/SpringBoard 位）：
+  4 次中 1 次左上绿 + 右上黄 + 左下蓝，其余只有左上绿。
+- H103bc（左上白色表示 SpringBoard+backboardd）：3 次都只有左上绿，
+  说明这 3 次 backboardd 根本没有 exec。
+- H103bd（加入 SpringBoard/backboardd 退出标志）：2 次只有左上绿；
+  1 次左上白、右上黄、左下蓝。白色那次 `backboardd/55` 和
+  `SpringBoard/27` 都在，但显示客户端仍只有 FDR loader；等待 10 分钟
+  颜色不变。
+- 结论：`backboardd` 启动本身有 run-to-run 差异；即使启动，也不会调用
+  Legacy display 的 `newUserClient`。
+
+产物：
+
+```text
+H103ba kernel  aaac1722f29b6ad38df7f1b0ebe12e09a70340e8aaadb62b76fc14f207028428
+H103ba payload 048dd55afa428fdb1d3ccad933957490c7f7ee4c1feb57bdbe6916d58ade2652
+H103ba boot    3195072d616d9be0411d73903c6468b9d6aac40423c3d92c342ad807cd8190f2
+
+H103bb kernel  11e9655709e8dde6fe4fc3bf731d308776b7ac3841709281eb7f8db3c8086bb7
+H103bb payload b67a54036d8891bab32ea421b59e275196aa46cda938c22d907469d8c267da36
+H103bb boot    d9b91fc6a29ecb90822da84c31923539b5160b57927ccd1cc60cd24e0b1b2130
+
+H103bc kernel  060689dc87083eafd3c10127bc569ae079bfadeb47dadae5e497a11578404d9b
+H103bc payload ebfda045e4e44192fe590bb244576be7d9b37bc796e0671005815215fe23b948
+H103bc boot    e5349527c74df987e5e21bcd670febe7be8eac41260a9556e719c34a458a42c6
+
+H103bd kernel  51cffbc25e890be9a8d4b9ca44ca7e1895197ed89cced9e6edb6c865c6664c66
+H103bd payload 29ef1f470870fca6061863a31a151bd56bc44e8467a89f8709a79425b378ccce
+H103bd boot    8284f2616412cea7e98cdb9d929802b4b2cdd6bb7b8af536210a38c08c9910f3
+```
+
+### 44.7 H103be：AMFI gate NOP + 颜色面板
+
+- 变量：H103bd 内核的 AMFI 权限门 NOP；其他与 H103bd 相同。
+- 3 次结果：1 次左上白、右上黄、左下蓝；另外 2 次只有左上绿。
+- 右上始终没有青色，说明 AMFI gate NOP 没有让 backboardd 打开显示。
+- 结论：AMFI/trustcache 权限门不是 backboardd 不 open 的根因；H103be
+  的 `Only allowed processes...` 循环消失，但显示客户端仍然只有 FDR
+  loader。
+
+产物：
+
+```text
+H103be kernel  ee38baaf27e395420b78eb9e43f95a89290a11b42ec5f1d8974e190d3f26c535
+H103be payload 8fc8cc373aa7d923ed6a8d9508d507c78dc91ada7a512f1887db7dc234ad9d26
+H103be boot    6ce2a1e2584055903edcb383432da9cc6eb478e7f44b21ec3e5059db7a4694ae
+```
+
+### 44.8 H103bf：DinnerABC 显示参数 parity
+
+- 只改 payload，追加：
+  `offline-mobile-graphics-client=1`、
+  `offline-legacy-cpu-present=1`、
+  `offline-legacy-unit-scale=2`、
+  `sheng-vsync=60`、`sheng-vsync-fixed=1`。
+- 3 次结果仍为 1 次左上白、2 次左上绿；右上没有青色。
+- 结论：DinnerABC 的 CPU display 参数不能单独让本项目 backboardd 打开
+  display；服务注册/display provider 差异仍需处理。
+
+产物：
+
+```text
+H103bf kernel  51cffbc25e890be9a8d4b9ca44ca7e1895197ed89cced9e6edb6c865c6664c66
+H103bf payload 1e2cb3e4b9c65903d3ac2389216e3b95c072d4ffead84b814369029aaf376a15
+H103bf boot    768f8eb8c01995df59d6cd8eb24d7080d4dd29d0e41400bd2857193f6262aced
+```
+
+### 44.9 H103bg：BackBoard/CoreAnimation 软件渲染偏好
+
+- 在 1 GiB Data seed 的 mobile/root `Library/Preferences` 中写入：
+  `CAEnableDeepFramebuffer=false`、
+  `CAEnableFramebufferCompression=false`、
+  `CAEnableIOSurfaceCompression=false`、
+  `CAForceSoftwareRendering=true`。
+- 结果：右上仍无青色；backboardd 仍未打开 Legacy display。
+- 结论：这组软件渲染偏好不足以把 backboardd 从 headless 状态拉回来。
+
+产物：
+
+```text
+H103bg kernel  51cffbc25e890be9a8d4b9ca44ca7e1895197ed89cced9e6edb6c865c6664c66
+H103bg payload 437a54dd94e52ed8104e96d7e7aaefe1f4673c307ca45ae8ec3dbc51ef4d78dd
+H103bg boot    ae9c39268b5cd4e49ee1dcf4cdbb0e933b673ea63c4016995ab23fd50677e0a6
+```
+
+### 44.10 只读分析：backboardd 进入 headless 的路径
+
+对 `/tmp/opencode/os-mnt/usr/libexec/backboardd` 做只读字符串/导入分析：
+
+- 导入 `IOMobileFramebuffer`、`Metal`、`IOSurface`；
+- 有 `BKDisplayStartWindowServer`、`BKDisplayIsHeadless`、
+  `StartWindowServer: headless (display:%d/server:%d)`、
+  `IOServiceOpen failed for class ...`；
+- 使用 `CADisplay` / `CAWindowServerDisplay` / `CAContext`；
+- 不能从日志证明它已经到达 `IOMobileFramebufferOpen`。
+
+因此当前最符合证据的解释是：
+
+```text
+Legacy framebuffer 后端正常
+  -> FDR loader 能打开
+  -> backboardd 不把它当作可用 CADisplay/display provider
+  -> BKDisplayStartWindowServer 走 headless
+```
+
+这不是继续调整 `newUserClient`、`IOClass`、`NativeSandboxGrantProcess`
+或 TrustCache 能解决的问题。
+
+### 44.11 当前结论与下一步
+
+已排除的低成本变量：
+
+- Data 512 MiB/1 GiB、4 GiB owned memory；
+- AMFI selector 0x5f 权限门；
+- `offline-mobile-graphics-client`；
+- `offline-legacy-cpu-present`、`sheng-vsync`、`unit-scale`；
+- Legacy `newUserClient` 拒绝路径；
+- BackBoard/CoreAnimation 软件渲染偏好。
+
+下一步只剩两条路线：
+
+1. **移植 DinnerABC 的 CPU display provider/注册路径**，重点对比
+   `package/BoardRuntime/LegacyDisplayProbe.cpp`、
+   `NativeLegacyDisplay.cpp` 与 `NativeMobileDisplay` 的 service 注册、
+   IORegistry 属性和 `CADisplay` 提供方式；DinnerABC 曾在 CPU 路径
+   达到 `backboardd calls=77/97`。
+2. 如果 provider 路径仍 headless，则提供 **IOAccelerator/IOGPU/Metal**
+   服务，或走 QcomGPU A540 路线。
+
+不再继续增加 boot-arg、`sheng-disable-jobs`、Data 容量或 AMFI 诊断。
 ```
