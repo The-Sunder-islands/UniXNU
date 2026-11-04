@@ -2378,6 +2378,17 @@ H103do kernel:     7d4d9969d65d9d478a02f6b03be69fa3ff920b3089bb39149d477f37c3f7d
 H103do payload:    8ee9f42772bfa247c9f6cbf2138d503533c7b6e994806061fe450d4f3fc5fd92
 ```
 
+H103do 单块写开始后 panic，确认单块 WRITE(10) 就崩。H103dp 用
+`fLogDma->writeBytes()` 填 DMA，并让 `ufsWriteCommand()` 的 `src` 等于
+`q->data`，跳过内部 memcpy；仍只写单块。
+
+```text
+H103dp boot:       89e1ea912460ce161b2d58297f767e5a0f8bcd8ba1522f5d9754d02540c085a3
+H103dp kernel pre: c0a274cb2e0c4f5c230c0817187a9545a532e09ecbba35e2820f6f59b455695d
+H103dp kernel:     4b5ca54dddef09acad19e03a3b7965f6edf5f1cf0cfb25eb85502c8bca3b7f60
+H103dp payload:    fe6de668a05e4b4b83dd0a7f5ca91170a0adef4119d963bd5f88c048ef40542f
+```
+
 ### 关键产物
 
 ```text

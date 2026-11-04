@@ -1094,24 +1094,33 @@ NativeUfsProbe::logWrite (uint64_t rel, uint32_t blocks, const void *src)
       blocks > fLogBlocks - rel || blocks > UFS_DATA_MAX / 4096) {
     return false;
   }
-  if (!fLogData || !fLogDataPhys) {
+  if (!fLogDma || !fLogData || !fLogDataPhys) {
     return false;
   }
+  const unsigned bytes = blocks * 4096U;
   IOLockLock (fLock);
   uint8_t cdb[16] = { 0x2a };
   putBe32 (cdb + 2, static_cast<uint32_t> (fLogFirst + rel));
   cdb[7] = static_cast<uint8_t> (blocks >> 8);
   cdb[8] = static_cast<uint8_t> (blocks);
-  // Do not CPU-write the live read DMA buffer. Swap in a dedicated writable
-  // log DMA buffer for the command, then restore the read buffer before the
-  // lock is dropped.
+  // getBytesNoCopy() on the DMA descriptor is not a CPU-write mapping here.
+  // Fill it through the IOMemoryDescriptor writeBytes() path instead, then
+  // pass the DMA pointer as src so ufsWriteCommand() skips its own memcpy.
+  IOByteCount copied = fLogDma->writeBytes (0, src, bytes);
+  if (copied != static_cast<IOByteCount> (bytes)) {
+    IOLog ("NATIVE_UFS_LOG: log DMA writeBytes short=%llu want=%u lba=%llx\n",
+           (unsigned long long) copied, bytes,
+           (unsigned long long) (fLogFirst + rel));
+    IOLockUnlock (fLock);
+    return false;
+  }
   uint8_t *savedData = fQueue.data;
   uint64_t savedPhys = fQueue.dataPhys;
   uint32_t savedCapacity = fQueue.dataCapacity;
   fQueue.data = fLogData;
   fQueue.dataPhys = fLogDataPhys;
   fQueue.dataCapacity = UFS_DATA_MAX;
-  bool ok = ufsWriteCommand (&fQueue, 0, cdb, blocks * 4096U, src);
+  bool ok = ufsWriteCommand (&fQueue, 0, cdb, bytes, fLogData);
   fQueue.data = savedData;
   fQueue.dataPhys = savedPhys;
   fQueue.dataCapacity = savedCapacity;

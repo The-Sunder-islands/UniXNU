@@ -2752,3 +2752,49 @@ payload:    8ee9f42772bfa247c9f6cbf2138d503533c7b6e994806061fe450d4f3fc5fd92
 - 有 `single write result=1`：单块写成功，TWRP 应能看到 `H103TEST`；
 - `single write result=0`：WRITE10 返回失败，查响应/窗口；
 - 连 `single write begin` 都没有：64 MiB 触发或 `h103SingleWrite` 没走到。
+
+## 65. H103dp：用 writeBytes 填 log DMA，跳过 ufsWriteCommand memcpy（2026-11-04）
+
+H103do 上机在：
+
+```text
+NATIVE_UFS_LOG: single write begin lba=1c607fb
+```
+
+后直接 panic，没有 `single write result`，确认是单块 WRITE(10) 就崩。
+H103dm 写 readData、H103dn/do 写独立 logDma，三者共同点都是
+`ufsWriteCommand()` 里：
+
+```c
+if (src != q->data) memcpy(q->data, src, bytes);
+```
+
+而 `getBytesNoCopy()` 返回的 DMA 映射在这里不是 CPU 可写路径。
+
+H103dp 改为：
+
+```text
+fLogDma->writeBytes(0, src, bytes)
+  返回值必须等于 bytes，否则打印 short 并返回
+
+ufsWriteCommand(&fQueue, 0, cdb, bytes, fLogData)
+  此时 q->data == src == fLogData，跳过 memcpy
+```
+
+仍然只写单块 `H103TEST`，不写 body/header，不读回，停屏 30 秒。
+
+候选：
+
+```text
+boot:       89e1ea912460ce161b2d58297f767e5a0f8bcd8ba1522f5d9754d02540c085a3
+kernel pre: c0a274cb2e0c4f5c230c0817187a9545a532e09ecbba35e2820f6f59b455695d
+kernel:     4b5ca54dddef09acad19e03a3b7965f6edf5f1cf0cfb25eb85502c8bca3b7f60
+ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload:    fe6de668a05e4b4b83dd0a7f5ca91170a0adef4119d963bd5f88c048ef40542f
+```
+
+判读：
+
+- `single write result=1`：DMA CPU 写是根因，单块写成功；
+- 出现 `log DMA writeBytes short`：`writeBytes` 也不行，需要换 CPU 可写源 + 独立物理 DMA；
+- `single write begin` 后仍 panic：不是 memcpy，问题在 WRITE10/PRDT/UTRD 或设备写保护。
