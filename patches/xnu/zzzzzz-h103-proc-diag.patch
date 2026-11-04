@@ -23,7 +23,7 @@ diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
 diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
 --- a/bsd/kern/kern_exit.c
 +++ b/bsd/kern/kern_exit.c
-@@ -1508,6 +1509,33 @@
+@@ -1508,6 +1509,34 @@
  }
  
  /*
@@ -39,7 +39,8 @@ diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
 +
 +	if (strcmp(comm, "cryptexd") != 0 && strcmp(comm, "eligibilityd") != 0 &&
 +	    strcmp(comm, "launchd") != 0 && strcmp(comm, "xpcproxy") != 0 &&
-+	    strcmp(comm, "driverkitd") != 0 && strcmp(comm, "backboardd") != 0) {
+++	    strcmp(comm, "driverkitd") != 0 && strcmp(comm, "backboardd") != 0 &&
++	    strcmp(comm, "logd_helper") != 0 && strcmp(comm, "logd") != 0) {
 +		return;
 +	}
 +	if (reason == OS_REASON_NULL) {

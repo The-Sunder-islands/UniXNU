@@ -1,0 +1,17 @@
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -1512,10 +1512,13 @@
+  * H103 diagnostic only: record selected process exits. This does not alter
+  * exit status, signals, launchd behavior or any verification path.
+  */
++extern volatile uint32_t native_boot_flags;
+ static void
+ native_trace_process_exit(proc_t p, int rv, struct os_reason *reason)
+ {
+ 	const char *comm = p->p_comm;
++	if (!strcmp(comm, "SpringBoard")) native_boot_flags |= 32;
++	if (!strcmp(comm, "backboardd")) native_boot_flags |= 64;
+ 	uint32_t ns = 0;
+ 	uint64_t code = 0;
+ 

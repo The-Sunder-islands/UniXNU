@@ -163,9 +163,10 @@ def main():
         run([sys.executable, ROOT / 'scripts/build-arm-driver.py', component], env=env)
 
     recipe = ROOT / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/iokit/DEVELOPMENT/IOPlatformExpert.cpo.json'
-    for name in ('LegacyDisplayProbe.cpp', 'NativeLegacyProbeSupport.cpp'):
+    for name in ('LegacyDisplayProbe.cpp', 'NativeLegacyProbeSupport.cpp', 'NativeA540AcceleratorProbe.cpp'):
         compile_recipe(ROOT / 'drivers/NativeMobileDisplay' / name, OUT / (Path(name).stem + '.o'), recipe,
-                       ['-I', str(OUT), '-I', str(ROOT / 'drivers/NativeMobileDisplay'), '-I', str(ROOT / '.cache/xnu-work/osfmk')])
+                       ['-I', str(OUT), '-I', str(ROOT / 'drivers/NativeMobileDisplay'),
+                        '-I', str(ROOT / 'drivers/NativeMetal'), '-I', str(ROOT / '.cache/xnu-work/osfmk')])
 
     display_obj = OUT / 'NativeLegacyDisplay.o'
     presenter_obj = ROOT / 'build/native-gop-presenter/NativeGOPPresenter.o'
@@ -220,15 +221,34 @@ def main():
     asm.write_text(''.join(f'.globl {name}\n.set {name}, {value:#x}\n' for name, value in sorted(bindings.items())))
     run(['xcrun', 'clang', '-target', 'arm64-apple-ios17.0.0', '-c', asm, '-o', OUT / 'original-bindings.o'])
 
+    # The own-code A540 probe derives from the original IOAcceleratorES base.
+    # Bind only the three audited base symbols; the original IOGPUFamily kext
+    # remains the runtime owner of the class.
+    accel_plan = json.loads((ROOT / 'scripts/data/ioaccelerator-base-abi.json').read_text())
+    accel_bindings = {
+        '__ZN15IOAcceleratorESC2EPK11OSMetaClass': int(accel_plan['protected_compatible_constructor_aliases'][0], 16),
+        '__ZN15IOAcceleratorESD2Ev': int(accel_plan['nondeleting_destructor'], 16),
+        '__ZN15IOAcceleratorES10gMetaClassE': int(accel_plan['metaclass'], 16),
+    }
+    accel_asm = OUT / 'original-accelerator-bindings.S'
+    accel_asm.write_text(''.join(f'.globl {name}\n.set {name}, {value:#x}\n' for name, value in sorted(accel_bindings.items())))
+    run(['xcrun', 'clang', '-target', 'arm64-apple-ios17.0.0', '-c', accel_asm, '-o', OUT / 'original-accelerator-bindings.o'])
+
     objcopy = shutil.which('llvm-objcopy') or '/opt/local/libexec/llvm-20/bin/llvm-objcopy'
     run([objcopy, '--remove-section=__DATA,__mod_init_func', '--globalize-symbol=__GLOBAL__sub_I_NativeLegacyDisplay.cpp',
          display_obj, OUT / 'NativeLegacyDisplay.late.o'])
     run([objcopy, '--remove-section=__DATA,__mod_init_func', '--globalize-symbol=__GLOBAL__sub_I_NativeGOPPresenter.cpp',
          presenter_obj, OUT / 'NativeGOPPresenter.late.o'])
+    run([objcopy, '--remove-section=__DATA,__mod_init_func', '--globalize-symbol=__GLOBAL__sub_I_NativeA540AcceleratorProbe.cpp',
+         OUT / 'NativeA540AcceleratorProbe.o', OUT / 'NativeA540AcceleratorProbe.late.o'])
     archive = OUT / 'libNativeLegacyDisplay.late.a'
     archive.unlink(missing_ok=True)
+    # Keep the archive member set identical to the stable H103cg layout. The
+    # A540 object remains linked even though the display object no longer draws
+    # its state; this compensates for the small gray-strip addition.
     members = [OUT / 'NativeLegacyDisplay.late.o', OUT / 'NativeGOPPresenter.late.o', OUT / 'original-bindings.o',
-               OUT / 'LegacyDisplayProbe.o', OUT / 'NativeLegacyProbeSupport.o']
+               OUT / 'LegacyDisplayProbe.o', OUT / 'NativeLegacyProbeSupport.o',
+               OUT / 'NativeA540AcceleratorProbe.late.o', OUT / 'original-accelerator-bindings.o']
     run(['xcrun', 'ar', 'rcs', archive] + members)
     sources = [ROOT / 'scripts/audit-mobile-graphics-legacy-op5.py',
                ROOT / 'drivers/NativeMobileDisplay/NativeLegacyDisplay.cpp',
@@ -236,7 +256,8 @@ def main():
                ROOT / 'drivers/NativeMobileDisplay/NativeGOPWire.h',
                ROOT / 'drivers/NativeMobileDisplay/NativeLegacyRequest.h',
                ROOT / 'drivers/NativeMobileDisplay/LegacyDisplayProbe.cpp',
-               ROOT / 'drivers/NativeMobileDisplay/NativeLegacyProbeSupport.cpp']
+               ROOT / 'drivers/NativeMobileDisplay/NativeLegacyProbeSupport.cpp',
+               ROOT / 'drivers/NativeMobileDisplay/NativeA540AcceleratorProbe.cpp']
     (OUT / 'build-report.json').write_text(json.dumps(dict(
         source_sha256={str(p.relative_to(ROOT)): sha(p) for p in sources},
         generated_abi_sha256=sha(OUT / 'OriginalLegacyFramebufferABI.h'),

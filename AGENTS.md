@@ -1,0 +1,107 @@
+# AGENTS.md
+
+## What this tree is
+
+- This is the `lss717/UniXNU` fork for the **OnePlus 5 (cheeseburger, MSM8998)**,
+  B line: UEFI + DarwinBoot + 4 KiB XNU.
+- The only supported OS profile is **iPad7,1 / iPadOS 17.7.11 / 21H461**. Never
+  mix a kernelcache, DeviceTree, OS/SystemOS image, dyld cache, or trust cache
+  from another IPSW.
+- The board profile, defconfig, ADT generator, boot arguments, and boot-image
+  packaging live in the sibling device repository
+  `../UniXNU-cheeseburger`, not here. Firmware lives in `../edk2-msm8998`.
+- Do not import DinnerABC files, its `patches/p10`, or its records. Do not
+  copy the `ios-sweet`/16K A-line or the `sagit-ios-port` layout. They are
+  read-only references at most.
+- `plans/oneplus5-cheeseburger/STATUS.md` and
+  `plans/oneplus5-cheeseburger/diagnostics/H103-preboot-layout-audit-2026-11-01.md`
+  are the canonical bring-up record. Read the latest appended section (currently
+  §44) before display work; do not infer the current gate from old sections.
+
+## Build and verification
+
+The driver is `./unixnu`. Device modules override base modules with the same
+name; `./unixnu status` shows the resolved origin of every module.
+
+```sh
+# One-time layout: UniXNU, UniXNU-cheeseburger and edk2-msm8998 side by side.
+git clone --recurse-submodules https://github.com/lss717/UniXNU
+git clone https://github.com/lss717/UniXNU-cheeseburger
+
+./unixnu defconfig cheeseburger_defconfig -D ../UniXNU-cheeseburger
+./unixnu fetch -D ../UniXNU-cheeseburger
+./unixnu build kernel -D ../UniXNU-cheeseburger    # macOS + Xcode only
+./unixnu build payload -D ../UniXNU-cheeseburger
+```
+
+- The kernel/prelink/userdata steps need macOS (`xcodebuild`, `hdiutil`,
+  `diskutil`, `compression_tool`). Linux can run `status`, `defconfig`,
+  `tree`, package-only work, and offline scripts.
+- Do **not** run bare `./unixnu build` on this port: its default set includes
+  firmware. Do **not** use `unixnu build firmware` or `unixnu bootimg`; both
+  assume the UniXNU/Mu-Silicium boot layout. Build firmware with
+  `edk2-msm8998/build.sh` and pack the Android boot image with the device
+  repository's `scripts/make-bootimg.py`.
+- CI `.github/workflows/macos-cheeseburger.yml` builds kernel/payload
+  (and optionally userdata); it does not build firmware or the boot image.
+- Useful checks:
+  - `./unixnu status`
+  - `cd ../UniXNU-cheeseburger && python3 scripts/check-cheeseburger.py`
+  - `python3 scripts/check-unixnu.py` (offline driver self-test; on this Linux
+    host with GNU mtools 4.0.43 it currently stops at
+    `FAIL: payload volume is reproducible` — confirm on macOS before treating
+    that as a source regression)
+- Documentation: `cd docs && npm ci && npm run build`; keep `docs/` and
+  `docs/zh/` pages and `docs/.vitepress/config.mts` in sync.
+
+## Source and patch workflow
+
+- `out/<board>/tree` and `out/<board>/.cache` are generated. Edit the real
+  source under `drivers/`, `kits/`, `scripts/`, or the device repository, not
+  symlinks in the generated tree.
+- Kernel patches live in `patches/xnu/`. Edit the applied source in
+  `out/<board>/tree/.cache/xnu-work` after a first kernel build, generate the
+  diff, add it to `patches/xnu/`, then rebuild kernel + prelink. Patch names
+  encode apply order; late patches use `zzy-`/`zzz-` prefixes. Do not reorder
+  or rename unrelated patches.
+- Bring-up diagnostics are boot-argument-gated and often live in
+  `zzzz...h103...` patches. Do not turn them into default behavior or add more
+  boot arguments without reading the current STATUS gate.
+- Submodules intentionally point at `lss717` forks under renamed repositories
+  (`NativeMobileDisplay` → `GopFramebuffer`, `NativeAES` → `SoftwareAES`,
+  `NativePrelink` → `XnuPrelink`, etc.). Do not restore upstream `UniXNU/...`
+  URLs. If you change a submodule, commit and push to its `lss717` fork and
+  update the superproject pointer.
+- Never commit IPSW files, kernelcaches, disk images, trust caches, Data seeds,
+  or vendor firmware. They are gitignored and belong in `.cache/` or external
+  storage.
+
+## Device and data safety
+
+- Use **`fastboot boot` only**. Do not flash `boot`, `userdata`, GPT, or any
+  firmware partition. A temporary TWRP image may be booted, never installed.
+- `userdata` is the Android ext4 partition (64 GiB). `userdata_ios` is the
+  iOS SHNGROOT partition (49.2 GiB) and is what `drivers/NativeUfs/RootLayout.h`
+  reads. Never run `fastboot flash userdata` — it destroys the Android side.
+  Writing `userdata_ios` or changing GPT requires explicit user approval and a
+  verified backup.
+- Keep the Android system bootable. The dual-boot menu is not implemented.
+
+## Current display bring-up
+
+- The Legacy display backend works (GOP test pattern, `start=1`); the blocker
+  is that backboardd does not obtain/use a display provider, so no user client
+  submits the first frame. H103 §44 lists the excluded hypotheses; do not
+  repeat them.
+- Keep the verified baseline: `cpus=1`, `IOClass =
+  IOMobileFramebufferLegacy` on the service, and no `sheng-vsync`.
+  `cpus=2` is nondeterministic before `KextLog`.
+- Do not disable `com.apple.iomfb_fdr_loader` (alone or with bics_daemon); it
+  produces a `sheng watchdog timeout failed: 222` panic.
+
+## Commits and docs
+
+- Follow `CONTRIBUTING.md`: one subject per commit, prefixes
+  `feat(<area>):`, `fix(<area>):`, `docs:`, `build(<area>):`, `chore:`.
+- Keep English and Simplified Chinese documentation in sync. The documentation
+  describes the resulting state; STATUS records the experiment history.

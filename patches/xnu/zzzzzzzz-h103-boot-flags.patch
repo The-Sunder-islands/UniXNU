@@ -1,0 +1,20 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -1,4 +1,5 @@
+ #include <kern/boot_progress.h>
++volatile uint32_t native_boot_flags;
+ /*
+  * Copyright (c) 2000-2020 Apple Inc. All rights reserved.
+  *
+@@ -955,6 +956,10 @@
+ 		printf("NATIVE_EXEC: pid=%d ppid=%d comm=%s argv0=%s argv1=%s\n",
+ 		    proc_getpid(p), p->p_ppid, p->p_comm, h96_a0 ? h96_a0 : "", h96_a1 ? h96_a1 : "");
+ 	}
++	if (!strcmp(p->p_comm, "logd_helper")) native_boot_flags |= 1;
++	if (!strcmp(p->p_comm, "driverkitd")) native_boot_flags |= 2;
++	if (!strcmp(p->p_comm, "backboardd")) native_boot_flags |= 4;
++	if (!strcmp(p->p_comm, "SpringBoard")) native_boot_flags |= 8;
+ 
+ #if DEVELOPMENT || DEBUG
+ 	/*
