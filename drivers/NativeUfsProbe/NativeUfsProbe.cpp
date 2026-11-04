@@ -308,6 +308,9 @@ class NativeUfsProbe : public IOService {
   uint64_t fLogFirst = 0;
   uint32_t fLogBlocks = 0;
   uint64_t fLogImageBytes = 0;
+  IOBufferMemoryDescriptor *fLogDma = nullptr;
+  uint8_t *fLogData = nullptr;
+  uint64_t fLogDataPhys = 0;
   static void logThread (void *, wait_result_t);
   bool logWrite (uint64_t rel, uint32_t blocks, const void *src);
   bool logSync (void);
@@ -1090,12 +1093,27 @@ NativeUfsProbe::logWrite (uint64_t rel, uint32_t blocks, const void *src)
       blocks > fLogBlocks - rel || blocks > UFS_DATA_MAX / 4096) {
     return false;
   }
+  if (!fLogData || !fLogDataPhys) {
+    return false;
+  }
   IOLockLock (fLock);
   uint8_t cdb[16] = { 0x2a };
   putBe32 (cdb + 2, static_cast<uint32_t> (fLogFirst + rel));
   cdb[7] = static_cast<uint8_t> (blocks >> 8);
   cdb[8] = static_cast<uint8_t> (blocks);
+  // Do not CPU-write the live read DMA buffer. Swap in a dedicated writable
+  // log DMA buffer for the command, then restore the read buffer before the
+  // lock is dropped.
+  uint8_t *savedData = fQueue.data;
+  uint64_t savedPhys = fQueue.dataPhys;
+  uint32_t savedCapacity = fQueue.dataCapacity;
+  fQueue.data = fLogData;
+  fQueue.dataPhys = fLogDataPhys;
+  fQueue.dataCapacity = UFS_DATA_MAX;
   bool ok = ufsWriteCommand (&fQueue, 0, cdb, blocks * 4096U, src);
+  fQueue.data = savedData;
+  fQueue.dataPhys = savedPhys;
+  fQueue.dataCapacity = savedCapacity;
   IOLockUnlock (fLock);
   return ok;
 }
@@ -1907,6 +1925,32 @@ NativeUfsProbe::start (IOService *provider)
   queue.dataCapacity = UFS_DATA_MAX;
   queue.poisoned = false;
   fQueue = queue;
+
+  IOOptionBits logOptions = static_cast<IOOptionBits> (kIODirectionOut) |
+                            static_cast<IOOptionBits> (kIOMemoryPhysicallyContiguous) |
+                            static_cast<IOOptionBits> (kIOMemoryMapperNone);
+  IOBufferMemoryDescriptor *logDma = IOBufferMemoryDescriptor::inTaskWithPhysicalMask (
+    kernel_task, logOptions, UFS_DATA_MAX, 0x00000000ffffffffULL);
+  if (!logDma) {
+    logDma = IOBufferMemoryDescriptor::inTaskWithOptions (
+      kernel_task, logOptions, UFS_DATA_MAX, 4096);
+  }
+  if (logDma) {
+    fLogDma = logDma;
+    fLogData = static_cast<uint8_t *> (logDma->getBytesNoCopy ());
+    IOByteCount logContiguous = 0;
+    fLogDataPhys = logDma->getPhysicalSegment (0, &logContiguous, kIOMemoryMapperNone);
+    if (!fLogData || !fLogDataPhys || (fLogDataPhys & 0xfff) ||
+        logContiguous < UFS_DATA_MAX) {
+      IOLog ("NATIVE_UFS_LOG: log DMA invalid data=%p phys=%llx cont=%llx\n",
+             fLogData, (unsigned long long) fLogDataPhys,
+             (unsigned long long) logContiguous);
+      fLogData = nullptr;
+      fLogDataPhys = 0;
+    }
+  } else {
+    IOLog ("NATIVE_UFS_LOG: log DMA allocation failed\n");
+  }
   fListMap = listMap;
   fUcdMap = ucdMap;
   fLock = IOLockAlloc ();

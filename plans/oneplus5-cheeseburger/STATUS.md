@@ -2357,6 +2357,17 @@ H103dm kernel:     5e88804355076fa0231afc2cd8ab4b3906736c637933733053e20c0d6bf41
 H103dm payload:    dc2ae7b63c084cc68762bc4a42ac1b0316c93bb24f8a22a0495faf3bf5323350
 ```
 
+H103dm 进入用户态，但 `window trigger bytes=67695616` 后仍 panic。H103dn
+增加独立的可写 log DMA 缓冲，`logWrite()` 临时替换 `fQueue.data`，避免
+CPU 写 live readData；快照仍只在 root 后 64 MiB 窗口读触发，不读回。
+
+```text
+H103dn boot:       f6d4e0dcc574a6c1a37f6281caa30d99b40007c819817cfa9772ce907c14aefb
+H103dn kernel pre: 0abc16afdfdf987ecfd69f684194cba5c7a0a279ab610516eb4e594d90e03b19
+H103dn kernel:     2a86871c25939305e32bcfb72dd2c75d25baf8914a57f262ddf29a2fed20b650
+H103dn payload:    8700cc6deb106c3697fcab7bfb12e0074c51955be060c247ce0f66f27d5e4b6e
+```
+
 ### 关键产物
 
 ```text

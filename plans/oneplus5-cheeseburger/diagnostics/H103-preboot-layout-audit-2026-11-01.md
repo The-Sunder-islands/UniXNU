@@ -2675,3 +2675,45 @@ payload:    dc2ae7b63c084cc68762bc4a42ac1b0316c93bb24f8a22a0495faf3bf5323350
 - 启动后约 64 MiB 窗口读时停 30 秒，屏幕应有 `window trigger bytes=...`；
 - TWRP 能拉到 `H103TEST`/`SHLOG001`：root 之后写路径正常；
 - 在 `window trigger` 后 panic：写路径本身有问题，需要单独隔离 WRITE10。
+
+## 63. H103dn：独立 log DMA 缓冲，避免写 live readData（2026-11-04）
+
+H103dm 上机已经进入用户态（launchd/dyld cache 都在跑），但在：
+
+```text
+NATIVE_UFS_LOG: window trigger bytes=67695616
+```
+
+之后立刻 panic，仍然在 UFS 命令路径。此时 start 未写、readback 已关，
+剩下的共同点是 `logWrite()` 直接把数据 `memcpy` 到 live 的
+`fQueue.data`（readData）上，而这个缓冲同时是 root/SystemOS 读 DMA。
+
+H103dn 增加一个独立的、`kIODirectionOut` 的可写 log DMA 缓冲：
+
+```text
+start: 分配 fLogDma = IOBufferMemoryDescriptor(kIODirectionOut, 128 KiB)
+logWrite:
+  IOLockLock(fLock)
+  保存 fQueue.data/dataPhys/dataCapacity
+  临时换成 fLogData/fLogDataPhys
+  ufsWriteCommand(...)
+  恢复 readData
+  IOLockUnlock
+```
+
+快照仍只在 root 之后 64 MiB 窗口读触发一次；不读回；停屏 30 秒；
+`h103-skip-pattern=1`。
+
+候选：
+
+```text
+boot:       f6d4e0dcc574a6c1a37f6281caa30d99b40007c819817cfa9772ce907c14aefb
+kernel pre: 0abc16afdfdf987ecfd69f684194cba5c7a0a279ab610516eb4e594d90e03b19
+kernel:     2a86871c25939305e32bcfb72dd2c75d25baf8914a57f262ddf29a2fed20b650
+ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload:    8700cc6deb106c3697fcab7bfb12e0074c51955be060c247ce0f66f27d5e4b6e
+```
+
+若 H103dn 仍在 `window trigger` 后 panic，则问题不在 readData 的 CPU
+写，而在 `ufsWriteCommand`/`ufsSubmit` 的 WRITE(10) 本身；下一步只写一个
+块到窗口首块，不再写 1 MiB body/header。
