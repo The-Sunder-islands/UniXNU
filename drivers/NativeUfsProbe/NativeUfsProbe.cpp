@@ -45,6 +45,12 @@ static volatile uint64_t gWindowLastCount;
 static volatile uint64_t gWindowLastReqBlock;
 static volatile uint64_t gWindowLastReqCount;
 static volatile uint64_t gWindowStartTicks;
+static volatile uint32_t gH103LogMode;
+static volatile uint64_t gH103LogFirst;
+static volatile uint64_t gH103RootFirst;
+static volatile uint64_t gH103RootLast;
+static volatile int gH103LogLatePaused;
+static uint64_t gH103HeartbeatStart;
 
 // H103cg's probe periodically redrew the GOP test pattern from its heartbeat.
 // The display archive is force-loaded into the kernel and exports this symbol;
@@ -56,8 +62,18 @@ extern "C" int native_legacy_test_pattern(void);
 static void
 heartbeatThread (void *, wait_result_t)
 {
+  gH103HeartbeatStart = mach_absolute_time ();
   for (;;) {
     IOSleep (10000);
+    if (!gH103LogLatePaused && gH103HeartbeatStart &&
+        mach_absolute_time () - gH103HeartbeatStart > 45 * 19200000ULL) {
+      gH103LogLatePaused = 1;
+      IOLog ("NATIVE_UFS_LOG: late mode=%u first=%llx root=%llx..%llx\n",
+             gH103LogMode, (unsigned long long) gH103LogFirst,
+             (unsigned long long) gH103RootFirst,
+             (unsigned long long) gH103RootLast);
+      IOSleep (30000);
+    }
     uint64_t winFlight = gWindowInFlight;
     uint64_t ufsFlight = gUfsInFlight;
     IOLog ("NATIVE_UFS_ALIVE: winFlight=%llu ufsFlight=%llu cmds=%llu "
@@ -1955,6 +1971,9 @@ NativeUfsProbe::start (IOService *provider)
          logMode, (unsigned long long) fLogFirst, fLogBlocks,
          (unsigned long long) rootFirst, (unsigned long long) rootLast,
          (unsigned long long) rootImageBytes);
-  IOSleep (30000);
+  gH103LogMode = logMode;
+  gH103LogFirst = fLogFirst;
+  gH103RootFirst = rootFirst;
+  gH103RootLast = rootLast;
   return published;
 }

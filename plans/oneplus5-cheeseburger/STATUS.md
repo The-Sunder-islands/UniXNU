@@ -2284,6 +2284,25 @@ payload: f637a087a016b84c505a1b4edffbd52e56b54b0b1dc9d9b1b2cdb75df5b480a9
 日志仍在 `userdata_ios` 未使用尾部；Android `userdata` 是 64 GiB ext4，
 不能盲写末尾 32 MiB，若必须用需先校验 ext4 文件系统边界。
 
+### H103dh 候选（2026-11-04）
+
+H103dg 的 30 秒停屏在 probe start 末尾、UI 之前，上机反馈“启动后没有
+停留”。H103dh 把停屏移到 heartbeat 启动后 45 秒，并打印 setup 参数：
+
+```text
+NATIVE_UFS_LOG: late mode=%u first=%llx root=%llx..%llx
+IOSleep(30000)
+```
+
+log 线程仍在 20 秒写 `H103TEST`（首块/末块）和 `SHLOG001`。
+
+```text
+boot:    d35d87a2a744f749078a06c5d3d41ec0e78ffbae8cd7491a8b31332bcc05dc46
+kernel:  3bfb18374e43aeda3ce94d44f7a0a20d89112c64c71091ebd629e10a6ca7f896
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: 5a123ca1658860d6a315595b0524d6096ae3b8726268cd1bab30d4cf3ea6883c
+```
+
 ### 关键产物
 
 ```text

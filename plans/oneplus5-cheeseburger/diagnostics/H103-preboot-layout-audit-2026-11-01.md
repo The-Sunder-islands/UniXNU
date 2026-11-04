@@ -2480,3 +2480,37 @@ payload: f637a087a016b84c505a1b4edffbd52e56b54b0b1dc9d9b1b2cdb75df5b480a9
 - 如果最终必须用 Android `userdata`，先读 ext4 superblock 的
   `s_blocks_count`/`s_log_block_size`，确认末尾 32 MiB 在文件系统之外，
   并在 TWRP 只读校验后再写，不能盲写。
+
+## 58. H103dh：把停屏点移到启动后的 heartbeat（2026-11-04）
+
+H103dg 上机反馈“启动后没有停留”。检查 H103dg 内核，
+`NativeUfsProbe::start` 里确实有 `IOSleep(30000)`，但它位于 probe start
+末尾、UI 之前，属于早期启动阶段；用户在系统起来后才观察，看到的是已经
+继续启动的状态。
+
+H103dh 改为：
+
+```text
+NativeUfsProbe::start 只记录 setup 参数，不再停屏
+gH103LogMode/gH103LogFirst/gH103RootFirst/gH103RootLast 保存到全局
+heartbeatThread 启动后 45 秒：
+  IOLog("NATIVE_UFS_LOG: late mode=%u first=%llx root=%llx..%llx")
+  IOSleep(30000)          // 此时 UI 已起来，屏幕明显冻结
+```
+
+原有 log 线程仍在 start 后 20 秒写 `H103TEST`（窗口首块 + 末块）和
+`SHLOG001`，所以这次既能拍照确认 setup 参数，也能在 TWRP 拉窗口验证写路径。
+
+候选：
+
+```text
+boot:    d35d87a2a744f749078a06c5d3d41ec0e78ffbae8cd7491a8b31332bcc05dc46
+kernel:  3bfb18374e43aeda3ce94d44f7a0a20d89112c64c71091ebd629e10a6ca7f896
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: 5a123ca1658860d6a315595b0524d6096ae3b8726268cd1bab30d4cf3ea6883c
+```
+
+上机：从 `fastboot boot` 开始观察，启动完成后约 45 秒屏幕应冻结 30 秒，
+拍下 `NATIVE_UFS_LOG: late ...`；随后进 TWRP 拉 `userdata_ios` 最后
+32 MiB。若 45 秒后仍不停屏，说明 heartbeat 线程没有运行或 probe 未启动，
+需要回到更早的 start 入口确认。
