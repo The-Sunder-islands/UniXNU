@@ -2637,3 +2637,41 @@ payload:    9db662466cf4e3ac3dedea4094ab6e704713fd55780595b16d2b86f43b6ad797
 ```
 
 H103dj（`4a9de88e...`）仍会 panic，不再使用。
+
+## 62. H103dm：把快照完全挪到 root 之后的窗口读（2026-11-04）
+
+H103dl 去掉读回后**仍在** `NATIVE_UFS_LOG: start snapshot begin` 后
+panic。panic 的 PC/LR 仍在 `readBlocks`/`readWindowBulk` 附近，说明
+`start()` 里同步写 1 MiB 会和早期 LUN/root 读竞争，不能作为日志入口。
+
+H103dm 改动：
+
+```text
+start() 只记录 setup/first/root/safe，不写任何块，也不启动 logThread
+remove start snapshot
+NativeUfsWindow 累计读 64 MiB 后，在 storage 读完成回调里执行一次
+  h103Snapshot("window", pause=1, verify=0)
+  - 写 H103TEST 首块/末块
+  - 写 1 MiB body
+  - 写 SHLOG001 header
+  - 不读回
+  - IOSleep(30000) 停屏
+heartbeat 仍然 h103-skip-pattern=1，不画 2×2
+```
+
+候选：
+
+```text
+boot:       6de47089a78519b1f239850ec11c9476397bbfc0f2b4df7f578d7e2b93e730cb
+kernel pre: 8676eae81e20f71ddb3e42776e26604e59498e6b658e4b034bed98291fad8d49
+kernel:     5e88804355076fa0231afc2cd8ab4b3906736c637933733053e20c0d6bf41014
+ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload:    dc2ae7b63c084cc68762bc4a42ac1b0316c93bb24f8a22a0495faf3bf5323350
+```
+
+上机判读：
+
+- 不再在 start snapshot 处 panic：早期写竞争确认；
+- 启动后约 64 MiB 窗口读时停 30 秒，屏幕应有 `window trigger bytes=...`；
+- TWRP 能拉到 `H103TEST`/`SHLOG001`：root 之后写路径正常；
+- 在 `window trigger` 后 panic：写路径本身有问题，需要单独隔离 WRITE10。

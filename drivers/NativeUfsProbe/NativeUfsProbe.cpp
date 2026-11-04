@@ -2044,20 +2044,19 @@ NativeUfsProbe::start (IOService *provider)
     IOLog ("NATIVE_UFS_LOG: window lba=%llx blocks=%u image=%llx\n",
            (unsigned long long) fLogFirst, fLogBlocks,
            (unsigned long long) fLogImageBytes);
-    IOLog ("NATIVE_UFS_LOG: start snapshot begin\n");
-    bool startOk = h103Snapshot ("start", false, false);
-    IOLog ("NATIVE_UFS_LOG: start snapshot result=%u\n", startOk ? 1 : 0);
-    thread_t logThreadId = nullptr;
-    kern_return_t logRet = kernel_thread_start (logThread, this, &logThreadId);
-    IOLog ("NATIVE_UFS_LOG: thread start rc=%x\n", logRet);
-    if (logRet == KERN_SUCCESS) {
-      thread_deallocate (logThreadId);
-    }
+    // Do not write from start(): the synchronous 1 MiB snapshot raced the
+    // early LUN/root reads and faulted in readBlocks. The first window read
+    // snapshot runs after root, on the storage request path.
+    IOLog ("NATIVE_UFS_LOG: deferred snapshot to window read\n");
+    gH103LogFirst = fLogFirst;
   } else {
     IOLog ("NATIVE_UFS_LOG: disabled mode=%u first=%llx root=%llx..%llx image=%llx\n",
            logMode, (unsigned long long) fLogFirst,
            (unsigned long long) rootFirst, (unsigned long long) rootLast,
            (unsigned long long) rootImageBytes);
+    fLogFirst = 0;
+    fLogBlocks = 0;
+    gH103LogFirst = 0;
   }
   return published;
 }

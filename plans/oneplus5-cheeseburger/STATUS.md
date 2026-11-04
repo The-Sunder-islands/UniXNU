@@ -2346,6 +2346,17 @@ H103dl kernel:     79646a830126c3aa88afa44ffc90475737e67da6d0de53e8c6de4c210b695
 H103dl payload:    9db662466cf4e3ac3dedea4094ab6e704713fd55780595b16d2b86f43b6ad797
 ```
 
+H103dl 仍 panic 在 start snapshot begin，PC/LR 在 readBlocks/readWindowBulk
+附近。H103dm 删除 start 快照和 logThread，只保留 root 之后 64 MiB 窗口读
+触发的一次快照，写 H103TEST/body/header，不读回，停屏 30 秒。
+
+```text
+H103dm boot:       6de47089a78519b1f239850ec11c9476397bbfc0f2b4df7f578d7e2b93e730cb
+H103dm kernel pre: 8676eae81e20f71ddb3e42776e26604e59498e6b658e4b034bed98291fad8d49
+H103dm kernel:     5e88804355076fa0231afc2cd8ab4b3906736c637933733053e20c0d6bf41014
+H103dm payload:    dc2ae7b63c084cc68762bc4a42ac1b0316c93bb24f8a22a0495faf3bf5323350
+```
+
 ### 关键产物
 
 ```text
