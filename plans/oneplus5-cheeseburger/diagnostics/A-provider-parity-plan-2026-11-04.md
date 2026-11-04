@@ -23,6 +23,10 @@ display，得到 `NATIVE_LEGACY_STATE calls>0`（理想情况下出现首个 iOS
   provider 失败，只能记录并回退；
 - 不提交 IPSW、kernelcache、userdata、jpg 等私有文件。
 
+> **停止记录（2026-11-04）**：A2/A2c 已越界。用户要求停止
+> display archive、方块/灰条、display timing 和 ordering 实验。
+> H103cg 是唯一基线；以下 A2/A3/A4 仅保留历史，不再执行。
+
 ## 1. 当前门
 
 H103cg 是唯一接受的稳定基线：
@@ -232,17 +236,12 @@ Waiting on <dict ... IOProviderClass=IOMedia ... UUID=04769D26-...>
 Data/APFS IOMedia 发布 race；启动未到 backboardd，`calls` 无法评估。
 A2 镜像不可用，H103cg 保持。
 
-#### A2c：size-budgeted 属性（下一步）
+#### A2c：已停止（2026-11-04，越界）
 
-macOS 树里曾有一个 5 成员 builder，注释明确写：
-
-> leaving it out keeps the Legacy archive below the layout-sensitive size
-> that otherwise displaces the UFS/APFS root-media publication.
-
-A2c 保留 A2 属性，但移除未使用的 A540 对象和 `drawTestPattern()` 里的
-accel 引用，改用 5 成员 builder，使 Legacy archive 小于 H103cg。若 root
-wait 消失，就能评估 A2 属性对 `calls` 的影响；若仍 root wait，说明不是
-单纯 archive size，需要转向 runtime property injection 或修复 race。
+A2 改了 display 属性/`IOMFBDisplayRefresh`；A2c 又移除了
+`drawTestPattern()` 的 accel 方块并改变了 archive 成员。这违反了
+“不再做方块/灰条/display 时序/ordering 实验”的边界。已恢复 H103cg
+源码和 7 成员 builder；A2/A2c 镜像不使用，A3/A4 也不执行。
 
 ### A3：identity parity（A2 仍不足时）
 

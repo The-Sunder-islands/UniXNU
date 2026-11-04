@@ -2147,4 +2147,24 @@ H103cg 保持。
 里的 accel 引用，改用 5 成员 builder，把 Legacy archive 缩到
 layout-sensitive 阈值以下，再评估 `calls`。若仍 root wait，则不是单纯
 archive size，转向 runtime property injection 或修复 race。
+
+## 48. A2/A2c 停止：边界恢复（2026-11-04）
+
+用户指出 A2/A2c 违反了“不再做方块/灰条/display 时序/ordering 实验”的
+边界：
+
+- A2 修改了 display 属性和 `IOMFBDisplayRefresh`；
+- A2c 移除了 `drawTestPattern()` 的 accel 方块，并改变 Legacy archive
+  成员；
+- 两者都属于 display archive/诊断实验，不属于已接受的 H103cg 基线。
+
+已恢复：
+
+- `NativeLegacyDisplay.cpp`、`LegacyDisplayProbe.cpp`、
+  `NativeA540AcceleratorProbe.cpp` 回到 H103cg；
+- macOS 源和 `scripts/build-op5-legacy-display.py` 回到 7 成员 builder；
+- A1/A2/A2c 镜像均不使用；H103cg 是唯一稳定基线。
+
+后续除用户明确要求外，不再做 display archive、方块/灰条、display
+timing 或 ordering 实验。
 ```

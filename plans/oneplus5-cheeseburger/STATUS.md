@@ -2090,10 +2090,12 @@ Waiting on <dict ... IOProviderClass=IOMedia ... UUID=04769D26-...>
 - 但 Legacy archive 变大再次触发 Data/APFS IOMedia race；
 - 未到 backboardd，`calls` 无法评估；A2 镜像不可用，H103cg 保持。
 
-下一步 **A2c**：保留 A2 属性，移除未使用的 A540 对象和
-`drawTestPattern()` 里的 accel 引用，改用 5 成员 builder，把 Legacy
-archive 缩到阈值以下；若仍 root wait，则转向 runtime property injection
-或修复 race。
+**A2/A2c 已停止（2026-11-04，越界）**：用户指出 A2 改了 display
+属性/refresh，A2c 又移除了 `drawTestPattern()` 的 accel 方块并改变
+archive 成员，违反“不再做方块/灰条/display 时序/ordering 实验”的边界。
+已恢复 H103cg 源码和 7 成员 builder；A1/A2/A2c 镜像均不使用。后续除用户
+明确要求外，不再做 display archive、方块/灰条、display timing 或
+ordering 实验。
 
 ### 关键产物
 
