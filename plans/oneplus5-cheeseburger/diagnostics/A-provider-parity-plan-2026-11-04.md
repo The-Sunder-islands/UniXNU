@@ -149,6 +149,41 @@ NATIVE_LEGACY_STATE ... calls>0 ... comm=backboardd
 - 启动停在 `Waiting on IOMedia UUID 04769D26-...`：Data/APFS race，
   记录后回退，不据此判定 A1 失败。
 
+#### A1 结果（2026-11-04）
+
+候选：
+
+```text
+boot-H103cw-a1.img
+size:    81,147,904 bytes
+boot:    43f831fb07fe5ad9f639a4147a26137d51f7972cb7fb74c4041639422245e28c
+kernel:  4950bfa6c93a248f3e584b05f60e93705c0603f9eb366827004f8fcedaa99d19
+payload: 3ac218e47edc83a80d2e746ea8ff75e320d6930c1826f7772eada4a925e82342
+```
+
+上机结果：**panic**。
+
+```text
+NATIVE_LEGACY: late probe enter
+Can't load kext com.apple.iokit.IOGPUFamily - requests to user space are disabled.
+OSMetaClass::preModLoad() wasn't called for class NativeA540AcceleratorProbe
+```
+
+原因：
+
+1. `native_a540_accelerator_probe()` 里
+   `if (!OSKextLoadKextWithIdentifier("com.apple.iokit.IOGPUFamily"))`
+   的返回值判断写反；加载失败后反而继续
+   `native_a540_accelerator_static_init()`，触发 OSMetaClass panic。
+2. 即使修正判断，pre-root late probe 阶段也无法加载 `IOGPUFamily`
+   （`requests to user space are disabled`）；原始 `IOAcceleratorES`
+   基类依赖该 family。
+
+结论：**A1 作为 pre-root 裸 accelerator stub 不可行**。原始
+`IOAcceleratorES` 需要 `IOGPUFamily` 已加载；可选后续是 A1b（把
+`IOGPUFamily` 放进 prelink roots）或 post-root publication，两者都会改变
+prelink 布局/启动时序，暂不执行。A1 源码已回退，H103cg 保持。
+
 ### A2：最小 display 属性（A1 不足时）
 
 目的：让原始 family/CA 看到完整的固定模式。

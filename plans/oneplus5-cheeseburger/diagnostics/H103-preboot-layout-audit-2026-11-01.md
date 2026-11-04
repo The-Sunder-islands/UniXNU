@@ -2082,4 +2082,39 @@ A 只读对照（sagit / HackiOS / DinnerABC）结论：
 下一步：A1。任何 display archive 改动仍可能触发 Data/APFS IOMedia race；
 若停在 `Waiting on IOMedia UUID 04769D26-...`，记录后回退，不据此判定
 provider 失败。
+
+## 46. A1 结果：pre-root 裸 accelerator 不可行（2026-11-04）
+
+候选 `boot-H103cw-a1.img`：
+
+```text
+boot:    43f831fb07fe5ad9f639a4147a26137d51f7972cb7fb74c4041639422245e28c
+kernel:  4950bfa6c93a248f3e584b05f60e93705c0603f9eb366827004f8fcedaa99d19
+payload: 3ac218e47edc83a80d2e746ea8ff75e320d6930c1826f7772eada4a925e82342
+```
+
+上机 panic：
+
+```text
+NATIVE_LEGACY: late probe enter
+Can't load kext com.apple.iokit.IOGPUFamily - requests to user space are disabled.
+OSMetaClass::preModLoad() wasn't called for class NativeA540AcceleratorProbe
+```
+
+原因：
+
+- `NativeA540AcceleratorProbe` 的
+  `OSKextLoadKextWithIdentifier("com.apple.iokit.IOGPUFamily")` 返回值
+  判断写反，失败后继续 `static_init()`；
+- pre-root late probe 阶段无法加载 `IOGPUFamily`，原始
+  `IOAcceleratorES` 基类不可用。
+
+结论：A1（pre-root 裸 `IOAcceleratorES`）不可行；A540 源码已回退，
+H103cg 仍是唯一稳定基线。后续二选一：
+
+1. **A2**：最小 display 属性（不依赖 IOGPUFamily）；
+2. **A1b**：把 `IOGPUFamily` 放进 prelink roots，或 post-root publication
+   （改变 prelink 布局/时序，风险更高，暂不执行）。
+
+详见 [A-provider-parity-plan-2026-11-04.md](A-provider-parity-plan-2026-11-04.md)。
 ```

@@ -2054,6 +2054,27 @@ provider，进入 headless，而不是 Legacy `newUserClient` 的问题。
 不再增加 boot-arg、`sheng-disable-jobs`、Data 容量或 AMFI 诊断；
 不再做 display timing/ordering/delay/pump 实验。
 
+### A1 结果（2026-11-04）
+
+`boot-H103cw-a1.img`（boot `43f831fb...`、kernel `4950bfa6...`、
+payload `3ac218e4...`）上机 **panic**：
+
+```text
+Can't load kext com.apple.iokit.IOGPUFamily - requests to user space are disabled.
+OSMetaClass::preModLoad() wasn't called for class NativeA540AcceleratorProbe
+```
+
+- `NativeA540AcceleratorProbe` 的 `OSKextLoadKextWithIdentifier()`
+  返回值判断写反；
+- pre-root late probe 阶段无法加载 `IOGPUFamily`，原始
+  `IOAcceleratorES` 基类不可用。
+
+结论：**A1 作为 pre-root 裸 accelerator stub 不可行**，源码已回退，
+H103cg 仍是唯一稳定基线。下一步建议 **A2（最小 display 属性，不依赖
+IOGPUFamily）**；A1b（prelink `IOGPUFamily` / post-root publication）
+会改变 prelink 布局，暂不执行。详见
+`diagnostics/A-provider-parity-plan-2026-11-04.md`。
+
 ### 关键产物
 
 ```text
