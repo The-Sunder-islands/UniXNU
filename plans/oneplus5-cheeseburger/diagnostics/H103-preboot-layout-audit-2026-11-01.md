@@ -2320,5 +2320,43 @@ payload: 3d0a464f0b082d5d413f2193aa89c95fa809f499febb5fd450d31c2e3a239d51
 基线 H103da。`NativeUfsProbe` 的 heartbeat 每 10 秒调用
 `native_legacy_test_pattern()`（weak import，display archive 提供实现），
 恢复 H103cg 原 probe 的周期重绘。display archive 仍是 H103da 的左上角
-三个块，root 修复（H103cg-6）不变。结果待上机；预期 root 通过，左上角
-三个块周期可见；`calls=0` 不变。
+三个块，root 修复（H103cg-6）不变。
+
+上机：**右上角和左上角都没有方块**。用 H103cg 原 kernel 反汇编确认原
+heartbeat 顺序是：
+
+```text
+IOLog(...)  ->  native_legacy_test_pattern()
+```
+
+H103db 把调用放在 `IOLog` 之前，heartbeat 日志又把图案盖掉；因此不是
+坐标问题，是绘制顺序问题。H103dc 把调用移到 `IOLog` 之后。
+
+## 54. H103dc：把 test pattern 调用移到 IOLog 之后（2026-11-04）
+
+候选 `boot-H103dc.img`：
+
+```text
+boot:    909bb8998f5f9c06e3a1ab5e43fb404673560e82ced026c072e45c70cd1ab5f5
+kernel:  1c1032a4dfad07a3cc0331c5cb4b5bb561923e4378f06a374b79f0952910462f
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: 5caa2c9ceb4461fbec201d337eddaca1394d88629cadd440bb2e5327ced060a9
+```
+
+H103cg 原 `heartbeatThread` 反汇编：
+
+```text
+fffffff0079b17d4  bl _IOLog
+fffffff0079b17d8  bl _native_legacy_test_pattern
+```
+
+H103dc 按这个顺序：
+
+```text
+IOLog(NATIVE_UFS_ALIVE...)
+native_legacy_test_pattern()
+```
+
+display archive 仍是 H103da 的左上角三个块，root 修复不变。结果待上机；
+预期 heartbeat 日志后周期重绘，右上 2×2 和左上三个块可见；`calls=0`
+不变。

@@ -58,9 +58,6 @@ heartbeatThread (void *, wait_result_t)
 {
   for (;;) {
     IOSleep (10000);
-    if (native_legacy_test_pattern) {
-      native_legacy_test_pattern ();
-    }
     uint64_t winFlight = gWindowInFlight;
     uint64_t ufsFlight = gUfsInFlight;
     IOLog ("NATIVE_UFS_ALIVE: winFlight=%llu ufsFlight=%llu cmds=%llu "
@@ -73,6 +70,11 @@ heartbeatThread (void *, wait_result_t)
            (unsigned long long) gUfsLastBytes,
            (unsigned long long) gWindowLastReqBlock,
            (unsigned long long) gWindowLastReqCount);
+    // H103cg order: print the heartbeat log first, then redraw the GOP test
+    // pattern. Drawing before IOLog lets the log overwrite the blocks.
+    if (native_legacy_test_pattern) {
+      native_legacy_test_pattern ();
+    }
     uint64_t start = gWindowStartTicks;
     if (gWindowInFlight && start && mach_absolute_time () - start > 10 * 19200000ULL) {
       panic ("NATIVE_UFS_STALL: req=%llx/%llu cmds=%llu winBytes=%llu "

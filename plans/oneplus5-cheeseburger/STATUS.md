@@ -2203,7 +2203,24 @@ payload: 3d0a464f0b082d5d413f2193aa89c95fa809f499febb5fd450d31c2e3a239d51
 
 `NativeUfsProbe` heartbeat 每 10 秒调用 `native_legacy_test_pattern()`
 （weak import），恢复 H103cg probe 的周期重绘。display 仍是 H103da 左上角
-三个块；root 修复不变。结果待上机。
+三个块；root 修复不变。
+
+上机：右上和左上都没有方块。H103cg 原 kernel 反汇编确认 heartbeat 顺序是
+`IOLog -> native_legacy_test_pattern`；H103db 在 `IOLog` 前调用，日志把
+图案盖掉。H103dc 把调用移到 `IOLog` 后。
+
+### H103dc 候选（2026-11-04）
+
+```text
+boot:    909bb8998f5f9c06e3a1ab5e43fb404673560e82ced026c072e45c70cd1ab5f5
+kernel:  1c1032a4dfad07a3cc0331c5cb4b5bb561923e4378f06a374b79f0952910462f
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: 5caa2c9ceb4461fbec201d337eddaca1394d88629cadd440bb2e5327ced060a9
+```
+
+按 H103cg 原 heartbeat 顺序，在 `IOLog` 后调用
+`native_legacy_test_pattern()`；display 仍是 H103da 左上角三个块。结果
+待上机。
 
 ### 关键产物
 
