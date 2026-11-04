@@ -46,6 +46,11 @@ static volatile uint64_t gWindowLastReqBlock;
 static volatile uint64_t gWindowLastReqCount;
 static volatile uint64_t gWindowStartTicks;
 
+// H103cg's probe periodically redrew the GOP test pattern from its heartbeat.
+// The display archive exports this symbol; keep it weak so an offline probe
+// archive without the display object still links.
+extern "C" int native_legacy_test_pattern(void) __attribute__((weak_import));
+
 // Independent liveness proof: if a window request is stuck, this thread keeps
 // printing the exact in-flight request and queue counters from another CPU.
 static void
@@ -53,6 +58,9 @@ heartbeatThread (void *, wait_result_t)
 {
   for (;;) {
     IOSleep (10000);
+    if (native_legacy_test_pattern) {
+      native_legacy_test_pattern ();
+    }
     uint64_t winFlight = gWindowInFlight;
     uint64_t ufsFlight = gUfsInFlight;
     IOLog ("NATIVE_UFS_ALIVE: winFlight=%llu ufsFlight=%llu cmds=%llu "

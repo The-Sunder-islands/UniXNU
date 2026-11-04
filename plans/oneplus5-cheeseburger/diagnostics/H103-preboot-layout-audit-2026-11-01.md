@@ -2305,3 +2305,20 @@ clean rebuild 的 probe archive 丢失了该调用，因此 `drawTestPattern()`
 下一步 H103db：在 UFS heartbeat 恢复
 `native_legacy_test_pattern()` 调用，让左上角三个块周期性重绘；root
 修复（H103cg-6）保持不变。display provider 仍是 `calls=0`，UI 仍未出现。
+
+## 53. H103db：恢复 heartbeat 周期重绘（2026-11-04）
+
+候选 `boot-H103db.img`：
+
+```text
+boot:    efc4bc2fbb5bc6721982046cc9b837b8182af55f4ee409b5035c8110e0849f21
+kernel:  d559aef221fbf554db6994e75d609dffb49d9e5d730596feabfec99bed0f8713
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: 3d0a464f0b082d5d413f2193aa89c95fa809f499febb5fd450d31c2e3a239d51
+```
+
+基线 H103da。`NativeUfsProbe` 的 heartbeat 每 10 秒调用
+`native_legacy_test_pattern()`（weak import，display archive 提供实现），
+恢复 H103cg 原 probe 的周期重绘。display archive 仍是 H103da 的左上角
+三个块，root 修复（H103cg-6）不变。结果待上机；预期 root 通过，左上角
+三个块周期可见；`calls=0` 不变。

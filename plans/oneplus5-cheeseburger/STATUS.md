@@ -2190,8 +2190,20 @@ payload: 9ebfe2ec3dbc7ae578d7683d376a3b4e9b583268690e8566dfed6b053ec1944e
 上机：**root 通过，`calls=0`，左上角三个块没有出现**。当前
 `NativeUfsProbe` heartbeat 没有调用 `native_legacy_test_pattern()`，
 clean rebuild 丢失了 H103cg 的周期重绘调用，`drawTestPattern()` 从未
-执行；坐标本身已编译进 archive。下一步 H103db：恢复 heartbeat 调用，
-验证左上角可见；display provider 仍 `calls=0`。
+执行；坐标本身已编译进 archive。
+
+### H103db 候选（2026-11-04）
+
+```text
+boot:    efc4bc2fbb5bc6721982046cc9b837b8182af55f4ee409b5035c8110e0849f21
+kernel:  d559aef221fbf554db6994e75d609dffb49d9e5d730596feabfec99bed0f8713
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: 3d0a464f0b082d5d413f2193aa89c95fa809f499febb5fd450d31c2e3a239d51
+```
+
+`NativeUfsProbe` heartbeat 每 10 秒调用 `native_legacy_test_pattern()`
+（weak import），恢复 H103cg probe 的周期重绘。display 仍是 H103da 左上角
+三个块；root 修复不变。结果待上机。
 
 ### 关键产物
 
