@@ -2983,3 +2983,43 @@ payload:    f7e1792c50851f052e87f1dbe867c247ad478099266511a5a8d72e1cf29f8fa6
 - 约 2.5 分钟出现 `late snapshot tick=12` 和 30 秒停屏：heartbeat 正常；
 - TWRP 拉到 late 时间戳的日志：FUA 写有效；
 - 如果 FUA 被拒绝：还需要单独处理写缓存，但不会再卡 fLock。
+
+## 70. H103du：1 GiB late-window 快照 + puller flush/direct（2026-11-05）
+
+H103dt 屏幕已经继续，但 TWRP 读到的文件还是 64 MiB 的早期快照。两个原因：
+
+1. heartbeat 第 12 tick 的 late 快照可能还没执行；
+2. TWRP `dd` 走页缓存，之前拉过早期窗口后，late 写入的块可能仍返回旧页。
+
+H103du 增加 **window 字节 late 快照**，不再依赖 heartbeat：
+
+```text
+gWindowBytes >= 64 MiB   -> h103Snapshot("window", pause=0, verify=0)
+gWindowBytes >= 1 GiB    -> h103Snapshot("late-window", pause=0, verify=0)
+```
+
+两个快照都不停屏，避免卡住存储线程；heartbeat 的 late 和第 12 tick 仍保留。
+
+puller 同时改为先 flush block cache，再尝试 `dd iflag=direct`，失败则回退普通 `dd`：
+
+```text
+blockdev --flushbufs /dev/block/sda14
+dd ... iflag=direct
+```
+
+候选：
+
+```text
+boot:       ba2c1f0a0c75e3e380d794d4794455853b86e6dfa70fcb5833d88857aec4f76c
+kernel pre: 495beb9382fbec52b0eefe65dba8b6a3232cd2b407f55b667fc7aaafe6c51178
+kernel:     2e660304ece04bfff8638583841be9629ce4517fd950f95b69557aa17db3f854
+ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload:    c1e7d4a2a77cea2e088da84f8951b739fc40d8435314076c33578208e80d3c59
+```
+
+上机后看：
+
+- 屏幕出现 `late-window trigger bytes=...`：1 GiB 快照触发；
+- TWRP 拉到 `SHLOG001` 且时间戳到 1 GiB 之后：late 窗口成功；
+- 如果文件仍是早期快照，先确认 puller 是否用了新脚本的 flush/direct；
+- 仍只写 `userdata_ios`，不碰 Android `userdata`。

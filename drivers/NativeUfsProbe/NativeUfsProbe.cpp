@@ -53,6 +53,7 @@ static volatile int gH103LogLatePaused;
 static uint64_t gH103HeartbeatStart;
 static volatile int gH103SkipPattern;
 static volatile int gH103WindowSnapshotDone;
+static volatile int gH103LateWindowSnapshotDone;
 class NativeUfsProbe;
 static NativeUfsProbe *gH103Probe;
 static volatile int gH103LateSnapshotDone;
@@ -1305,19 +1306,24 @@ NativeUfsProbe::h103Snapshot (const char *tag, bool pause, bool verify)
 void
 NativeUfsProbe::h103WindowRead (void)
 {
-  if (gH103WindowSnapshotDone || !fLogFirst || !fLogBlocks) {
+  if (!fLogFirst || !fLogBlocks) {
     return;
   }
-  // The root/SystemOS window reads are a known-running path. Trigger one
-  // post-boot snapshot after enough read traffic has passed, independent of
-  // the heartbeat and the separate log thread.
-  if (gWindowBytes < 64ULL * 1024 * 1024) {
-    return;
+  // The root/SystemOS window reads are a known-running path. Take an early
+  // snapshot at 64 MiB and a late one at 1 GiB, independent of the heartbeat.
+  if (!gH103WindowSnapshotDone && gWindowBytes >= 64ULL * 1024 * 1024) {
+    gH103WindowSnapshotDone = 1;
+    IOLog ("NATIVE_UFS_LOG: window trigger bytes=%llu\n",
+           (unsigned long long) gWindowBytes);
+    h103Snapshot ("window", false, false);
   }
-  gH103WindowSnapshotDone = 1;
-  IOLog ("NATIVE_UFS_LOG: window trigger bytes=%llu\n",
-         (unsigned long long) gWindowBytes);
-  h103Snapshot ("window", false, false);
+  if (!gH103LateWindowSnapshotDone &&
+      gWindowBytes >= 1024ULL * 1024 * 1024) {
+    gH103LateWindowSnapshotDone = 1;
+    IOLog ("NATIVE_UFS_LOG: late-window trigger bytes=%llu\n",
+           (unsigned long long) gWindowBytes);
+    h103Snapshot ("late-window", false, false);
+  }
 }
 
 static uint8_t gH103Test[4096] __attribute__((aligned(4096)));

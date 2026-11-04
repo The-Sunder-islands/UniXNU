@@ -2431,6 +2431,17 @@ H103dt kernel:     1cfdae53833c10286e1f202f46a9a6ad48e24df679648c7a727c92d70e334
 H103dt payload:    f7e1792c50851f052e87f1dbe867c247ad478099266511a5a8d72e1cf29f8fa6
 ```
 
+H103dt 屏幕继续但 TWRP 文件仍是 64 MiB 早期快照。H103du 增加 1 GiB
+`late-window` 快照，两个窗口快照都不停屏；puller 增加
+`blockdev --flushbufs` 和 `dd iflag=direct` 回退。
+
+```text
+H103du boot:       ba2c1f0a0c75e3e380d794d4794455853b86e6dfa70fcb5833d88857aec4f76c
+H103du kernel pre: 495beb9382fbec52b0eefe65dba8b6a3232cd2b407f55b667fc7aaafe6c51178
+H103du kernel:     2e660304ece04bfff8638583841be9629ce4517fd950f95b69557aa17db3f854
+H103du payload:    c1e7d4a2a77cea2e088da84f8951b739fc40d8435314076c33578208e80d3c59
+```
+
 ### 关键产物
 
 ```text

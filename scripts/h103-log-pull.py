@@ -95,9 +95,18 @@ def pull_window(adb_path: str, serial: str | None, part: str,
         raise SystemExit(f"partition too small: {size} bytes")
     skip = blocks - WINDOW_BLOCKS
     remote = "/tmp/h103log.bin"
-    adb(adb_path, serial, "shell",
-        f"dd if={part} of={remote} bs={BLOCK} skip={skip} count={WINDOW_BLOCKS}",
-        timeout=300)
+    # The UFS window may have been pulled before; TWRP can serve stale block
+    # cache pages even after the kernel rewrote the late snapshot.
+    try:
+        adb(adb_path, serial, "shell", f"blockdev --flushbufs {part}", timeout=30)
+    except SystemExit:
+        pass
+    dd_cmd = (f"dd if={part} of={remote} bs={BLOCK} skip={skip} "
+              f"count={WINDOW_BLOCKS}")
+    try:
+        adb(adb_path, serial, "shell", dd_cmd + " iflag=direct", timeout=300)
+    except SystemExit:
+        adb(adb_path, serial, "shell", dd_cmd, timeout=300)
     adb(adb_path, serial, "pull", remote, str(output), timeout=300)
     adb(adb_path, serial, "shell", f"rm -f {remote}")
     return size
