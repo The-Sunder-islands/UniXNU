@@ -52,6 +52,7 @@ static volatile uint64_t gH103RootLast;
 static uint64_t gH103HeartbeatStart;
 static volatile int gH103SkipPattern;
 static uint32_t gH103SlotCursor;
+static volatile int gH103Quiet;
 class NativeUfsProbe;
 static NativeUfsProbe *gH103Probe;
 static void h103SlotWriteThunk (void);
@@ -71,20 +72,6 @@ heartbeatThread (void *, wait_result_t)
   for (;;) {
     IOSleep (2000);
     h103SlotWriteThunk ();
-    uint64_t winFlight = gWindowInFlight;
-    uint64_t ufsFlight = gUfsInFlight;
-    IOLog ("NATIVE_UFS_ALIVE: winFlight=%llu ufsFlight=%llu cmds=%llu "
-           "winReq=%llu winBytes=%llu lastCmd=%llx/%llu req=%llx/%llu\n",
-           (unsigned long long) winFlight, (unsigned long long) ufsFlight,
-           (unsigned long long) gUfsCommands,
-           (unsigned long long) gWindowRequests,
-           (unsigned long long) gWindowBytes,
-           (unsigned long long) gUfsLastLba,
-           (unsigned long long) gUfsLastBytes,
-           (unsigned long long) gWindowLastReqBlock,
-           (unsigned long long) gWindowLastReqCount);
-    // H103cg order: print the heartbeat log first, then redraw the GOP test
-    // pattern. Drawing before IOLog lets the log overwrite the blocks.
     if (!gH103SkipPattern) {
       native_legacy_test_pattern ();
     }
@@ -868,7 +855,7 @@ ufsSubmit (UfsQueue *q, unsigned direction, unsigned bytes,
   gUfsInFlight = 0;
   gUfsLastLoops = loops;
   gUfsLastTicks = mach_absolute_time () - commandStart;
-  if ((gUfsCommands & 63) == 0) {
+  if (!gH103Quiet && (gUfsCommands & 63) == 0) {
     IOLog ("NATIVE_UFS_PROGRESS: cmds=%llu last=%llx/%llu loops=%llu ticks=%llu "
            "winReq=%llu winBytes=%llu winFlight=%llu lastWin=%llx/%llu "
            "req=%llx/%llu\n",
@@ -1095,7 +1082,7 @@ NativeUfsProbe::readWindowBulk (uint64_t lba, uint32_t blocks, void *out)
   uint64_t unlockTicks = mach_absolute_time () - unlockStart;
   static unsigned gBulkPhases;
   unsigned call = gBulkPhases++;
-  if (call < 8 || commandTicks > 19200000ULL || lockTicks > 19200000ULL) {
+  if (!gH103Quiet && (call < 8 || commandTicks > 19200000ULL || lockTicks > 19200000ULL)) {
     IOLog ("NATIVE_UFS_BULK: lba=%llx blocks=%u lock=%llu cmd=%llu unlock=%llu ok=%u\n",
            lba, blocks, (unsigned long long) lockTicks,
            (unsigned long long) commandTicks,
@@ -1438,7 +1425,7 @@ NativeUfsWindow::doAsyncReadWrite (IOMemoryDescriptor *buffer, UInt64 block,
   gWindowLastReqCount = count;
   gWindowStartTicks = mach_absolute_time ();
   gWindowInFlight = 1;
-  if (request < 8 || (request & 1023) == 0) {
+  if (!gH103Quiet && (request < 8 || (request & 1023) == 0)) {
     IOLog ("NATIVE_UFS_WINDOW: %s req=%llu block=%llx count=%llu\n",
            label, request, block, count);
   }
@@ -1524,7 +1511,7 @@ NativeUfsWindow::doAsyncReadWrite (IOMemoryDescriptor *buffer, UInt64 block,
   gWindowInFlight = 0;
   gWindowStartTicks = 0;
   uint64_t requestTicks = mach_absolute_time () - requestStart;
-  if (request < 8 || (request & 1023) == 0 || requestTicks > 19200000ULL) {
+  if (!gH103Quiet && (request < 8 || (request & 1023) == 0 || requestTicks > 19200000ULL)) {
     IOLog ("NATIVE_UFS_WINDOW: %s req=%llu done=%llu ok=%u ticks=%llu "
            "read=%llu write=%llu\n",
            label, request, done, ok ? 1 : 0,
@@ -1532,7 +1519,7 @@ NativeUfsWindow::doAsyncReadWrite (IOMemoryDescriptor *buffer, UInt64 block,
            (unsigned long long) readTicks,
            (unsigned long long) writeTicks);
   }
-  if (request < 4) {
+  if (!gH103Quiet && request < 4) {
     IOLog ("NATIVE_UFS_PHASE: %s req=%llu lock=%llu read=%llu write=%llu unlock=%llu\n",
            label, request, (unsigned long long) lockTicks,
            (unsigned long long) readTicks, (unsigned long long) writeTicks,
@@ -1581,7 +1568,7 @@ NativeUfsLun::doAsyncReadWrite (IOMemoryDescriptor *buffer, UInt64 block,
   if (block == 0) {
     gBlock0Requests++;
   }
-  if (gIoRequestLog < 16) {
+  if (!gH103Quiet && gIoRequestLog < 16) {
     IOLog ("NATIVE_UFS_IO: req block=%llx count=%llu sector=%x len=%llx\n",
            block, count, sector, buffer->getLength ());
     gIoRequestLog++;
@@ -1591,12 +1578,12 @@ NativeUfsLun::doAsyncReadWrite (IOMemoryDescriptor *buffer, UInt64 block,
   bool ok = host->readBlocks (lun, block, count, sector, buffer, &done);
   uint64_t finished = mach_absolute_time ();
   IOReturn status = ok ? kIOReturnSuccess : kIOReturnIOError;
-  if (gIoRequestLog < 32) {
+  if (!gH103Quiet && gIoRequestLog < 32) {
     IOLog ("NATIVE_UFS_IO: done block=%llx count=%llu ok=%u done=%llx status=%x\n",
            block, count, ok ? 1 : 0, done, status);
     gIoRequestLog++;
   }
-  if (gIoRequests <= 8) {
+  if (!gH103Quiet && gIoRequests <= 8) {
     IOLog ("NATIVE_UFS_IO: timing block=%llx ufs_ticks=%llu total_ticks=%llu\n",
            block, finished - started, mach_absolute_time () - started);
   }
@@ -1607,15 +1594,15 @@ NativeUfsLun::doAsyncReadWrite (IOMemoryDescriptor *buffer, UInt64 block,
     dumpMediaServices ();
   }
   if (completion && completion->action) {
-    if (gIoRequests <= 8) {
+    if (!gH103Quiet && gIoRequests <= 8) {
       IOLog ("NATIVE_UFS_IO: completion enter block=%llx\n", block);
     }
     completion->action (completion->target, completion->parameter, status, done);
-    if (gIoRequests <= 8) {
+    if (!gH103Quiet && gIoRequests <= 8) {
       IOLog ("NATIVE_UFS_IO: completion leave block=%llx\n", block);
     }
   }
-  if ((gIoRequests & 31) == 0) {
+  if (!gH103Quiet && (gIoRequests & 31) == 0) {
     IOLog ("NATIVE_UFS_IO: requests=%u block0=%u last_block=%llx\n",
            gIoRequests, gBlock0Requests, block);
   }
@@ -2150,6 +2137,7 @@ NativeUfsProbe::start (IOService *provider)
   IOLog ("NATIVE_UFS_GPT: start returning published=%u windows=%u\n",
          published ? 1 : 0, windowsPublished);
   gH103Probe = this;
+  gH103Quiet = 1;
   uint32_t skipPattern = 0;
   PE_parse_boot_argn ("h103-skip-pattern", &skipPattern, sizeof skipPattern);
   gH103SkipPattern = skipPattern ? 1 : 0;

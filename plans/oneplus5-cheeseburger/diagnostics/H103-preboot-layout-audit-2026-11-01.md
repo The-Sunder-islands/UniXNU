@@ -3075,3 +3075,36 @@ display:    03fa715 (GopFramebuffer display-op5)
 上机：每 2 秒应能看到 `NATIVE_LEGACY_PATTERN` 三条日志，屏幕右上 2×2 和
 左上三块应重绘；TWRP puller 应读到 `slot=... slots_written=...` 的最新
 128 KiB 日志。仍只写 `userdata_ios`。
+
+## 72. H103dw：回到 H103bd 颜色面板，静默 2 秒 slot（2026-11-05）
+
+核对 11 月 3 日的提交：`8946733`/`77cbf26` 指向的 `bfa9a0d` 只是
+**纯品红 256×256** 测试块，不是右上 2×2。真正的 H103bd 2×2 颜色面板在
+`5f29dde`，当前源码也仍然保留同一套 `stageColor/clientColor/callsColor`
+代码；后来只是增加了左上三块和日志。
+
+H103dw 的取舍：
+
+```text
+显示 source 回到 5f29dde（H103bd 2×2 颜色面板，无 PATTERN 日志）
+heartbeat 2 秒 slot 保留
+gH103Quiet=1，关闭 NATIVE_UFS_ALIVE / PROGRESS / WINDOW / IO / BULK 周期日志
+payload 去掉 -v、debug=0x14e、boot-progress=2
+puller 继续 flush + direct + 最新 slot
+```
+
+这样屏幕不再被 console 每 2 秒刷掉，2×2 画完后没有日志覆盖；日志只在
+`userdata_ios` slot 里。
+
+候选：
+
+```text
+boot:       99307b5f99a7154a7212b5e9ff3e0ef562b5fc89e98d4bf334c42c28cde7fcc4
+kernel pre: 57122244f4a55f1e37d02753b094c8f812f163b18478b4a81e4aa38eff235bc8
+kernel:     61603873ad954ef895b3ffefebf722bb3bde3e9ef4fca3f06827b20997628374
+ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload:    ff3a13661b3fbccbe38a42633865b84b51cfd57dd8b7f2ba4db218a096462217
+display:    5f29dde
+```
+
+上机：屏幕右上应保留 2×2，不再持续滚动；TWRP 拉到最新 slot 即可。

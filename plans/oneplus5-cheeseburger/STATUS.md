@@ -2454,6 +2454,18 @@ H103dv payload:    ad3b2e80ddd06480261db84ec1698a3c39d39ad64eb1af52fd85044bf76db
 display:           03fa715 (GopFramebuffer display-op5)
 ```
 
+H103dv 的 display archive 没链入/console 刷屏。H103dw 回到 H103bd 的
+`5f29dde` 2×2 颜色面板，保留 2 秒 slot，`gH103Quiet=1` 关闭周期 UFS 日志，
+payload 去掉 `-v`/debug/boot-progress。
+
+```text
+H103dw boot:       99307b5f99a7154a7212b5e9ff3e0ef562b5fc89e98d4bf334c42c28cde7fcc4
+H103dw kernel pre: 57122244f4a55f1e37d02753b094c8f812f163b18478b4a81e4aa38eff235bc8
+H103dw kernel:     61603873ad954ef895b3ffefebf722bb3bde3e9ef4fca3f06827b20997628374
+H103dw payload:    ff3a13661b3fbccbe38a42633865b84b51cfd57dd8b7f2ba4db218a096462217
+display:           5f29dde
+```
+
 ### 关键产物
 
 ```text
