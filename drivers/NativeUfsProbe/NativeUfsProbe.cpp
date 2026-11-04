@@ -54,8 +54,6 @@ static volatile int gH103SkipPattern;
 static uint32_t gH103SlotCursor;
 static volatile int gH103Quiet;
 class NativeUfsProbe;
-static NativeUfsProbe *gH103Probe;
-static void h103SlotWriteThunk (void);
 
 // H103cg's probe periodically redrew the GOP test pattern from its heartbeat.
 // The display archive is force-loaded into the kernel and exports this symbol;
@@ -74,7 +72,6 @@ heartbeatThread (void *, wait_result_t)
     if (!gH103SkipPattern) {
       native_legacy_test_pattern ();
     }
-    h103SlotWriteThunk ();
     uint64_t start = gWindowStartTicks;
     if (gWindowInFlight && start && mach_absolute_time () - start > 10 * 19200000ULL) {
       panic ("NATIVE_UFS_STALL: req=%llx/%llu cmds=%llu winBytes=%llu "
@@ -331,13 +328,6 @@ public:
 OSDefineMetaClassAndStructors (NativeUfsProbe, IOService)
 OSDefineMetaClassAndStructors (NativeUfsLun, IOBlockStorageDevice)
 
-static void
-h103SlotWriteThunk (void)
-{
-  if (gH103Probe) {
-    gH103Probe->h103SlotWrite ();
-  }
-}
 OSDefineMetaClassAndStructors (NativeUfsWindow, IOBlockStorageDevice)
 
 static uint32_t
@@ -2136,7 +2126,6 @@ NativeUfsProbe::start (IOService *provider)
   dumpRootMedia ();
   IOLog ("NATIVE_UFS_GPT: start returning published=%u windows=%u\n",
          published ? 1 : 0, windowsPublished);
-  gH103Probe = this;
   gH103Quiet = 1;
   uint32_t skipPattern = 0;
   PE_parse_boot_argn ("h103-skip-pattern", &skipPattern, sizeof skipPattern);

@@ -3145,3 +3145,34 @@ display:    5f29dde
 
 判读：右上 2×2 出现说明 slot 写阻塞是原因；仍不出现则与 slot 无关，
 下一步只保留 heartbeat 绘制、完全关闭 slot 做对照。
+
+## 74. H103dy：只画 2×2，完全关闭 slot（2026-11-05）
+
+H103dx 上机后 2×2 和 slot 都没有更新，日志还是旧的。两者都由 heartbeat
+驱动，因此先排除 slot：H103dy 完全移除 `h103SlotWriteThunk()`，heartbeat
+只做：
+
+```text
+IOSleep(2000)
+native_legacy_test_pattern()
+stall check
+```
+
+保留 `5f29dde` H103bd 2×2、`gH103Quiet=1`、payload 无 verbose。
+
+候选：
+
+```text
+boot:       5bc2f835a73f93c5b0c7717f6d8987fc2ea457bd6c5ef9799bafaa012bf35cef
+kernel pre: a324abf0ea174d95b272ee2cf72400d3adefcab9909bdf71b24169cd57b98335
+kernel:     9cda2b9a65a211ea1b84835b42db7111d08eb13068186cecc95167e4b637b1e1
+ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload:    116b6885483c2139e0eff3fa0739c0e511471cb981c9d3f33119d30ee1ca9dd5
+display:    5f29dde
+```
+
+判读：
+
+- 2×2 出现：H103dx 的 slot 写入阻塞 heartbeat；
+- 2×2 仍不出现：heartbeat 没启动或 display archive 没链入；
+- 本次不写 slot，TWRP 日志不会更新是预期的。

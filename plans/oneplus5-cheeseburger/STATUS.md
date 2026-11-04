@@ -2476,6 +2476,17 @@ H103dx kernel:     5addf7cd16d56c698344a93af59b33ddb504b6043e29b5ee1721cbcf094fa
 H103dx payload:    a339391de2d8ba325efd693fa7e5c5a96bd2e8a352f50540d8bec5eae6f435de
 ```
 
+H103dx 上机 2×2 和 slot 都没有更新。H103dy 完全移除 slot，只保留
+heartbeat 2×2，用于判断 heartbeat 是否运行。
+
+```text
+H103dy boot:       5bc2f835a73f93c5b0c7717f6d8987fc2ea457bd6c5ef9799bafaa012bf35cef
+H103dy kernel pre: a324abf0ea174d95b272ee2cf72400d3adefcab9909bdf71b24169cd57b98335
+H103dy kernel:     9cda2b9a65a211ea1b84835b42db7111d08eb13068186cecc95167e4b637b1e1
+H103dy payload:    116b6885483c2139e0eff3fa0739c0e511471cb981c9d3f33119d30ee1ca9dd5
+display:           5f29dde
+```
+
 ### 关键产物
 
 ```text
