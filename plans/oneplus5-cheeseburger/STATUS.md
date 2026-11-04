@@ -2487,6 +2487,15 @@ H103dy payload:    116b6885483c2139e0eff3fa0739c0e511471cb981c9d3f33119d30ee1ca9
 display:           5f29dde
 ```
 
+H103dz 用 H103bd 的 payload 参数（-v/debug=0x14e/boot-progress=2）配
+H103dy 的“只画 2×2、不写 slot”内核。
+
+```text
+H103dz boot:    4fecce628a60ae0ce0bbf39923931b92f3f4152d5f07b25205caca661f9803c8
+H103dz kernel:  9cda2b9a65a211ea1b84835b42db7111d08eb13068186cecc95167e4b637b1e1
+H103dz payload: 06c4e71bac2bc1f727de45dedd566c888d99564de11268b9a922b91eaa304749
+```
+
 ### 关键产物
 
 ```text

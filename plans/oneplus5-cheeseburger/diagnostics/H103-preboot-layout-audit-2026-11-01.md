@@ -3176,3 +3176,29 @@ display:    5f29dde
 - 2×2 出现：H103dx 的 slot 写入阻塞 heartbeat；
 - 2×2 仍不出现：heartbeat 没启动或 display archive 没链入；
 - 本次不写 slot，TWRP 日志不会更新是预期的。
+
+## 75. H103dz：H103bd payload 参数 + 只画 2×2（2026-11-05）
+
+H103dy 仍看不到 2×2，slot 已完全移除。H103bd 镜像（`8284f261...`）能出
+2×2，其 payload 参数包含 `-v`、`debug=0x14e`、`boot-progress=2`；H103dy
+为了安静把这些都去掉了。H103dz 只用 H103bd 的 payload 参数，内核仍是
+H103dy 的“只画 2×2、不写 slot”版本：
+
+```text
+kernel: 9cda2b9a... (H103dy, heartbeat native_legacy_test_pattern only)
+payload args: H103bd 原样 (-v debug=0x14e boot-progress=2 ...)
+display: 5f29dde
+```
+
+候选：
+
+```text
+boot:    4fecce628a60ae0ce0bbf39923931b92f3f4152d5f07b25205caca661f9803c8
+kernel: 9cda2b9a65a211ea1b84835b42db7111d08eb13068186cecc95167e4b637b1e1
+payload: 06c4e71bac2bc1f727de45dedd566c888d99564de11268b9a922b91eaa304749
+```
+
+判读：
+
+- 2×2 出现：H103dy 的 quiet payload 参数把显示路径关掉了；
+- 仍不出现：H103dy 内核/display archive 与 H103bd 内核不同，需直接对比两个内核。
