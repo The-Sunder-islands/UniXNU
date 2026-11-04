@@ -2194,4 +2194,36 @@ H103cg；`boot-H103cg-1.img` 不使用。
 
 指示块不能通过“改 display archive 再重编”来移动。后续如果还要移动，
 只能从 display archive 外部做覆盖/绘制，或先修复 Data/APFS race。
+
+## 50. H103cg-2/H103cg-3 对照：源码可重复，二进制不可重复（2026-11-04）
+
+对照：
+
+| 包 | 内容 | boot | 结果 |
+| --- | --- | --- | --- |
+| H103cg-2 | H103cg 原镜像逐字节拷贝 | `4560ac5b...` | 可用 |
+| H103cg-3 | H103cg 同源码 clean rebuild | `d9e3322b...` | 停在 `IOMedia UUID 04769D26` |
+
+H103cg-3 的源码与 H103cg 完全一致（submodule `5f29dde`，
+`NativeLegacyDisplay`/`LegacyDisplayProbe`/`NativeA540` 哈希一致，
+7 成员 builder），但构建输出不同：
+
+```text
+              H103cg 原版      H103cg-3
+kernel        7b5d4ae1...      fe155269...
+ADT           d98d9522...      158ebdb6...
+payload       a12f5fc9...      9d8fb9b7...
+boot          4560ac5b...      d9e3322b...
+```
+
+结论：
+
+- H103cg 的**源码逻辑**可重复，但**二进制不可重复**；
+- ADT/kernel 构建期差异会改变精确布局/时序，足以触发 Data/APFS
+  IOMedia 发布 race；
+- H103cg 原二进制是唯一稳定点；H103cg-2 是它的逐字节拷贝，可用；
+- H103cg-3 不使用；不再把“同源码重编译”当作无改动包。
+
+后续若要改显示行为，只能从 display archive 外部做覆盖/运行时注入，
+或先修复 Data/APFS race；不能再通过重编 display archive/kernel 实现。
 ```

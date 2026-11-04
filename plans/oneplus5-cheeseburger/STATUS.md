@@ -2120,6 +2120,26 @@ Data/APFS race；H103cg exact 是唯一稳定点。源码已回退；H103cg-1 �
 指示块只能从 display archive 外部覆盖/绘制，或先修复 race，不能再通过
 重编 display archive 移动。
 
+### H103cg-2/H103cg-3 对照（2026-11-04）
+
+| 包 | 内容 | boot | 结果 |
+| --- | --- | --- | --- |
+| H103cg-2 | H103cg 原镜像逐字节拷贝 | `4560ac5b...` | 可用 |
+| H103cg-3 | H103cg 同源码 clean rebuild | `d9e3322b...` | 停在 `IOMedia UUID 04769D26` |
+
+H103cg-3 源码与 H103cg 完全一致（submodule `5f29dde`、7 成员 builder），
+但 kernel/ADT/payload 构建输出不同：
+
+```text
+H103cg:   kernel 7b5d4ae1...  ADT d98d9522...  payload a12f5fc9...
+H103cg-3: kernel fe155269...  ADT 158ebdb6...  payload 9d8fb9b7...
+```
+
+结论：**H103cg 源码可重复，二进制不可重复**；精确布局/时序变化会触发
+Data/APFS race。H103cg 原二进制是唯一稳定点，H103cg-2 是可用拷贝；
+H103cg-3 不使用，不再把“同源码重编译”当作无改动包。后续只能从
+display archive 外部覆盖/注入，或先修 race。
+
 ### 关键产物
 
 ```text
