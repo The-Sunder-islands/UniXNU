@@ -26,6 +26,10 @@ display，得到 `NATIVE_LEGACY_STATE calls>0`（理想情况下出现首个 iOS
 > **停止记录（2026-11-04）**：A2/A2c 已越界。用户要求停止
 > display archive、方块/灰条、display timing 和 ordering 实验。
 > H103cg 是唯一基线；以下 A2/A3/A4 仅保留历史，不再执行。
+>
+> H103cg-1（只移动三个 fill 坐标，其他完全按 H103cg）仍然 root wait
+> `04769D26`；display archive 的任何二进制/布局变化都会触发 race。
+> 指示块只能从 display archive 外部覆盖/绘制，或先修复 race。
 
 ## 1. 当前门
 

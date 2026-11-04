@@ -2097,6 +2097,29 @@ archive 成员，违反“不再做方块/灰条/display 时序/ordering 实验�
 明确要求外，不再做 display archive、方块/灰条、display timing 或
 ordering 实验。
 
+### H103cg-1 结果（2026-11-04）
+
+`boot-H103cg-1.img`（boot `e1fb98d4...`、kernel `7edeaf8e...`、
+payload `105c0c08...`）按 H103cg 源码重打，仅把三个 16×16 指示块从
+右下角移到左上角：
+
+```text
+fill(w-16,h-16) -> fill(8,8)
+fill(w-40,h-16) -> fill(32,8)
+fill(w-64,h-16) -> fill(56,8)
+```
+
+上机仍然停在：
+
+```text
+Waiting on <dict ... IOProviderClass=IOMedia ... UUID=04769D26-...>
+```
+
+结论：即使只改三个坐标常量，display archive 的二进制/布局变化仍会触发
+Data/APFS race；H103cg exact 是唯一稳定点。源码已回退；H103cg-1 不使用。
+指示块只能从 display archive 外部覆盖/绘制，或先修复 race，不能再通过
+重编 display archive 移动。
+
 ### 关键产物
 
 ```text

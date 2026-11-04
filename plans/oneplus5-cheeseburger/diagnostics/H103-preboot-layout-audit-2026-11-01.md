@@ -2167,4 +2167,31 @@ archive size，转向 runtime property injection 或修复 race。
 
 后续除用户明确要求外，不再做 display archive、方块/灰条、display
 timing 或 ordering 实验。
+
+## 49. H103cg-1：仅移动三个 fill 坐标仍 root wait（2026-11-04）
+
+候选 `boot-H103cg-1.img`（boot `e1fb98d4...`、kernel `7edeaf8e...`、
+payload `105c0c08...`）：
+
+- 基线为 H103cg `5f29dde`；`LegacyDisplayProbe.cpp`/`NativeA540...`
+  与 H103cg 完全一致；builder 为 H103cg 的 7 成员版本；
+- 唯一源码差异是 `NativeLegacyDisplay.cpp` 中三个 16×16 指示块的坐标：
+  ```text
+  fill(w-16,h-16) -> fill(8,8)
+  fill(w-40,h-16) -> fill(32,8)
+  fill(w-64,h-16) -> fill(56,8)
+  ```
+
+上机仍然停在：
+
+```text
+Waiting on <dict ... IOProviderClass=IOMedia ... UUID=04769D26-...>
+```
+
+结论：即使只改三个坐标常量，display archive 的二进制/布局变化仍会触发
+Data/APFS IOMedia 发布 race。H103cg exact 是唯一稳定点。源码已回退到
+H103cg；`boot-H103cg-1.img` 不使用。
+
+指示块不能通过“改 display archive 再重编”来移动。后续如果还要移动，
+只能从 display archive 外部做覆盖/绘制，或先修复 Data/APFS race。
 ```
