@@ -881,6 +881,10 @@ ufsSubmit (UfsQueue *q, unsigned direction, unsigned bytes,
   gUfsLastLoops = loops;
   gUfsLastTicks = mach_absolute_time () - commandStart;
   if (!gH103Quiet && (gUfsCommands & 63) == 0) {
+    // H103bd's UFS completion path redrew the 2x2 before printing PROGRESS.
+    // That frequent redraw, not the 10-second heartbeat alone, is what kept
+    // the panel alive while the console scrolled. Restore it verbatim.
+    native_legacy_test_pattern ();
     IOLog ("NATIVE_UFS_PROGRESS: cmds=%llu last=%llx/%llu loops=%llu ticks=%llu "
            "winReq=%llu winBytes=%llu winFlight=%llu lastWin=%llx/%llu "
            "req=%llx/%llu\n",

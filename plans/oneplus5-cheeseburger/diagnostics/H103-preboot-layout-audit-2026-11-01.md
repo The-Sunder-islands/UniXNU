@@ -3253,3 +3253,51 @@ display: 5f29dde
 - 2×2 仍不出现：只剩 display archive 差异（H103bd 内核的
   `NATIVE_LEGACY_STATE/CLIENTS`）或独立 slot 线程两个变量，下一步停止
   在 H103dy 上继续改，改用 H103bd 精确镜像做对照。
+
+## 77. H103eb：恢复 UFS 完成路径的 2×2 重绘（2026-11-05）
+
+H103ea 和 `boot-H103ea-bdargs.img`（H103bd 原始 payload 参数，无
+`sheng-log`）都没有右上 2×2。对比 H103bd 内核的调用点后发现关键差异：
+
+```text
+H103bd:
+  ufsCommand completion
+    if ((gUfsCommands & 63) == 0)
+      native_legacy_test_pattern()   // 先重绘 2×2
+      print PROGRESS / NATIVE_LEGACY_STATE
+
+当前源码:
+  ufsCommand completion
+    if (!quiet && (gUfsCommands & 63) == 0)
+      print NATIVE_UFS_PROGRESS        // 没有重绘
+  native_legacy_test_pattern() 只在 10 秒心跳里
+```
+
+H103bd 的 2×2 能持续可见，是因为 UFS 完成路径每 64 条命令就重绘一次，
+而不是只靠 10 秒心跳。H103eb 在 `ufsCommand` 的 PROGRESS 分支里、打印
+之前补回 `native_legacy_test_pattern()`：
+
+```text
+heartbeat: 10 秒 + ALIVE + pattern（保持 H103ea）
+UFS completion: (gUfsCommands & 63) == 0 时先 pattern，再 PROGRESS
+quiet: 0
+slot: 独立 2 秒线程（H103bd 参数下 sheng-log 未开，线程空转）
+display: 5f29dde
+payload: H103bd 原始参数（无 sheng-log / native-cpufreq-early）
+```
+
+候选：
+
+```text
+XNU:     7c4af02f609ae748b4f2e71fcb3b0efb40d660e7bde8bec90412a03dcf61d14d
+kernel:  91959feaa38bf249f91cfe6b534968b00498817cc5d704bffe377169d00ba691
+payload: 32963f1f9e9f4e90af00fa1cbb3cef829cd143fbf0e7c986902253f53959cfc1
+boot:    614c83a5d912ca4c5ab815190e95122a30a2f972518d89fcee1fc73763ea1f59
+```
+
+判读：
+
+- 2×2 出现：UFS 完成路径重绘就是 H103bd 保持面板的原因；H103ec 再加
+  `sheng-log=1` 和 slot；
+- 仍不出现：H103bd display archive 的 `NATIVE_LEGACY_STATE/CLIENTS` 版本
+  还有别的行为，必须找回那份 archive。

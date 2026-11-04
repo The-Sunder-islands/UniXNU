@@ -2519,6 +2519,20 @@ display:         5f29dde
   是最后两个变量，下一步回退到 H103bd 精确镜像；
 - TWRP 应能读到每 2 秒更新一次的 `SHLOG001` 最新 slot。
 
+H103ea 上机后右上仍没有 2×2；换成 H103bd 原始 payload 参数
+（无 `sheng-log`、无 `native-cpufreq-early`）的 `boot-H103ea-bdargs.img`
+也没有。直接对比 H103bd 内核后发现：H103bd 的 **UFS 完成路径**在
+`(gUfsCommands & 63) == 0` 时先调用 `native_legacy_test_pattern()`，再打印
+PROGRESS/STATE；当前源码只在 10 秒心跳里调用。H103eb 恢复这条 UFS
+完成路径重绘，仍用 H103bd 原始参数：
+
+```text
+H103eb XNU:     7c4af02f609ae748b4f2e71fcb3b0efb40d660e7bde8bec90412a03dcf61d14d
+H103eb kernel:  91959feaa38bf249f91cfe6b534968b00498817cc5d704bffe377169d00ba691
+H103eb payload: 32963f1f9e9f4e90af00fa1cbb3cef829cd143fbf0e7c986902253f53959cfc1
+H103eb boot:    614c83a5d912ca4c5ab815190e95122a30a2f972518d89fcee1fc73763ea1f59
+```
+
 ### 关键产物
 
 ```text
