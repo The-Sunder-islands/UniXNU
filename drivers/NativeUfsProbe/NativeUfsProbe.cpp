@@ -54,21 +54,36 @@ static volatile int gH103SkipPattern;
 static uint32_t gH103SlotCursor;
 static volatile int gH103Quiet;
 class NativeUfsProbe;
+static NativeUfsProbe *gH103Probe;
+static void h103SlotWriteThunk (void);
 
 // H103cg's probe periodically redrew the GOP test pattern from its heartbeat.
 // The display archive is force-loaded into the kernel and exports this symbol;
 // call it directly like the original code (a weak import can bind to null).
 extern "C" int native_legacy_test_pattern(void);
 
-// Independent liveness proof: if a window request is stuck, this thread keeps
-// printing the exact in-flight request and queue counters from another CPU.
+// H103ea keeps H103bd's 10-second heartbeat byte-for-byte: the ALIVE console
+// line is written first, then the 2x2 panel. H103bd was built exactly this way
+// and is the only confirmed 2x2 image; changing the interval or dropping the
+// ALIVE line was not proven safe.
 static void
 heartbeatThread (void *, wait_result_t)
 {
   gH103HeartbeatStart = mach_absolute_time ();
   IOLog ("NATIVE_UFS_HB: enter\n");
   for (;;) {
-    IOSleep (2000);
+    IOSleep (10000);
+    IOLog ("NATIVE_UFS_ALIVE: winFlight=%llu ufsFlight=%llu cmds=%llu "
+           "winReq=%llu winBytes=%llu lastCmd=%llx/%llu req=%llx/%llu\n",
+           (unsigned long long) gWindowInFlight,
+           (unsigned long long) gUfsInFlight,
+           (unsigned long long) gUfsCommands,
+           (unsigned long long) gWindowRequests,
+           (unsigned long long) gWindowBytes,
+           (unsigned long long) gUfsLastLba,
+           (unsigned long long) gUfsLastBytes,
+           (unsigned long long) gWindowLastReqBlock,
+           (unsigned long long) gWindowLastReqCount);
     if (!gH103SkipPattern) {
       native_legacy_test_pattern ();
     }
@@ -84,6 +99,18 @@ heartbeatThread (void *, wait_result_t)
              (unsigned long long) gUfsLastBytes,
              (unsigned long long) gUfsInFlight);
     }
+  }
+}
+
+// H103ea: the 2-second slot is a separate thread. H103bd's heartbeat is left
+// at its proven 10-second cadence, so the persistent log cannot perturb the
+// 2x2 redraw order that H103bd uses.
+static void
+h103SlotThread (void *, wait_result_t)
+{
+  for (;;) {
+    IOSleep (2000);
+    h103SlotWriteThunk ();
   }
 }
 
@@ -324,6 +351,14 @@ public:
   bool readWindowBulk (uint64_t lba, uint32_t blocks, void *out);
   bool readWindow4k (uint64_t lba, void *out);
 };
+
+static void
+h103SlotWriteThunk (void)
+{
+  if (gH103Probe) {
+    gH103Probe->h103SlotWrite ();
+  }
+}
 
 OSDefineMetaClassAndStructors (NativeUfsProbe, IOService)
 OSDefineMetaClassAndStructors (NativeUfsLun, IOBlockStorageDevice)
@@ -2126,7 +2161,8 @@ NativeUfsProbe::start (IOService *provider)
   dumpRootMedia ();
   IOLog ("NATIVE_UFS_GPT: start returning published=%u windows=%u\n",
          published ? 1 : 0, windowsPublished);
-  gH103Quiet = 1;
+  gH103Quiet = 0;
+  gH103Probe = this;
   uint32_t skipPattern = 0;
   PE_parse_boot_argn ("h103-skip-pattern", &skipPattern, sizeof skipPattern);
   gH103SkipPattern = skipPattern ? 1 : 0;
@@ -2136,6 +2172,12 @@ NativeUfsProbe::start (IOService *provider)
          heartbeatRet, gH103SkipPattern);
   if (heartbeatRet == KERN_SUCCESS) {
     thread_deallocate (heartbeat);
+  }
+  thread_t slotThread = nullptr;
+  kern_return_t slotRet = kernel_thread_start (h103SlotThread, nullptr, &slotThread);
+  IOLog ("NATIVE_UFS_HB: slot rc=%x\n", slotRet);
+  if (slotRet == KERN_SUCCESS) {
+    thread_deallocate (slotThread);
   }
 
   // Persistent log window: the last 32 MiB of userdata_ios. Write one

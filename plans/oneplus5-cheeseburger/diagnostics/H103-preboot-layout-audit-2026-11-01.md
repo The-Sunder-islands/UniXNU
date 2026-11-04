@@ -3202,3 +3202,54 @@ payload: 06c4e71bac2bc1f727de45dedd566c888d99564de11268b9a922b91eaa304749
 
 - 2×2 出现：H103dy 的 quiet payload 参数把显示路径关掉了；
 - 仍不出现：H103dy 内核/display archive 与 H103bd 内核不同，需直接对比两个内核。
+
+## 76. H103ea：恢复 H103bd 心跳，2 秒 slot 独立线程（2026-11-05）
+
+H103dy/H103dz 都看不到右上 2×2。直接对比两个内核后确认：
+
+- H103bd 的 heartbeat 是 `IOSleep(10000)`，先打印
+  `NATIVE_UFS_ALIVE: ...`，再无条件调用
+  `native_legacy_test_pattern()`；
+- H103dy/H103dz 把心跳改成 2 秒、去掉了 `NATIVE_UFS_ALIVE` 行，并把
+  `gH103Quiet` 设为 1；
+- H103bd 内核还带有 `NATIVE_LEGACY_STATE/CLIENTS` 和更长的
+  `NATIVE_UFS_PROGRESS` 字符串，当前 `5f29dde` display archive 没有这些
+  日志，但 `native_legacy_test_pattern()` 的绘制指令两边一致。
+
+H103ea 只做三件事：
+
+```text
+heartbeat: IOSleep(10000) -> IOLog(NATIVE_UFS_ALIVE) -> native_legacy_test_pattern()
+gH103Quiet = 0（恢复 H103bd 周期日志）
+2 秒 slot 放入独立 h103SlotThread，不再插在 10 秒心跳里
+payload: 沿用 H103dz 的 H103bd 参数（含 sheng-log=1）
+display: 5f29dde，不改
+```
+
+构建路径：
+
+```text
+build-arm-driver.py NativeUfsProbe     # 先重编驱动 archive
+build-xnu-4k-baseline.sh               # 重编 XNU
+unixnu build prelink                   # 生成 out/.../kernel/kernel.macho
+把 kernel.macho 写回 H103dz payload 的 Payloads/kernel.macho
+用 H103dz boot image 的 UEFI kernel 重新拼 ramdisk
+```
+
+候选：
+
+```text
+XNU:     32d9bf03ef5a76b64ea4d1f76d38879b150beea8b98a69904ff916b7e9a56166
+kernel:  560571229630b8edd2e235d7c8104ca57cf9fd320e1efe2ec041f7a5cda62e61
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: 4da9f3c04fc867713badd6ca243c20797ad5f7def0ca39b23fd3219d669c6665
+boot:    a07fe2567b43edcf7cbd58a86a8d4474cae49ac84e79b667e074205e1b4e2f5e
+display: 5f29dde
+```
+
+判读：
+
+- 2×2 出现：H103bd 的心跳/日志顺序可与 2 秒 slot 共存，H103eb 再静默；
+- 2×2 仍不出现：只剩 display archive 差异（H103bd 内核的
+  `NATIVE_LEGACY_STATE/CLIENTS`）或独立 slot 线程两个变量，下一步停止
+  在 H103dy 上继续改，改用 H103bd 精确镜像做对照。

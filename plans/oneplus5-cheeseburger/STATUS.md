@@ -2496,6 +2496,29 @@ H103dz kernel:  9cda2b9a65a211ea1b84835b42db7111d08eb13068186cecc95167e4b637b1e1
 H103dz payload: 06c4e71bac2bc1f727de45dedd566c888d99564de11268b9a922b91eaa304749
 ```
 
+H103ea 回到 H103bd 的心跳节奏：`IOSleep(10000)`、先打印
+`NATIVE_UFS_ALIVE`、再调用 `native_legacy_test_pattern()`；`gH103Quiet=0`
+恢复周期日志。2 秒 slot 移到独立线程，只在测试图案之外写
+`userdata_ios`，不改变心跳顺序。payload 沿用 H103dz 的 H103bd 参数
+（含 `sheng-log=1`），display 仍是 `5f29dde`。
+
+```text
+H103ea XNU:     32d9bf03ef5a76b64ea4d1f76d38879b150beea8b98a69904ff916b7e9a56166
+H103ea kernel:  560571229630b8edd2e235d7c8104ca57cf9fd320e1efe2ec041f7a5cda62e61
+H103ea ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+H103ea payload: 4da9f3c04fc867713badd6ca243c20797ad5f7def0ca39b23fd3219d669c6665
+H103ea boot:    a07fe2567b43edcf7cbd58a86a8d4474cae49ac84e79b667e074205e1b4e2f5e
+display:         5f29dde
+```
+
+上机判读：
+
+- 右上 2×2 出现：H103bd 的心跳/日志顺序 + slot 线程可以共存；
+- 2×2 仍不出现：display archive 与 H103bd 的差异（其内核含
+  `NATIVE_LEGACY_STATE/CLIENTS`，当前 `5f29dde` 不含）或独立 slot 线程
+  是最后两个变量，下一步回退到 H103bd 精确镜像；
+- TWRP 应能读到每 2 秒更新一次的 `SHLOG001` 最新 slot。
+
 ### 关键产物
 
 ```text
@@ -2510,6 +2533,7 @@ H103bd boot      8284f2616412cea7e98cdb9d929802b4b2cdd6bb7b8af536210a38c08c9910f
 H103be boot      6ce2a1e2584055903edcb383432da9cc6eb478e7f44b21ec3e5059db7a4694ae
 H103bf boot      768f8eb8c01995df59d6cd8eb24d7080d4dd29d0e41400bd2857193f6262aced
 H103bg boot      ae9c39268b5cd4e49ee1dcf4cdbb0e933b673ea63c4016995ab23fd50677e0a6
+H103ea boot      a07fe2567b43edcf7cbd58a86a8d4474cae49ac84e79b667e074205e1b4e2f5e
 ```
 
 ## 更新规则
