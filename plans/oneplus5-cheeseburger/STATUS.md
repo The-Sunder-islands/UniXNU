@@ -2400,6 +2400,16 @@ H103dq kernel:     f100195bb7fa93a7f8ec2ed51ce29cf63a971f2ccb60c6c5451c5f93016be
 H103dq payload:    9fb582e3d250d6ec5de36e38ced8b0a77e62f1ea1d3345be4aa5d76f2bc03d52
 ```
 
+H103dq 单块写成功；TWRP 拉到 `H103TEST`。H103dr 恢复窗口触发的完整
+`SHLOG001` 快照，仍只写 `userdata_ios`，不读回。
+
+```text
+H103dr boot:       9d566a4ceea7243ecde98f7442265deafc5f96e1a93c0011bedde4122d99beb3
+H103dr kernel pre: 09733c6e1b0d7baf4497454d5194c32f8acfd34268054015a2447dc3f99c5c0a
+H103dr kernel:     a5c0a9ead8ea24ba3ce49a8a8e1976226211abf9879f47fff6f8ee196490e8ee
+H103dr payload:    c12852ab4ac428385f91594774f611d44176326b5bd98689598d43f3c67943d5
+```
+
 ### 关键产物
 
 ```text

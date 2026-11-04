@@ -2843,3 +2843,46 @@ payload:    9fb582e3d250d6ec5de36e38ced8b0a77e62f1ea1d3345be4aa5d76f2bc03d52
 - 仍断言 read-only：改 `kIODirectionInOut` 或显式 `prepare(kIODirectionIn)`；
 - 断言消失但 UFS/data abort：问题转到 WRITE10/PRDT/UTRD；
 - `writeBytes short`：缓冲仍不可写。
+
+## 67. H103dr：恢复 SHLOG001 header/body（2026-11-04）
+
+H103dq 上机后 TWRP 拉到了：
+
+```text
+H103 write self-test
+H103TEST
+```
+
+说明单块写入 `userdata_ios` 窗口成功，`kIODirectionIn` + `writeBytes()` +
+`ufsWriteCommand(src=fLogData)` 路径可用。
+
+H103dr 把窗口触发从单块测试恢复成完整快照：
+
+```text
+h103WindowRead -> h103Snapshot("window", pause=1, verify=0)
+  - H103TEST 首块/末块
+  - 1 MiB kernel msgbuf
+  - SHLOG001 v3 header
+  - 不读回
+  - IOSleep(30000)
+```
+
+仍只操作 `userdata_ios` 最后 32 MiB，不改 Android `userdata`。
+
+候选：
+
+```text
+boot:       9d566a4ceea7243ecde98f7442265deafc5f96e1a93c0011bedde4122d99beb3
+kernel pre: 09733c6e1b0d7baf4497454d5194c32f8acfd34268054015a2447dc3f99c5c0a
+kernel:     a5c0a9ead8ea24ba3ce49a8a8e1976226211abf9879f47fff6f8ee196490e8ee
+ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload:    c12852ab4ac428385f91594774f611d44176326b5bd98689598d43f3c67943d5
+```
+
+上机拉窗口：
+
+- `SHLOG001`：日志落盘，解析正文；
+- 只有 `H103TEST`：单块写正常，body/header 失败；
+- 什么都没有：64 MiB 触发或快照没执行。
+
+成功后去掉 `h103-skip-pattern=1`，恢复 2×2。

@@ -1297,7 +1297,7 @@ NativeUfsProbe::h103WindowRead (void)
   gH103WindowSnapshotDone = 1;
   IOLog ("NATIVE_UFS_LOG: window trigger bytes=%llu\n",
          (unsigned long long) gWindowBytes);
-  h103SingleWrite ();
+  h103Snapshot ("window", true, false);
 }
 
 static uint8_t gH103Test[4096] __attribute__((aligned(4096)));
