@@ -2226,4 +2226,47 @@ boot          4560ac5b...      d9e3322b...
 
 后续若要改显示行为，只能从 display archive 外部做覆盖/运行时注入，
 或先修复 Data/APFS race；不能再通过重编 display archive/kernel 实现。
+
+## 51. H103cg-6：重编译可稳定过 root（2026-11-04）
+
+候选 `boot-H103cg-6.img`：
+
+```text
+boot:    1201d68379dedd8f08a3a01cdadccde9caf6009b9304e2dae5f4a8f410a4ac7f
+kernel:  76634aa5e4104d97b53526dfa0d33b212846a959951525fc31935dfc52982e6e
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: c9f841e6f7612bd58dc3e96eb1227a5a165f540f8eca8aea6251dcf62911fdb6
 ```
+
+结果：**通过 root，可用**。
+
+根因：macOS 构建树里的 `NativeUfsProbe.cpp` 仍是旧 Android 逻辑：
+
+- GPT 选择 `"userdata"`，不是 `"userdata_ios"`；
+- root manifest 和 OS/SystemOS window 的绝对地址硬编码 `0x14f40 * 4096`。
+
+H103cg 原版 probe 是：
+
+- GPT 查找 `userdata_ios` 的 first LBA；
+- manifest 从该 first LBA 读取；
+- window 绝对地址 = `rootFirst * 4096 + rootOffset`。
+
+H103cg-6 的两处修复：
+
+```text
+1) GPT 分区选择/日志改为 userdata_ios，rootFirst/rootLast 从 GPT 取；
+2) window absolute 从 0x14f40*4096 改为 rootFirst*4096。
+```
+
+H103cg-5 只修了第 1 处，window 仍指向 Android `userdata`，所以仍停在
+`04769D26`；H103cg-6 修了第 2 处后通过。
+
+结论：
+
+- 重编译内容可以稳定过 root；H103cg-6 是可用重编译基线；
+- H103cg-2（原镜像逐字节拷贝）仍是原版可用对照；
+- 之前 H103cg-3/4/5 的 `04769D26` 是 probe 分区/window 错误，不是
+  display archive 或 kernel 时序；
+- display provider 仍是 `calls=0`，无 UI；本次没有移动心跳指示块；
+- 后续若移动指示块，可以直接在 H103cg-6 的 probe 修复基础上重编，
+  不再受 `04769D26` 阻塞。

@@ -1489,10 +1489,11 @@ NativeUfsProbe::start (IOService *provider)
   ADD ("cur=%llx bak=%llx usable=%llx..%llx\n",
        currentLba, backupLba, firstUsable, lastUsable);
   const char *const keys[] = {
-    "userdata", "persist", "cache", "misc", "metadata", "system", "vendor",
+    "userdata_ios", "persist", "cache", "misc", "metadata", "system", "vendor",
     "boot", "recovery", "modem", "modemst1", "modemst2", "fsg", "fsc",
     "keymaster", "abl", "xbl", "tz", "devcfg", "devinfo"
   };
+  uint64_t rootFirst = 0, rootLast = 0;
   unsigned listed = 0;
   for (uint32_t index = 0; index < entryCount; index++) {
     const uint8_t *entry = data + index * entrySize;
@@ -1512,6 +1513,10 @@ NativeUfsProbe::start (IOService *provider)
       name[length++] = (hi == 0 && lo >= 32 && lo < 127) ? char (lo) : '?';
     }
     name[length] = 0;
+    if (!__builtin_strcmp (name, "userdata_ios")) {
+      rootFirst = first;
+      rootLast = last;
+    }
     bool key = false;
     for (unsigned k = 0; k < sizeof (keys) / sizeof (keys[0]); k++) {
       if (!__builtin_strcmp (name, keys[k])) {
@@ -1528,6 +1533,7 @@ NativeUfsProbe::start (IOService *provider)
   }
   ADD ("partitions=%u listed=%u\n", entryCount, listed);
   IOLog ("%s", text);
+  IOLog ("NATIVE_UFS_ROOT: userdata_ios LBA %llx..%llx\n", rootFirst, rootLast);
 
   IOOptionBits readOptions = static_cast<IOOptionBits> (kIODirectionInOut) |
                              static_cast<IOOptionBits> (kIOMemoryPhysicallyContiguous) |
@@ -1569,7 +1575,7 @@ NativeUfsProbe::start (IOService *provider)
   {
     uint8_t header[4096] = {};
     uint8_t readUserdata[16] = { 0x28 };
-    putBe32 (readUserdata + 2, 0x14f40U);
+    putBe32 (readUserdata + 2, static_cast<uint32_t> (rootFirst));
     readUserdata[8] = 1;
     if (ufsCommand (&queue, 0, readUserdata, sizeof (header), header)) {
       uint32_t magic = getLe32 (header);
@@ -1577,7 +1583,7 @@ NativeUfsProbe::start (IOService *provider)
       uint32_t version = getLe32 (header + 8);
       uint32_t windows = getLe32 (header + 12);
       uint64_t imageBytes = getLe64 (header + 16);
-      IOLog ("NATIVE_UFS_ROOT: userdata[0x14f40] magic=%08x/%08x ver=%u windows=%u image=%llx\n",
+      IOLog ("NATIVE_UFS_ROOT: userdata_ios magic=%08x/%08x ver=%u windows=%u image=%llx\n",
              magic, magic2, version, windows, imageBytes);
       if (magic == 0x474e4853U && magic2 == 0x544f4f52U && windows <= 4) {
         for (uint32_t index = 0; index < windows; index++) {
@@ -1624,7 +1630,7 @@ NativeUfsProbe::start (IOService *provider)
 
   unsigned windowsPublished = 0;
   for (unsigned index = 0; index < rootWindows; index++) {
-    uint64_t absolute = 0x14f40ULL * 4096ULL + rootOffset[index];
+    uint64_t absolute = rootFirst * 4096ULL + rootOffset[index];
     IOLog ("NATIVE_UFS_ROOT: preparing window[%u]=%s abs=%llx bytes=%llx\n",
            index, rootName[index], absolute, rootSize[index]);
     NativeUfsWindow *window = new NativeUfsWindow;

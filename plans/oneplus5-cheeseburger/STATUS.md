@@ -2140,6 +2140,39 @@ Data/APFS race。H103cg 原二进制是唯一稳定点，H103cg-2 是可用拷�
 H103cg-3 不使用，不再把“同源码重编译”当作无改动包。后续只能从
 display archive 外部覆盖/注入，或先修 race。
 
+### H103cg-6 成功（2026-11-04）
+
+`boot-H103cg-6.img`：
+
+```text
+boot:    1201d68379dedd8f08a3a01cdadccde9caf6009b9304e2dae5f4a8f410a4ac7f
+kernel:  76634aa5e4104d97b53526dfa0d33b212846a959951525fc31935dfc52982e6e
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: c9f841e6f7612bd58dc3e96eb1227a5a165f540f8eca8aea6251dcf62911fdb6
+```
+
+H103cg-6 通过 root，可用。根因是 macOS 构建树的
+`NativeUfsProbe.cpp` 仍是旧 Android 逻辑：GPT 选 `"userdata"`、root
+manifest/window 绝对地址硬编码 `0x14f40*4096`。H103cg-6 恢复为
+H103cg 的 `userdata_ios` first LBA，并修正：
+
+```text
+rootFirst = GPT 中 userdata_ios 的 first LBA
+manifest  = rootFirst
+window    = rootFirst * 4096 + rootOffset
+```
+
+H103cg-5 只修了 partition，window 仍用 `0x14f40`，所以仍失败；H103cg-6
+修正 window 后通过。
+
+结论：
+
+- 重编译内容可以稳定过 root；H103cg-6 是可用重编译基线；
+- H103cg-2 是原镜像逐字节拷贝，仍可用作原版对照；
+- 之前 H103cg-3/4/5 的 `04769D26` 是 UFS probe 分区/window 错误，
+  不是 display archive 或 kernel 时序；
+- display provider 仍 `calls=0`，无 UI；本次未移动心跳指示块。
+
 ### 关键产物
 
 ```text

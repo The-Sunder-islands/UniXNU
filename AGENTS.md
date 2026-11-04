@@ -16,7 +16,7 @@
 - `plans/oneplus5-cheeseburger/STATUS.md` and
   `plans/oneplus5-cheeseburger/diagnostics/H103-preboot-layout-audit-2026-11-01.md`
   are the canonical bring-up record. Read the latest appended section (currently
-  §50) before display work; do not infer the current gate from old sections.
+  §51) before display work; do not infer the current gate from old sections.
 
 ## Build and verification
 
@@ -103,5 +103,12 @@ git clone https://github.com/lss717/UniXNU-cheeseburger
 
 - Follow `CONTRIBUTING.md`: one subject per commit, prefixes
   `feat(<area>):`, `fix(<area>):`, `docs:`, `build(<area>):`, `chore:`.
+- **Commit after every successful build or package.** This is mandatory: once a
+  build or packaged image is produced and verified (or designated as the
+  candidate), commit all source, build-script, patch and documentation changes
+  immediately — in this repository and in every affected sibling/submodule
+  repository. Do not leave a successful build's inputs uncommitted. Record the
+  boot/kernel/payload hashes in the commit message or the STATUS/diagnostic
+  entry. Private images, IPSWs and kernels stay out of git.
 - Keep English and Simplified Chinese documentation in sync. The documentation
   describes the resulting state; STATUS records the experiment history.
