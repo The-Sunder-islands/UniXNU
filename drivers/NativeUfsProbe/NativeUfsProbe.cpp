@@ -314,7 +314,7 @@ class NativeUfsProbe : public IOService {
 
 public:
   bool start (IOService *provider) override;
-  bool h103Snapshot (const char *tag, bool pause);
+  bool h103Snapshot (const char *tag, bool pause, bool verify);
   void h103WindowRead (void);
   bool readBlocks (uint8_t unit, uint64_t block, uint64_t count, uint32_t blockSize,
                    IOMemoryDescriptor *dst, uint64_t *done);
@@ -1122,11 +1122,11 @@ NativeUfsProbe::logThread (void *raw, wait_result_t)
   thread_set_thread_name (current_thread (), "h103_log");
   // Let root mount and the early display/root messages enter the kernel ring.
   IOSleep (20000);
-  self->h103Snapshot ("thread", false);
+  self->h103Snapshot ("thread", false, false);
 }
 
 bool
-NativeUfsProbe::h103Snapshot (const char *tag, bool pause)
+NativeUfsProbe::h103Snapshot (const char *tag, bool pause, bool verify)
 {
   if (!fLogFirst || !fLogBlocks || !fReady || !fLock) {
     IOLog ("NATIVE_UFS_LOG: snapshot skipped tag=%s first=%llx blocks=%u "
@@ -1165,18 +1165,22 @@ NativeUfsProbe::h103Snapshot (const char *tag, bool pause)
             "tag=%s lba=%llx wrote=0 read=0", tag ? tag : "?",
             (unsigned long long) fLogFirst);
   bool testWrite = logWrite (0, 1, test);
-  bool testRead = testWrite && readWindow4k (fLogFirst, check) &&
-                  memcmp (check, "H103TEST", 8) == 0;
+  bool testRead = false;
+  if (verify) {
+    testRead = testWrite && readWindow4k (fLogFirst, check) &&
+               memcmp (check, "H103TEST", 8) == 0;
+  }
   snprintf (reinterpret_cast<char *> (test + 16), 128,
             "tag=%s lba=%llx wrote=%u read=%u", tag ? tag : "?",
             (unsigned long long) fLogFirst, testWrite ? 1 : 0,
             testRead ? 1 : 0);
   logWrite (0, 1, test);
   bool endWrite = logWrite (H103_LOG_BLOCKS - 1, 1, test);
-  IOLog ("NATIVE_UFS_LOG: write test tag=%s wrote=%u read=%u end=%u lba=%llx\n",
-         tag ? tag : "?", testWrite ? 1 : 0, testRead ? 1 : 0,
-         endWrite ? 1 : 0, (unsigned long long) fLogFirst);
-  if (!testWrite || !testRead) {
+  IOLog ("NATIVE_UFS_LOG: write test tag=%s verify=%u wrote=%u read=%u end=%u "
+         "lba=%llx\n", tag ? tag : "?", verify ? 1 : 0, testWrite ? 1 : 0,
+         testRead ? 1 : 0, endWrite ? 1 : 0,
+         (unsigned long long) fLogFirst);
+  if (!testWrite || (verify && !testRead)) {
     IOFreeAligned (test, 4096);
     IOFreeAligned (check, 4096);
     if (pause) {
@@ -1265,7 +1269,7 @@ NativeUfsProbe::h103WindowRead (void)
   gH103WindowSnapshotDone = 1;
   IOLog ("NATIVE_UFS_LOG: window trigger bytes=%llu\n",
          (unsigned long long) gWindowBytes);
-  h103Snapshot ("window", true);
+  h103Snapshot ("window", true, false);
 }
 
 bool
@@ -2041,7 +2045,7 @@ NativeUfsProbe::start (IOService *provider)
            (unsigned long long) fLogFirst, fLogBlocks,
            (unsigned long long) fLogImageBytes);
     IOLog ("NATIVE_UFS_LOG: start snapshot begin\n");
-    bool startOk = h103Snapshot ("start", false);
+    bool startOk = h103Snapshot ("start", false, false);
     IOLog ("NATIVE_UFS_LOG: start snapshot result=%u\n", startOk ? 1 : 0);
     thread_t logThreadId = nullptr;
     kern_return_t logRet = kernel_thread_start (logThread, this, &logThreadId);

@@ -2335,6 +2335,17 @@ H103dj kernel:     276f9927225058e5d7a0fab702a0af6150af0edac16614159fd4c778642a3
 H103dj payload:    4a8321c68e55f9bd373f0ada49d8396a99331c6e6400efc9827b4b5f5d600897
 ```
 
+H103dj 栈修复生效，但仍在 `start snapshot begin` 后 panic，PC/LR 在读路径
+附近。H103dl 把所有快照的读回关掉，只写 `H103TEST`/body/header，由
+puller 验证。
+
+```text
+H103dl boot:       491301d0755278baf94c6253c85d2f00306321a96cd39e0e269871094829889b
+H103dl kernel pre: 6c0c1f3c55cf9fc5c7590c8f164c4efe2cdaf3c13b492e99f1688d96ab941e16
+H103dl kernel:     79646a830126c3aa88afa44ffc90475737e67da6d0de53e8c6de4c210b695ed6
+H103dl payload:    9db662466cf4e3ac3dedea4094ab6e704713fd55780595b16d2b86f43b6ad797
+```
+
 ### 关键产物
 
 ```text

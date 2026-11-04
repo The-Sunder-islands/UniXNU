@@ -2600,3 +2600,40 @@ payload:    4a8321c68e55f9bd373f0ada49d8396a99331c6e6400efc9827b4b5f5d600897
 ```
 
 H103di（`e025ea4f...`）会 panic，不再使用。
+
+## 61. H103dl：去掉快照读回，只写 H103TEST/header（2026-11-04）
+
+H103dj 的栈修复生效（`h103Snapshot` 帧降到 0x120），但上机仍在
+`NATIVE_UFS_LOG: start snapshot begin` 后立刻 panic。panic 的 PC/LR 落在
+读路径（`readWindowBulk`/`readBlocks` 附近），因此第一嫌疑变成
+`h103Snapshot` 里的：
+
+```text
+bool testWrite = logWrite (0, 1, test);
+bool testRead  = testWrite && readWindow4k (fLogFirst, check) && ...
+```
+
+也就是说，写测试块可能已经成功，紧接着的 4 KiB 读回触发了 data abort。
+
+H103dl 把所有快照的 `verify` 参数设为 0：
+
+```text
+start  : 写 H103TEST 首块/末块 + 1 MiB body + SHLOG001 header，不读回
+thread : 同上，不读回
+window : 同上，不读回
+```
+
+写入是否成功改由 TWRP 的 puller 验证。这样如果 H103dl 不再 panic，就可以
+确认是读回路径；如果仍 panic，则第一块 WRITE(10) 本身有问题。
+
+候选：
+
+```text
+boot:       491301d0755278baf94c6253c85d2f00306321a96cd39e0e269871094829889b
+kernel pre: 6c0c1f3c55cf9fc5c7590c8f164c4efe2cdaf3c13b492e99f1688d96ab941e16
+kernel:     79646a830126c3aa88afa44ffc90475737e67da6d0de53e8c6de4c210b695ed6
+ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload:    9db662466cf4e3ac3dedea4094ab6e704713fd55780595b16d2b86f43b6ad797
+```
+
+H103dj（`4a9de88e...`）仍会 panic，不再使用。
