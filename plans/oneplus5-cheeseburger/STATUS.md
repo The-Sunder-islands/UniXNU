@@ -2323,6 +2323,18 @@ ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
 payload:    d046fc95e76e648a707f131ea6e15c77634079e8ef5a35ad4cb969b45d3e8763
 ```
 
+H103di 上机在 `start snapshot begin` 后 panic。原因是
+`start` 栈帧 0x2360 加 `h103Snapshot` 栈帧 0x20e0（`test[4096]` +
+`check[4096]`）超过 16 KiB 内核栈。H103dj 把 test/check 移到
+`IOMallocAligned`，`h103Snapshot` 栈帧降到 0x120。
+
+```text
+H103dj boot:       4a9de88e2c884506b75bcfeb14ea82a2e2ee09c8afa2711fe14a622d267d2047
+H103dj kernel pre: 77134eed24d453e1653666613b397a7d591e08755726eb34a69f72dbf1527d06
+H103dj kernel:     276f9927225058e5d7a0fab702a0af6150af0edac16614159fd4c778642a38b2
+H103dj payload:    4a8321c68e55f9bd373f0ada49d8396a99331c6e6400efc9827b4b5f5d600897
+```
+
 ### 关键产物
 
 ```text

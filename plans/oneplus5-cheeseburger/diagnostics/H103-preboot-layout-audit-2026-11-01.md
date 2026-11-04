@@ -2558,3 +2558,45 @@ payload:    d046fc95e76e648a707f131ea6e15c77634079e8ef5a35ad4cb969b45d3e8763
 - `SHLOG001`：日志已落盘，直接解析正文；
 - `NATIVE_UFS_LOG: start snapshot result=...` / `window trigger bytes=...`：
   只能通过窗口里的正文看到，若没有正文则说明 start 写也失败。
+
+## 60. H103dj：修复 start 快照的内核栈溢出（2026-11-04）
+
+H103di 上机在 `NATIVE_UFS_LOG: start snapshot begin` 后立刻 panic：
+
+```text
+Kernel data abort
+pc 0xfffffff0079b0442 ...
+```
+
+反汇编确认不是 UFS 写失败，而是栈溢出：
+
+```text
+NativeUfsProbe::start frame       0x2360  (9056 bytes)
+NativeUfsProbe::h103Snapshot frame 0x20e0  (8416 bytes)
+                                  ------
+                                  0x4440  (17472 bytes) > 16 KiB kernel stack
+```
+
+`h103Snapshot` 里的 `uint8_t test[4096]` + `uint8_t check[4096]` 共 8 KiB
+叠在 `start` 的 9 KiB 栈帧上，第一条 `WRITE(10)` 之前就踩穿内核栈。
+
+H103dj 把 `test`/`check` 改为 `IOMallocAligned(4096, 4096)`，栈帧：
+
+```text
+h103Snapshot 0x120 (288 bytes)
+```
+
+其余逻辑不变：start 同步快照、64 MiB 窗口读快照、`H103TEST` 先写后读、
+`h103-skip-pattern=1` 不画 2×2。
+
+候选：
+
+```text
+boot:      4a9de88e2c884506b75bcfeb14ea82a2e2ee09c8afa2711fe14a622d267d2047
+kernel pre: 77134eed24d453e1653666613b397a7d591e08755726eb34a69f72dbf1527d06
+kernel:     276f9927225058e5d7a0fab702a0af6150af0edac16614159fd4c778642a38b2
+ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload:    4a8321c68e55f9bd373f0ada49d8396a99331c6e6400efc9827b4b5f5d600897
+```
+
+H103di（`e025ea4f...`）会 panic，不再使用。

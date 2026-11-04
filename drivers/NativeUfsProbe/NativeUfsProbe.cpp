@@ -1138,13 +1138,33 @@ NativeUfsProbe::h103Snapshot (const char *tag, bool pause)
   // Write the self-test before inspecting the window. The old code returned
   // early when block 0 held stale data, which made every retry after a partial
   // write impossible to distinguish from a dead writer.
-  uint8_t test[4096] = {};
+  //
+  // Keep the two 4 KiB self-test buffers off the stack: start() already uses a
+  // 9 KiB frame and h103Snapshot() used to add another 8 KiB, overflowing the
+  // 16 KiB kernel stack before the first WRITE(10).
+  uint8_t *test = static_cast<uint8_t *> (IOMallocAligned (4096, 4096));
+  uint8_t *check = static_cast<uint8_t *> (IOMallocAligned (4096, 4096));
+  if (!test || !check) {
+    if (test) {
+      IOFreeAligned (test, 4096);
+    }
+    if (check) {
+      IOFreeAligned (check, 4096);
+    }
+    IOLog ("NATIVE_UFS_LOG: snapshot test allocation failed tag=%s\n",
+           tag ? tag : "?");
+    if (pause) {
+      IOSleep (30000);
+    }
+    return false;
+  }
+  memset (test, 0, 4096);
+  memset (check, 0, 4096);
   memcpy (test, "H103TEST", 8);
   snprintf (reinterpret_cast<char *> (test + 16), 128,
             "tag=%s lba=%llx wrote=0 read=0", tag ? tag : "?",
             (unsigned long long) fLogFirst);
   bool testWrite = logWrite (0, 1, test);
-  uint8_t check[4096] = {};
   bool testRead = testWrite && readWindow4k (fLogFirst, check) &&
                   memcmp (check, "H103TEST", 8) == 0;
   snprintf (reinterpret_cast<char *> (test + 16), 128,
@@ -1157,11 +1177,17 @@ NativeUfsProbe::h103Snapshot (const char *tag, bool pause)
          tag ? tag : "?", testWrite ? 1 : 0, testRead ? 1 : 0,
          endWrite ? 1 : 0, (unsigned long long) fLogFirst);
   if (!testWrite || !testRead) {
+    IOFreeAligned (test, 4096);
+    IOFreeAligned (check, 4096);
     if (pause) {
       IOSleep (30000);
     }
     return false;
   }
+  IOFreeAligned (check, 4096);
+  check = nullptr;
+  IOFreeAligned (test, 4096);
+  test = nullptr;
 
   uint8_t *body = static_cast<uint8_t *> (
     IOMallocAligned (H103_LOG_MSG_BLOCKS * 4096U, 4096));
