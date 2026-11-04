@@ -71,10 +71,10 @@ heartbeatThread (void *, wait_result_t)
   IOLog ("NATIVE_UFS_HB: enter\n");
   for (;;) {
     IOSleep (2000);
-    h103SlotWriteThunk ();
     if (!gH103SkipPattern) {
       native_legacy_test_pattern ();
     }
+    h103SlotWriteThunk ();
     uint64_t start = gWindowStartTicks;
     if (gWindowInFlight && start && mach_absolute_time () - start > 10 * 19200000ULL) {
       panic ("NATIVE_UFS_STALL: req=%llx/%llu cmds=%llu winBytes=%llu "

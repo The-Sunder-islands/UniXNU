@@ -3108,3 +3108,40 @@ display:    5f29dde
 ```
 
 上机：屏幕右上应保留 2×2，不再持续滚动；TWRP 拉到最新 slot 即可。
+
+## 73. H103dx：先画 2×2，再写 slot（2026-11-05）
+
+对比 3 号 `8946733`：当时 heartbeat 只有 `NATIVE_UFS_ALIVE`，根本没有
+`native_legacy_test_pattern()`；H103bd 镜像的 2×2 是后来直接在 heartbeat
+里调用的。H103dw 把 128 KiB slot 写放在绘制之前，slot 写要拿 `fLock`，
+会拖住后面的 2×2。
+
+H103dx 只改顺序：
+
+```text
+heartbeat 2s:
+  native_legacy_test_pattern()   // 先画 2×2
+  h103SlotWriteThunk()           // 再静默写 slot
+  不打印 console
+```
+
+保留：
+
+- `5f29dde` H103bd 2×2 颜色面板；
+- 2 秒 slot；
+- `gH103Quiet=1`；
+- payload 无 `-v/debug/boot-progress`。
+
+候选：
+
+```text
+boot:       7c4f4e6dde4f55a971dd8abb92e7715d8fdcc9a457670977692e9aed76b21211
+kernel pre: cb65784262dbdc70c6a868664cf58a5f2f7885c85e9ce926fc9c5ae604cc058c
+kernel:     5addf7cd16d56c698344a93af59b33ddb504b6043e29b5ee1721cbcf094fafd5
+ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload:    a339391de2d8ba325efd693fa7e5c5a96bd2e8a352f50540d8bec5eae6f435de
+display:    5f29dde
+```
+
+判读：右上 2×2 出现说明 slot 写阻塞是原因；仍不出现则与 slot 无关，
+下一步只保留 heartbeat 绘制、完全关闭 slot 做对照。

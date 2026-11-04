@@ -2466,6 +2466,16 @@ H103dw payload:    ff3a13661b3fbccbe38a42633865b84b51cfd57dd8b7f2ba4db218a096462
 display:           5f29dde
 ```
 
+H103dx 只改顺序：先 `native_legacy_test_pattern()`，后 `h103SlotWrite()`；
+仍静默、2 秒 slot、`5f29dde` 2×2。
+
+```text
+H103dx boot:       7c4f4e6dde4f55a971dd8abb92e7715d8fdcc9a457670977692e9aed76b21211
+H103dx kernel pre: cb65784262dbdc70c6a868664cf58a5f2f7885c85e9ce926fc9c5ae604cc058c
+H103dx kernel:     5addf7cd16d56c698344a93af59b33ddb504b6043e29b5ee1721cbcf094fafd5
+H103dx payload:    a339391de2d8ba325efd693fa7e5c5a96bd2e8a352f50540d8bec5eae6f435de
+```
+
 ### 关键产物
 
 ```text
