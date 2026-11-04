@@ -2266,6 +2266,24 @@ payload: faed19554139fd3457b566715963a5b752175b1041a38700ce83569557afb70b
 
 结果待上机。
 
+### H103dg 候选（2026-11-04）
+
+H103df 仍无 `H103TEST`；H103dg 增加：
+
+- `NATIVE_UFS_LOG: setup ...` 后停屏 30 秒；
+- `H103TEST` 同时写窗口 block 0 和最后一块；
+- puller 扫描整个 32 MiB 窗口找 `H103TEST`。
+
+```text
+boot:    94040dc74ea2b20f2ba9b8655b92b1dc9d3bf81502a95884f94145c1d5aa9685
+kernel:  f1bd6e7cba37a50b73df7b57fdf18bd5ec032ba1962a29af9c3e8ae7d4f21d2e
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: f637a087a016b84c505a1b4edffbd52e56b54b0b1dc9d9b1b2cdb75df5b480a9
+```
+
+日志仍在 `userdata_ios` 未使用尾部；Android `userdata` 是 64 GiB ext4，
+不能盲写末尾 32 MiB，若必须用需先校验 ext4 文件系统边界。
+
 ### 关键产物
 
 ```text

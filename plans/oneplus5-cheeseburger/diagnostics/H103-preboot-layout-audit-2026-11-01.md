@@ -2451,3 +2451,32 @@ payload: faed19554139fd3457b566715963a5b752175b1041a38700ce83569557afb70b
 
 上机：启动后等 60 秒，进 TWRP 拉窗口；若脚本打印
 `H103 write self-test block present`，把 `wrote/read` 发回。
+
+H103df 上机仍然没有 `H103TEST`。H103dg 追加：
+
+```text
+NATIVE_UFS_LOG: setup mode=%u first=%llx blocks=%u root=%llx..%llx image=%llx
+IOSleep(30000)              // 停屏拍照
+H103TEST 同时写 block 0 和窗口最后一块
+puller 扫描整个 32 MiB 窗口找 H103TEST
+```
+
+候选：
+
+```text
+boot:    94040dc74ea2b20f2ba9b8655b92b1dc9d3bf81502a95884f94145c1d5aa9685
+kernel:  f1bd6e7cba37a50b73df7b57fdf18bd5ec032ba1962a29af9c3e8ae7d4f21d2e
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: f637a087a016b84c505a1b4edffbd52e56b54b0b1dc9d9b1b2cdb75df5b480a9
+```
+
+关于 `userdata`：
+
+- H103 的 `userdata` 是 Android 64 GiB ext4；直接写末尾 32 MiB 可能破坏
+  Android 文件系统；
+- 现在日志窗口在 `userdata_ios` 的未使用尾部（SHNGROOT 镜像约
+  9.38 GiB，分区约 49.2 GiB），是安全位置；
+- `H103TEST` 没出现更可能是写线程/写命令，不是分区；
+- 如果最终必须用 Android `userdata`，先读 ext4 superblock 的
+  `s_blocks_count`/`s_log_block_size`，确认末尾 32 MiB 在文件系统之外，
+  并在 TWRP 只读校验后再写，不能盲写。

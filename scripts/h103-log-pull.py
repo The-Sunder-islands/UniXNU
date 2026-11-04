@@ -165,15 +165,17 @@ def main(argv: list[str] | None = None) -> int:
         size = pull_window(adb_path, args.serial, part, window_path)
         window = window_path.read_bytes()
 
-    if window[:8] == b"H103TEST":
-        text = decode_test(window)
-        report = args.output or pathlib.Path(
-            "h103-log-" + time.strftime("%Y%m%d-%H%M%S") + ".txt")
-        report.write_text("H103 write self-test\n" + text + "\n", encoding="utf-8")
-        print("H103 write self-test block present:")
-        print(text)
-        print(f"report: {report}")
-        return 0
+    if window[:8] != MAGIC:
+        test_at = window.find(b"H103TEST")
+        if test_at >= 0:
+            text = decode_test(window[test_at:])
+            report = args.output or pathlib.Path(
+                "h103-log-" + time.strftime("%Y%m%d-%H%M%S") + ".txt")
+            report.write_text("H103 write self-test\n" + text + "\n", encoding="utf-8")
+            print(f"H103 write self-test block present at window +{test_at}:")
+            print(text)
+            print(f"report: {report}")
+            return 0
 
     header = decode_header(window)
     msg_bytes = min(header["msg_bytes"], header["msg_blocks"] * BLOCK)

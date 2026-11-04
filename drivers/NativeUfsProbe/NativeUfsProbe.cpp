@@ -1135,8 +1135,9 @@ NativeUfsProbe::logThread (void *raw, wait_result_t)
             "lba=%llx wrote=%u read=%u", (unsigned long long) self->fLogFirst,
             testWrite ? 1 : 0, testRead ? 1 : 0);
   self->logWrite (0, 1, test);
-  IOLog ("NATIVE_UFS_LOG: write test wrote=%u read=%u lba=%llx\n",
-         testWrite ? 1 : 0, testRead ? 1 : 0,
+  bool endWrite = self->logWrite (H103_LOG_BLOCKS - 1, 1, test);
+  IOLog ("NATIVE_UFS_LOG: write test wrote=%u read=%u end=%u lba=%llx\n",
+         testWrite ? 1 : 0, testRead ? 1 : 0, endWrite ? 1 : 0,
          (unsigned long long) self->fLogFirst);
   if (!testWrite || !testRead) {
     IOSleep (30000);
@@ -1950,5 +1951,10 @@ NativeUfsProbe::start (IOService *provider)
            (unsigned long long) rootFirst, (unsigned long long) rootLast,
            (unsigned long long) rootImageBytes);
   }
+  IOLog ("NATIVE_UFS_LOG: setup mode=%u first=%llx blocks=%u root=%llx..%llx image=%llx\n",
+         logMode, (unsigned long long) fLogFirst, fLogBlocks,
+         (unsigned long long) rootFirst, (unsigned long long) rootLast,
+         (unsigned long long) rootImageBytes);
+  IOSleep (30000);
   return published;
 }
