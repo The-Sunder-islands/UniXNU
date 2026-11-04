@@ -2933,3 +2933,53 @@ payload:    39194bd3cdfb27df875b076ae1a5e28aa1bcfe83c9e9749f34da43d680edae8b
 上机：启动后约 2.5 分钟会停屏 30 秒，此时 2×2 应已出现；随后进 TWRP 拉
 窗口，重点看 `backboardd`、`SpringBoard`、`IOMobileFramebufferLegacy`
 user client 和 late 日志。
+
+## 69. H103dt：去掉 logSync 卡点，WRITE10 用 FUA（2026-11-05）
+
+H103ds 上机后屏幕停在：
+
+```text
+NATIVE_UFS_LOG: write test tag=window verify=0 wrote=1 read=0 end=1
+```
+
+几分钟不动。日志文件已经有有效 `SHLOG001`、`msg_bytes=43573`，说明
+body/header 已经写入；卡点在 header 之后的：
+
+```c
+if (ok) {
+  ok = logSync ();   // SYNCHRONIZE CACHE, CDB 0x35
+}
+```
+
+`logSync()` 持有 `fLock` 发 `SYNCHRONIZE CACHE`。该命令不返回时：
+late heartbeat 快照拿不到 `fLock`，2×2 也不会继续。`IOSleep(30000)` 排在
+`logSync()` 之后，还没走到，不是停住的原因。
+
+H103dt 改动：
+
+```text
+logWrite CDB: cdb[1] = 0x08 (FUA)
+h103Snapshot: 删除 logSync()
+window 早期快照: pause=0
+late heartbeat 快照: pause=1，保留 30 秒停屏
+payload 不带 h103-skip-pattern，保留 2×2
+```
+
+这样写命令自身提交到介质，不再依赖可能卡死的 SYNCHRONIZE CACHE。
+
+候选：
+
+```text
+boot:       d4c770df3ade2f3a7990daa673e58aa3cc77d9f974710ac20f17a70fe1977486
+kernel pre: 50958392dfcd669560aae3ce3ccde2bae1fbc7cc9795f4049b3eb86f34099a7e
+kernel:     1cfdae53833c10286e1f202f46a9a6ad48e24df679648c7a727c92d70e334935
+ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload:    f7e1792c50851f052e87f1dbe867c247ad478099266511a5a8d72e1cf29f8fa6
+```
+
+上机判读：
+
+- 早期 `write test` 后继续出现 `snapshot tag=window`：不再卡 `logSync`；
+- 约 2.5 分钟出现 `late snapshot tick=12` 和 30 秒停屏：heartbeat 正常；
+- TWRP 拉到 late 时间戳的日志：FUA 写有效；
+- 如果 FUA 被拒绝：还需要单独处理写缓存，但不会再卡 fLock。

@@ -1119,6 +1119,7 @@ NativeUfsProbe::logWrite (uint64_t rel, uint32_t blocks, const void *src)
   const unsigned bytes = blocks * 4096U;
   IOLockLock (fLock);
   uint8_t cdb[16] = { 0x2a };
+  cdb[1] = 0x08;  // FUA: commit this log write without a SYNCHRONIZE CACHE
   putBe32 (cdb + 2, static_cast<uint32_t> (fLogFirst + rel));
   cdb[7] = static_cast<uint8_t> (blocks >> 8);
   cdb[8] = static_cast<uint8_t> (blocks);
@@ -1287,9 +1288,9 @@ NativeUfsProbe::h103Snapshot (const char *tag, bool pause, bool verify)
   strlcpy (h.tag, "cheeseburger-H103", sizeof h.tag);
   memcpy (head, &h, sizeof h);
   ok = ok && logWrite (0, 1, head);
-  if (ok) {
-    ok = logSync ();
-  }
+  // Do not issue SYNCHRONIZE CACHE here. The WRITE(10) uses FUA; the UFS sync
+  // command has been observed to hold fLock indefinitely, which also blocks
+  // the heartbeat late snapshot and 2x2 redraw.
   IOLog ("NATIVE_UFS_LOG: snapshot tag=%s ok=%u msg=%u first=%llx blocks=%u\n",
          tag ? tag : "?", ok ? 1 : 0, msgBytes,
          (unsigned long long) fLogFirst, fLogBlocks);
@@ -1316,7 +1317,7 @@ NativeUfsProbe::h103WindowRead (void)
   gH103WindowSnapshotDone = 1;
   IOLog ("NATIVE_UFS_LOG: window trigger bytes=%llu\n",
          (unsigned long long) gWindowBytes);
-  h103Snapshot ("window", true, false);
+  h103Snapshot ("window", false, false);
 }
 
 static uint8_t gH103Test[4096] __attribute__((aligned(4096)));

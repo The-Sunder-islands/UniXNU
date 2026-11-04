@@ -2420,6 +2420,17 @@ H103ds kernel:     22e1aa5980149bef455326e3c5d83def80fff98db18b6652294d807822be8
 H103ds payload:    39194bd3cdfb27df875b076ae1a5e28aa1bcfe83c9e9749f34da43d680edae8b
 ```
 
+H103ds 屏幕停在 `write test`；日志已有有效 SHLOG001，卡点是 header 后的
+`logSync()`/SYNCHRONIZE CACHE。H103dt 删除 logSync，WRITE10 用 FUA；
+早期 window 快照 pause=0，late heartbeat 快照 pause=1，保留 2×2。
+
+```text
+H103dt boot:       d4c770df3ade2f3a7990daa673e58aa3cc77d9f974710ac20f17a70fe1977486
+H103dt kernel pre: 50958392dfcd669560aae3ce3ccde2bae1fbc7cc9795f4049b3eb86f34099a7e
+H103dt kernel:     1cfdae53833c10286e1f202f46a9a6ad48e24df679648c7a727c92d70e334935
+H103dt payload:    f7e1792c50851f052e87f1dbe867c247ad478099266511a5a8d72e1cf29f8fa6
+```
+
 ### 关键产物
 
 ```text
