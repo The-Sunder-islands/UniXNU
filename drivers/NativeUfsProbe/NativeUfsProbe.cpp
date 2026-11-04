@@ -47,9 +47,9 @@ static volatile uint64_t gWindowLastReqCount;
 static volatile uint64_t gWindowStartTicks;
 
 // H103cg's probe periodically redrew the GOP test pattern from its heartbeat.
-// The display archive exports this symbol; keep it weak so an offline probe
-// archive without the display object still links.
-extern "C" int native_legacy_test_pattern(void) __attribute__((weak_import));
+// The display archive is force-loaded into the kernel and exports this symbol;
+// call it directly like the original code (a weak import can bind to null).
+extern "C" int native_legacy_test_pattern(void);
 
 // Independent liveness proof: if a window request is stuck, this thread keeps
 // printing the exact in-flight request and queue counters from another CPU.
@@ -72,9 +72,7 @@ heartbeatThread (void *, wait_result_t)
            (unsigned long long) gWindowLastReqCount);
     // H103cg order: print the heartbeat log first, then redraw the GOP test
     // pattern. Drawing before IOLog lets the log overwrite the blocks.
-    if (native_legacy_test_pattern) {
-      native_legacy_test_pattern ();
-    }
+    native_legacy_test_pattern ();
     uint64_t start = gWindowStartTicks;
     if (gWindowInFlight && start && mach_absolute_time () - start > 10 * 19200000ULL) {
       panic ("NATIVE_UFS_STALL: req=%llx/%llu cmds=%llu winBytes=%llu "

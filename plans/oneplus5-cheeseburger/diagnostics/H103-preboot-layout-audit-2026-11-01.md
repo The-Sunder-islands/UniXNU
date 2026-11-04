@@ -2357,6 +2357,31 @@ IOLog(NATIVE_UFS_ALIVE...)
 native_legacy_test_pattern()
 ```
 
-display archive 仍是 H103da 的左上角三个块，root 修复不变。结果待上机；
-预期 heartbeat 日志后周期重绘，右上 2×2 和左上三个块可见；`calls=0`
-不变。
+display archive 仍是 H103da 的左上角三个块，root 修复不变。
+
+上机：**仍然没有方块**。H103cg 原 heartbeat 是直接
+`bl _native_legacy_test_pattern`；H103dc 用的是
+`weak_import` + `if (symbol)`，weak 符号在 kernel link 里绑定为空，
+整段调用被跳过。H103dd 去掉 weak，改为和原代码一样的直接调用。
+
+## 55. H103dd：直接调用 test pattern（2026-11-04）
+
+候选 `boot-H103dd.img`：
+
+```text
+boot:    571b00917dceb81f478e59ce070bf278311775af739f174f858a8ae563b5f4ff
+kernel:  971f37ee5330129b116e315c01ff678aeed00f0d9647fbe42160376019462c9c
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: 310053dbc060c32d5c20ac13ce9edbe24a616ab888e71d0037b19f4aaeb02335
+```
+
+H103dd 的 `heartbeatThread` 反汇编已确认是：
+
+```text
+fffffff0079b1640  bl _IOLog
+fffffff0079b1644  bl _native_legacy_test_pattern
+```
+
+与 H103cg 原 kernel 的 `IOLog -> native_legacy_test_pattern` 直接调用一致。
+display archive 仍是 H103da 的左上角三个块；root 修复不变。结果待上机；
+预期右上 2×2 和左上三个块可见；`calls=0` 不变。

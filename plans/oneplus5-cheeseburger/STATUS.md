@@ -2219,8 +2219,23 @@ payload: 5caa2c9ceb4461fbec201d337eddaca1394d88629cadd440bb2e5327ced060a9
 ```
 
 按 H103cg 原 heartbeat 顺序，在 `IOLog` 后调用
-`native_legacy_test_pattern()`；display 仍是 H103da 左上角三个块。结果
-待上机。
+`native_legacy_test_pattern()`；display 仍是 H103da 左上角三个块。
+
+上机：仍然没有方块。H103cg 原 heartbeat 是直接
+`bl _native_legacy_test_pattern`；H103dc 的 `weak_import + if (symbol)`
+在 kernel link 里绑定为空，调用被跳过。H103dd 改为直接调用。
+
+### H103dd 候选（2026-11-04）
+
+```text
+boot:    571b00917dceb81f478e59ce070bf278311775af739f174f858a8ae563b5f4ff
+kernel:  971f37ee5330129b116e315c01ff678aeed00f0d9647fbe42160376019462c9c
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: 310053dbc060c32d5c20ac13ce9edbe24a616ab888e71d0037b19f4aaeb02335
+```
+
+反汇编已确认 `IOLog -> native_legacy_test_pattern` 直接调用，和 H103cg
+原 kernel 一致。结果待上机。
 
 ### 关键产物
 
