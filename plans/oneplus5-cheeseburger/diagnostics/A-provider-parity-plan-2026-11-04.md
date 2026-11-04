@@ -205,6 +205,45 @@ prelink 布局/启动时序，暂不执行。A1 源码已回退，H103cg 保持�
 - `calls=0`：进入 A3；
 - root wait：记录并回退。
 
+#### A2 结果（2026-11-04）
+
+候选：
+
+```text
+boot-H103cx-a2.img
+size:    81,147,904 bytes
+boot:    571d77b74176a89c60f773bca36b364ec90172b782ce142cb948360a79cbc822
+kernel:  4fbd7673243bc9aae455017d7d8258a6dcb37d028808ce26343a9849689c526c
+payload: 9a6efa2eb7cd371941b225590a9901c6c8ba9240204e49d7545356317732cf53
+```
+
+上机结果：显示属性发布成功，但随后停在 root wait：
+
+```text
+NATIVE_LEGACY: display properties 1080x1920 row=4320
+NATIVE_LEGACY: registerService object=...
+NATIVE_LEGACY: base start ok primary=1 ...
+NATIVE_LEGACY: phase=4 dt=1 probe=1 attach=1 start=1 reg=1
+
+Waiting on <dict ... IOProviderClass=IOMedia ... UUID=04769D26-...>
+```
+
+结论：A2 的属性代码在显示服务上生效，但 Legacy archive 变大再次触发了
+Data/APFS IOMedia 发布 race；启动未到 backboardd，`calls` 无法评估。
+A2 镜像不可用，H103cg 保持。
+
+#### A2c：size-budgeted 属性（下一步）
+
+macOS 树里曾有一个 5 成员 builder，注释明确写：
+
+> leaving it out keeps the Legacy archive below the layout-sensitive size
+> that otherwise displaces the UFS/APFS root-media publication.
+
+A2c 保留 A2 属性，但移除未使用的 A540 对象和 `drawTestPattern()` 里的
+accel 引用，改用 5 成员 builder，使 Legacy archive 小于 H103cg。若 root
+wait 消失，就能评估 A2 属性对 `calls` 的影响；若仍 root wait，说明不是
+单纯 archive size，需要转向 runtime property injection 或修复 race。
+
 ### A3：identity parity（A2 仍不足时）
 
 改动（一次只改一项）：

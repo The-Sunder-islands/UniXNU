@@ -2075,6 +2075,26 @@ IOGPUFamily）**；A1b（prelink `IOGPUFamily` / post-root publication）
 会改变 prelink 布局，暂不执行。详见
 `diagnostics/A-provider-parity-plan-2026-11-04.md`。
 
+### A2 结果（2026-11-04）
+
+`boot-H103cx-a2.img`（boot `571d77b7...`、kernel `4fbd7673...`、
+payload `9a6efa2e...`）：
+
+```text
+NATIVE_LEGACY: display properties 1080x1920 row=4320
+NATIVE_LEGACY: phase=4 dt=1 probe=1 attach=1 start=1 reg=1
+Waiting on <dict ... IOProviderClass=IOMedia ... UUID=04769D26-...>
+```
+
+- A2 属性已在显示服务上发布；
+- 但 Legacy archive 变大再次触发 Data/APFS IOMedia race；
+- 未到 backboardd，`calls` 无法评估；A2 镜像不可用，H103cg 保持。
+
+下一步 **A2c**：保留 A2 属性，移除未使用的 A540 对象和
+`drawTestPattern()` 里的 accel 引用，改用 5 成员 builder，把 Legacy
+archive 缩到阈值以下；若仍 root wait，则转向 runtime property injection
+或修复 race。
+
 ### 关键产物
 
 ```text

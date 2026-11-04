@@ -2117,4 +2117,34 @@ H103cg 仍是唯一稳定基线。后续二选一：
    （改变 prelink 布局/时序，风险更高，暂不执行）。
 
 详见 [A-provider-parity-plan-2026-11-04.md](A-provider-parity-plan-2026-11-04.md)。
+
+## 47. A2 结果：display 属性发布，但 archive 增大触发 root race（2026-11-04）
+
+候选 `boot-H103cx-a2.img`：
+
+```text
+boot:    571d77b74176a89c60f773bca36b364ec90172b782ce142cb948360a79cbc822
+kernel:  4fbd7673243bc9aae455017d7d8258a6dcb37d028808ce26343a9849689c526c
+payload: 9a6efa2eb7cd371941b225590a9901c6c8ba9240204e49d7545356317732cf53
+```
+
+上机：
+
+```text
+NATIVE_LEGACY: display properties 1080x1920 row=4320
+NATIVE_LEGACY: registerService object=...
+NATIVE_LEGACY: base start ok primary=1 ...
+NATIVE_LEGACY: phase=4 dt=1 probe=1 attach=1 start=1 reg=1
+
+Waiting on <dict ... IOProviderClass=IOMedia ... UUID=04769D26-...>
+```
+
+结论：A2 属性已在服务上发布，但 Legacy archive 变大再次触发 Data/APFS
+IOMedia 发布 race；未到 backboardd，`calls` 无法评估。A2 镜像不可用，
+H103cg 保持。
+
+下一步 A2c：保留 A2 属性，移除未使用的 A540 对象和 `drawTestPattern()`
+里的 accel 引用，改用 5 成员 builder，把 Legacy archive 缩到
+layout-sensitive 阈值以下，再评估 `calls`。若仍 root wait，则不是单纯
+archive size，转向 runtime property injection 或修复 race。
 ```
