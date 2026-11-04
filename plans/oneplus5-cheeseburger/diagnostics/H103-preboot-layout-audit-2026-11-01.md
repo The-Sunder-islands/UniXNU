@@ -2886,3 +2886,50 @@ payload:    c12852ab4ac428385f91594774f611d44176326b5bd98689598d43f3c67943d5
 - 什么都没有：64 MiB 触发或快照没执行。
 
 成功后去掉 `h103-skip-pattern=1`，恢复 2×2。
+
+## 68. H103ds：late 快照 + 恢复 2×2（2026-11-04）
+
+H103dr 的 `SHLOG001` 成功（`msg_bytes=43562`），但 64 MiB 触发的快照停在
+320.751，只到 launchd/dyld cache，没有 `backboardd`/`SpringBoard`/显示
+客户端。日志里已经确认：
+
+```text
+NATIVE_LEGACY: IOMobileFramebufferLegacy::start
+NATIVE_LEGACY: startHardware gop=1
+NATIVE_LEGACY: video=9d400000 1080x1920 row=4320 display=1
+NATIVE_LEGACY: mapping=0xfffffff799610540
+NATIVE_LEGACY: valid=1 phys=0 len=0
+NATIVE_LEGACY: base start ok primary=1
+NATIVE_LEGACY: phase=4 dt=1 probe=1 attach=1 start=1 reg=1
+NATIVE_UFS_HB: enter
+```
+
+H103ds 增加 heartbeat 第 12 tick（约 120 秒 + 50 秒停屏之后）的 late 快照，
+并从 payload 去掉 `h103-skip-pattern=1`，恢复 heartbeat 的 2×2 重绘：
+
+```text
+heartbeat tick >= 12:
+  NATIVE_UFS_LOG: late snapshot tick=...
+  gH103Probe->h103Snapshot("late", pause=1, verify=0)
+  IOSleep(30000)
+
+payload 不再带 h103-skip-pattern=1
+心跳每次 tick 调 native_legacy_test_pattern()
+```
+
+64 MiB 的早期 `window` 快照保留；late 快照会覆盖 header/body，TWRP 最终
+读到 late 日志。
+
+候选：
+
+```text
+boot:       5f6bfd17c9ad87a3070de1da27a56f907b58bdbef12d838e030ed261531388ec
+kernel pre: e0f57cb61db08be3685de2d8b8cb50f2eeed58006836b3082ca5223c6b4c3080
+kernel:     22e1aa5980149bef455326e3c5d83def80fff98db18b6652294d807822be814c
+ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload:    39194bd3cdfb27df875b076ae1a5e28aa1bcfe83c9e9749f34da43d680edae8b
+```
+
+上机：启动后约 2.5 分钟会停屏 30 秒，此时 2×2 应已出现；随后进 TWRP 拉
+窗口，重点看 `backboardd`、`SpringBoard`、`IOMobileFramebufferLegacy`
+user client 和 late 日志。

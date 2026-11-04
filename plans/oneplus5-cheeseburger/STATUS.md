@@ -2410,6 +2410,16 @@ H103dr kernel:     a5c0a9ead8ea24ba3ce49a8a8e1976226211abf9879f47fff6f8ee196490e
 H103dr payload:    c12852ab4ac428385f91594774f611d44176326b5bd98689598d43f3c67943d5
 ```
 
+H103dr 的 SHLOG001 成功，但 64 MiB 快照停在 launchd/dyld cache。H103ds 在
+heartbeat 第 12 tick 增加 late 快照，并去掉 `h103-skip-pattern=1` 恢复 2×2。
+
+```text
+H103ds boot:       5f6bfd17c9ad87a3070de1da27a56f907b58bdbef12d838e030ed261531388ec
+H103ds kernel pre: e0f57cb61db08be3685de2d8b8cb50f2eeed58006836b3082ca5223c6b4c3080
+H103ds kernel:     22e1aa5980149bef455326e3c5d83def80fff98db18b6652294d807822be814c
+H103ds payload:    39194bd3cdfb27df875b076ae1a5e28aa1bcfe83c9e9749f34da43d680edae8b
+```
+
 ### 关键产物
 
 ```text

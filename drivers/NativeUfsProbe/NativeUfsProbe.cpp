@@ -53,6 +53,10 @@ static volatile int gH103LogLatePaused;
 static uint64_t gH103HeartbeatStart;
 static volatile int gH103SkipPattern;
 static volatile int gH103WindowSnapshotDone;
+class NativeUfsProbe;
+static NativeUfsProbe *gH103Probe;
+static volatile int gH103LateSnapshotDone;
+static bool h103LateSnapshotThunk (void);
 
 // H103cg's probe periodically redrew the GOP test pattern from its heartbeat.
 // The display archive is force-loaded into the kernel and exports this symbol;
@@ -77,6 +81,12 @@ heartbeatThread (void *, wait_result_t)
              (unsigned long long) gH103RootFirst,
              (unsigned long long) gH103RootLast);
       IOSleep (30000);
+    }
+    if (!gH103LateSnapshotDone && hbTicks >= 12) {
+      gH103LateSnapshotDone = 1;
+      IOLog ("NATIVE_UFS_LOG: late snapshot tick=%u\n", hbTicks);
+      bool lateOk = h103LateSnapshotThunk ();
+      IOLog ("NATIVE_UFS_LOG: late snapshot result=%u\n", lateOk ? 1 : 0);
     }
     uint64_t winFlight = gWindowInFlight;
     uint64_t ufsFlight = gUfsInFlight;
@@ -328,6 +338,15 @@ public:
 
 OSDefineMetaClassAndStructors (NativeUfsProbe, IOService)
 OSDefineMetaClassAndStructors (NativeUfsLun, IOBlockStorageDevice)
+
+static bool
+h103LateSnapshotThunk (void)
+{
+  if (!gH103Probe) {
+    return false;
+  }
+  return gH103Probe->h103Snapshot ("late", true, false);
+}
 OSDefineMetaClassAndStructors (NativeUfsWindow, IOBlockStorageDevice)
 
 static uint32_t
@@ -2087,6 +2106,7 @@ NativeUfsProbe::start (IOService *provider)
   dumpRootMedia ();
   IOLog ("NATIVE_UFS_GPT: start returning published=%u windows=%u\n",
          published ? 1 : 0, windowsPublished);
+  gH103Probe = this;
   uint32_t skipPattern = 0;
   PE_parse_boot_argn ("h103-skip-pattern", &skipPattern, sizeof skipPattern);
   gH103SkipPattern = skipPattern ? 1 : 0;
