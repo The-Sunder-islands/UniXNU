@@ -2038,15 +2038,21 @@ provider，进入 headless，而不是 Legacy `newUserClient` 的问题。
 `offline-legacy-cpu-present`、`sheng-vsync`、unit-scale、Legacy
 `newUserClient` 路径、BackBoard/CA 软件渲染偏好。
 
-下一步二选一：
+下一步按 A 线 provider 对齐计划执行（详见
+`diagnostics/A-provider-parity-plan-2026-11-04.md`）：
 
-1. **优先**：对比并移植 DinnerABC 的 CPU display provider/注册路径
-   （`LegacyDisplayProbe.cpp`、`NativeLegacyDisplay.cpp`、
-   `NativeMobileDisplay` 的 service/IORegistry 属性）；DinnerABC CPU
-   路径曾达到 `backboardd calls=77/97`。
-2. 若仍 headless：提供 IOAccelerator/IOGPU/Metal，或走 QcomGPU A540。
+1. **A1**：发布最小裸 `IOAcceleratorES`（不设置
+   `MetalPluginName`/`MetalPluginClassName`），验证 backboardd 是否
+   因为没有 accelerator 而 headless；
+2. **A2**：A1 不足时，补最小 display 属性
+   （`DisplayWidth/Height`、`RowBytes`、`PixelFormat`、
+   `IOMFBDisplayRefresh`），不改 timing；
+3. **A3**：仍不足时，才做 `IOFBDependentID=0` /
+   去掉 `NativeSandboxGrantProcess` / `IOClass` override 的 identity parity；
+4. **A4**：最后才补父节点 `compatible`/`canvas-width/height`。
 
-不再增加 boot-arg、`sheng-disable-jobs`、Data 容量或 AMFI 诊断。
+不再增加 boot-arg、`sheng-disable-jobs`、Data 容量或 AMFI 诊断；
+不再做 display timing/ordering/delay/pump 实验。
 
 ### 关键产物
 

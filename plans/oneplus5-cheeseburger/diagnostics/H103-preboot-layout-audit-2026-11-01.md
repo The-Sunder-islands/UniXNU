@@ -2041,4 +2041,45 @@ Legacy framebuffer 后端正常
    服务，或走 QcomGPU A540 路线。
 
 不再继续增加 boot-arg、`sheng-disable-jobs`、Data 容量或 AMFI 诊断。
+
+## 45. A 线：H103cg provider 对齐计划（2026-11-04）
+
+H103cg 仍是唯一接受的稳定基线：
+
+```text
+NATIVE_LEGACY_STATE:
+  load=0 stage=10 reg=1 surface=0/1 probe=1 dt=1 start=1 calls=0 pattern=1
+boot: 4560ac5b64662aa321348d530617894ef85bf27252eae04396f8a2048b1cea8a
+```
+
+A 只读对照（sagit / HackiOS / DinnerABC）结论：
+
+- `sagit` 的 iOS 18 显示路径依赖物理 DPU 节点、`device_type=display-subsystem`、
+  `canvas-width/height` 和 `registerService()` 前的完整 display 属性；
+- `HackiOS` 显式发布 `TimingElements`/`ColorElements`、`/arm-io` 显示节点
+  和空 `IOAcceleratorES`；
+- `DinnerABC` 与 H103cg 同 OS，但 **不设置** `IOClass`、
+  `NativeSandboxGrantProcess`、`IOFBDependentID`；H103at 已排除
+  `IOClass`/`NativeSandboxGrantProcess`，`IOFBDependentID` 仍未单独验证；
+- H103cg **没有发布 `IOAcceleratorES`**：`native_a540_accelerator_probe()`
+  有定义但全树无调用点，`native_a540_accel_state` 为 0；
+- H103cg 服务上几乎只有 `IOMFB Debug Info` + `IOFBDependentID`，
+  没有 sagit 的 `DisplayWidth/Height`、`RowBytes`、`IOMFBDisplayRefresh`
+  等属性。
+
+执行顺序：
+
+1. **A1**：发布最小裸 `IOAcceleratorES`（不设置 `MetalPluginName`/
+   `MetalPluginClassName`），单变量验证 headless 是否由 accelerator 缺失导致；
+2. **A2**：A1 不足时补最小 display 属性，不改 timing；
+3. **A3**：仍不足时才做 `IOFBDependentID=0` / 去掉
+   `NativeSandboxGrantProcess` / `IOClass` override；
+4. **A4**：最后才补父节点 `compatible`/`canvas-width/height`。
+
+完整差异表、验收标准和回退规则见
+[A-provider-parity-plan-2026-11-04.md](A-provider-parity-plan-2026-11-04.md)。
+
+下一步：A1。任何 display archive 改动仍可能触发 Data/APFS IOMedia race；
+若停在 `Waiting on IOMedia UUID 04769D26-...`，记录后回退，不据此判定
+provider 失败。
 ```
