@@ -2173,6 +2173,21 @@ H103cg-5 只修了 partition，window 仍用 `0x14f40`，所以仍失败；H103c
   不是 display archive 或 kernel 时序；
 - display provider 仍 `calls=0`，无 UI；本次未移动心跳指示块。
 
+### H103da 候选（2026-11-04）
+
+`boot-H103da.img`：
+
+```text
+boot:    997f5cd88d42fbbe4c8f0f8bd8d4abf42b3b6aa74c4f4ab044c446a9316c7a53
+kernel:  f8a238140fdaf0ee0082e4c77ed7389c6b50efa536230a7e16762a468ee1d6c3
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: 9ebfe2ec3dbc7ae578d7683d376a3b4e9b583268690e8566dfed6b053ec1944e
+```
+
+基线 H103cg-6（`userdata_ios` probe + window 修复）；display 只把三个
+16×16 指示块移到左上角 `(8,8)/(32,8)/(56,8)`，其他不变。结果待上机；
+预期 root 通过，display provider 仍 `calls=0`。
+
 ### 关键产物
 
 ```text

@@ -2270,3 +2270,27 @@ H103cg-5 只修了第 1 处，window 仍指向 Android `userdata`，所以仍停
 - display provider 仍是 `calls=0`，无 UI；本次没有移动心跳指示块；
 - 后续若移动指示块，可以直接在 H103cg-6 的 probe 修复基础上重编，
   不再受 `04769D26` 阻塞。
+
+## 52. H103da：H103cg-6 + 三个心跳块移到左上角（2026-11-04）
+
+候选 `boot-H103da.img`：
+
+```text
+boot:    997f5cd88d42fbbe4c8f0f8bd8d4abf42b3b6aa74c4f4ab044c446a9316c7a53
+kernel:  f8a238140fdaf0ee0082e4c77ed7389c6b50efa536230a7e16762a468ee1d6c3
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: 9ebfe2ec3dbc7ae578d7683d376a3b4e9b583268690e8566dfed6b053ec1944e
+```
+
+基线是 H103cg-6（`userdata_ios` probe + window 修复），display 只改三个
+16×16 指示块坐标：
+
+```text
+fill(w-16,h-16) -> fill(8,8)
+fill(w-40,h-16) -> fill(32,8)
+fill(w-64,h-16) -> fill(56,8)
+```
+
+其他 display archive、timing、ordering、boot 参数均未改。ADT 与 H103cg
+完全一致（`d98d9522...`）。结果待上机；预期 root 通过，左上角出现三个
+指示块；display provider 仍是 `calls=0`，UI 仍未出现。
