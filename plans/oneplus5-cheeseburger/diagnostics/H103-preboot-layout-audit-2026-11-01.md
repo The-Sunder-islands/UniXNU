@@ -2798,3 +2798,48 @@ payload:    fe6de668a05e4b4b83dd0a7f5ca91170a0adef4119d963bd5f88c048ef40542f
 - `single write result=1`：DMA CPU 写是根因，单块写成功；
 - 出现 `log DMA writeBytes short`：`writeBytes` 也不行，需要换 CPU 可写源 + 独立物理 DMA；
 - `single write begin` 后仍 panic：不是 memcpy，问题在 WRITE10/PRDT/UTRD 或设备写保护。
+
+## 66. H103dq：log DMA 改为 kIODirectionIn（2026-11-04）
+
+H103dp 在 `fLogDma->writeBytes()` 触发：
+
+```text
+IOMemoryDescriptor.cpp:2261
+Assertion failed: !(kIOMemoryPreparedReadOnly && _flags)
+```
+
+说明 H103dp 把 log DMA 建成 `kIODirectionOut`，描述符被 prepare 成
+read-only，`writeBytes()` 在真正发 UFS 命令前就断言。UFS WRITE(10) 是
+设备从内存读数据，缓冲应为 CPU 可写方向。
+
+H103dq 只改这一处：
+
+```text
+logOptions = kIODirectionIn | PhysContiguous | MapperNone
+```
+
+保留：
+
+```text
+fLogDma->writeBytes(0, src, bytes)
+ufsWriteCommand(..., src = fLogData)  // src == q->data，跳过 memcpy
+```
+
+仍只写 `userdata_ios` 窗口首块，不写 body/header，不读回，停屏 30 秒。
+
+候选：
+
+```text
+boot:       6f6ffb9148f947a7097e25cdba0b29d9a53764c9dce91688aae7d314fc5879e0
+kernel pre: 664888302c4e39d9fc3418fef47f50d03c179d034d016cc50b3f89b318bceba7
+kernel:     f100195bb7fa93a7f8ec2ed51ce29cf63a971f2ccb60c6c5451c5f93016be97e
+ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload:    9fb582e3d250d6ec5de36e38ced8b0a77e62f1ea1d3345be4aa5d76f2bc03d52
+```
+
+判读：
+
+- `single write result=1` + TWRP 看到 `H103TEST`：方向问题解决；
+- 仍断言 read-only：改 `kIODirectionInOut` 或显式 `prepare(kIODirectionIn)`；
+- 断言消失但 UFS/data abort：问题转到 WRITE10/PRDT/UTRD；
+- `writeBytes short`：缓冲仍不可写。

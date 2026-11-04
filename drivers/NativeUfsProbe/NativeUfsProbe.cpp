@@ -1961,7 +1961,7 @@ NativeUfsProbe::start (IOService *provider)
   queue.poisoned = false;
   fQueue = queue;
 
-  IOOptionBits logOptions = static_cast<IOOptionBits> (kIODirectionOut) |
+  IOOptionBits logOptions = static_cast<IOOptionBits> (kIODirectionIn) |
                             static_cast<IOOptionBits> (kIOMemoryPhysicallyContiguous) |
                             static_cast<IOOptionBits> (kIOMemoryMapperNone);
   IOBufferMemoryDescriptor *logDma = IOBufferMemoryDescriptor::inTaskWithPhysicalMask (

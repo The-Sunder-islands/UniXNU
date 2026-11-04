@@ -2389,6 +2389,17 @@ H103dp kernel:     4b5ca54dddef09acad19e03a3b7965f6edf5f1cf0cfb25eb85502c8bca3b7
 H103dp payload:    fe6de668a05e4b4b83dd0a7f5ca91170a0adef4119d963bd5f88c048ef40542f
 ```
 
+H103dp 在 `fLogDma->writeBytes()` 触发 `kIOMemoryPreparedReadOnly` 断言，
+因为 log DMA 用了 `kIODirectionOut`。H103dq 改成 `kIODirectionIn`，仍只写
+`userdata_ios` 窗口首块。
+
+```text
+H103dq boot:       6f6ffb9148f947a7097e25cdba0b29d9a53764c9dce91688aae7d314fc5879e0
+H103dq kernel pre: 664888302c4e39d9fc3418fef47f50d03c179d034d016cc50b3f89b318bceba7
+H103dq kernel:     f100195bb7fa93a7f8ec2ed51ce29cf63a971f2ccb60c6c5451c5f93016be97e
+H103dq payload:    9fb582e3d250d6ec5de36e38ced8b0a77e62f1ea1d3345be4aa5d76f2bc03d52
+```
+
 ### 关键产物
 
 ```text
