@@ -2514,3 +2514,47 @@ payload: 5a123ca1658860d6a315595b0524d6096ae3b8726268cd1bab30d4cf3ea6883c
 拍下 `NATIVE_UFS_LOG: late ...`；随后进 TWRP 拉 `userdata_ios` 最后
 32 MiB。若 45 秒后仍不停屏，说明 heartbeat 线程没有运行或 probe 未启动，
 需要回到更早的 start 入口确认。
+
+## 59. H103di：不再依赖 heartbeat，start 窗口读双写（2026-11-04）
+
+H103dh 确认 boot 哈希 `d35d87a2...`，但启动后仍完全没有停屏。H103
+历史上 heartbeat/`NATIVE_UFS_ALIVE` 一直不稳定（H103av/H103aw，H103ba–bd
+的 2×2 也是 run-to-run），因此 H103di 把持久化日志从 heartbeat 解耦：
+
+```text
+NativeUfsProbe::start 同步执行一次 h103Snapshot("start")
+  - 写 H103TEST 到窗口首块
+  - 读回校验
+  - 写 H103TEST 到窗口末块
+  - 写 SHLOG001 v3 + 1 MiB msgbuf
+
+NativeUfsWindow::doAsyncReadWrite 完成后
+  - gWindowBytes >= 64 MiB 时触发一次 h103Snapshot("window")
+  - 该路径是 root/SystemOS 已证明会走的读路径
+  - 快照后 IOSleep(30000) 停屏
+
+logThread 只调用 h103Snapshot("thread")，不再因首块非空提前 return
+heartbeat 改为 50 秒计数停屏，不再用 mach_absolute_time
+h103-skip-pattern=1 时跳过 native_legacy_test_pattern()
+所有 kernel_thread_start 返回值都打印
+```
+
+H103di 的 2×2 面板本轮故意不画（`h103-skip-pattern=1`），用于先确认日志
+和写路径；不是显示回归。
+
+候选：
+
+```text
+boot:       e025ea4f401e1fca990ae160c300058775e2c8a5b1b3b852de1b2694297e9f0a
+kernel pre: a59dd74d8ca950d2dc0e462e78182d56999384c8219d570fa79fef2593b889b7
+kernel:     171185264ec4c0eae82722164b45094045860d657f490bd982d6179390e66cc0
+ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload:    d046fc95e76e648a707f131ea6e15c77634079e8ef5a35ad4cb969b45d3e8763
+```
+
+上机后 TWRP 拉窗口，重点看：
+
+- `H103TEST ... tag=start` 或 `tag=window`：裸 UFS 写路径正常；
+- `SHLOG001`：日志已落盘，直接解析正文；
+- `NATIVE_UFS_LOG: start snapshot result=...` / `window trigger bytes=...`：
+  只能通过窗口里的正文看到，若没有正文则说明 start 写也失败。

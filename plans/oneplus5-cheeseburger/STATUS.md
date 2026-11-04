@@ -2303,6 +2303,26 @@ ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
 payload: 5a123ca1658860d6a315595b0524d6096ae3b8726268cd1bab30d4cf3ea6883c
 ```
 
+### H103di 候选（2026-11-04）
+
+H103dh 确认 boot 哈希正确，但启动后仍无 45 秒停屏，说明 heartbeat 不可靠。
+H103di 把日志写入从 heartbeat 解耦：
+
+- `NativeUfsProbe::start` 同步写一次 `H103TEST` + `SHLOG001`；
+- `NativeUfsWindow::doAsyncReadWrite` 累计 64 MiB 后触发第二次快照并停屏 30 秒；
+- `logThread` 先写测试，不再因首块非空提前返回；
+- 打印所有 `kernel_thread_start` 返回值；
+- heartbeat 改用 50 秒计数停屏；
+- payload 加 `h103-skip-pattern=1`，本轮不画 2×2。
+
+```text
+boot:       e025ea4f401e1fca990ae160c300058775e2c8a5b1b3b852de1b2694297e9f0a
+kernel pre: a59dd74d8ca950d2dc0e462e78182d56999384c8219d570fa79fef2593b889b7
+kernel:     171185264ec4c0eae82722164b45094045860d657f490bd982d6179390e66cc0
+ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload:    d046fc95e76e648a707f131ea6e15c77634079e8ef5a35ad4cb969b45d3e8763
+```
+
 ### 关键产物
 
 ```text

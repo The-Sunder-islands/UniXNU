@@ -51,6 +51,8 @@ static volatile uint64_t gH103RootFirst;
 static volatile uint64_t gH103RootLast;
 static volatile int gH103LogLatePaused;
 static uint64_t gH103HeartbeatStart;
+static volatile int gH103SkipPattern;
+static volatile int gH103WindowSnapshotDone;
 
 // H103cg's probe periodically redrew the GOP test pattern from its heartbeat.
 // The display archive is force-loaded into the kernel and exports this symbol;
@@ -63,10 +65,12 @@ static void
 heartbeatThread (void *, wait_result_t)
 {
   gH103HeartbeatStart = mach_absolute_time ();
+  IOLog ("NATIVE_UFS_HB: enter\n");
+  unsigned hbTicks = 0;
   for (;;) {
     IOSleep (10000);
-    if (!gH103LogLatePaused && gH103HeartbeatStart &&
-        mach_absolute_time () - gH103HeartbeatStart > 45 * 19200000ULL) {
+    hbTicks++;
+    if (!gH103LogLatePaused && hbTicks >= 5) {
       gH103LogLatePaused = 1;
       IOLog ("NATIVE_UFS_LOG: late mode=%u first=%llx root=%llx..%llx\n",
              gH103LogMode, (unsigned long long) gH103LogFirst,
@@ -88,7 +92,9 @@ heartbeatThread (void *, wait_result_t)
            (unsigned long long) gWindowLastReqCount);
     // H103cg order: print the heartbeat log first, then redraw the GOP test
     // pattern. Drawing before IOLog lets the log overwrite the blocks.
-    native_legacy_test_pattern ();
+    if (!gH103SkipPattern) {
+      native_legacy_test_pattern ();
+    }
     uint64_t start = gWindowStartTicks;
     if (gWindowInFlight && start && mach_absolute_time () - start > 10 * 19200000ULL) {
       panic ("NATIVE_UFS_STALL: req=%llx/%llu cmds=%llu winBytes=%llu "
@@ -308,6 +314,8 @@ class NativeUfsProbe : public IOService {
 
 public:
   bool start (IOService *provider) override;
+  bool h103Snapshot (const char *tag, bool pause);
+  void h103WindowRead (void);
   bool readBlocks (uint8_t unit, uint64_t block, uint64_t count, uint32_t blockSize,
                    IOMemoryDescriptor *dst, uint64_t *done);
   bool readWindowBulk (uint64_t lba, uint32_t blocks, void *out);
@@ -1114,67 +1122,72 @@ NativeUfsProbe::logThread (void *raw, wait_result_t)
   thread_set_thread_name (current_thread (), "h103_log");
   // Let root mount and the early display/root messages enter the kernel ring.
   IOSleep (20000);
-  if (!self->fLogFirst || !self->fLogBlocks || !self->fReady || !self->fLock) {
-    return;
-  }
-  uint8_t first[4096] = {};
-  if (!self->readWindow4k (self->fLogFirst, first)) {
-    IOLog ("NATIVE_UFS_LOG: window read failed lba=%llx\n",
-           (unsigned long long) self->fLogFirst);
-    return;
-  }
-  bool empty = true;
-  for (unsigned i = 0; i < sizeof (first); ++i) {
-    if (first[i]) {
-      empty = false;
-      break;
-    }
-  }
-  if (!empty && memcmp (first, "SHLOG001", 8) != 0) {
-    IOLog ("NATIVE_UFS_LOG: window not empty and not SHLOG001\n");
-    return;
+  self->h103Snapshot ("thread", false);
+}
+
+bool
+NativeUfsProbe::h103Snapshot (const char *tag, bool pause)
+{
+  if (!fLogFirst || !fLogBlocks || !fReady || !fLock) {
+    IOLog ("NATIVE_UFS_LOG: snapshot skipped tag=%s first=%llx blocks=%u "
+           "ready=%u lock=%u\n", tag ? tag : "?", (unsigned long long) fLogFirst,
+           fLogBlocks, fReady ? 1 : 0, fLock ? 1 : 0);
+    return false;
   }
 
-  // Single-block write/readback self-test before the body. If it remains in
-  // the window the TWRP puller can distinguish a broken WRITE(10) from an
-  // incomplete SHLOG001 header/body. On failure hold the screen long enough
-  // to photograph the NATIVE_UFS_LOG line.
+  // Write the self-test before inspecting the window. The old code returned
+  // early when block 0 held stale data, which made every retry after a partial
+  // write impossible to distinguish from a dead writer.
   uint8_t test[4096] = {};
   memcpy (test, "H103TEST", 8);
   snprintf (reinterpret_cast<char *> (test + 16), 128,
-            "lba=%llx wrote=0 read=0", (unsigned long long) self->fLogFirst);
-  bool testWrite = self->logWrite (0, 1, test);
+            "tag=%s lba=%llx wrote=0 read=0", tag ? tag : "?",
+            (unsigned long long) fLogFirst);
+  bool testWrite = logWrite (0, 1, test);
   uint8_t check[4096] = {};
-  bool testRead = testWrite && self->readWindow4k (self->fLogFirst, check) &&
+  bool testRead = testWrite && readWindow4k (fLogFirst, check) &&
                   memcmp (check, "H103TEST", 8) == 0;
   snprintf (reinterpret_cast<char *> (test + 16), 128,
-            "lba=%llx wrote=%u read=%u", (unsigned long long) self->fLogFirst,
-            testWrite ? 1 : 0, testRead ? 1 : 0);
-  self->logWrite (0, 1, test);
-  bool endWrite = self->logWrite (H103_LOG_BLOCKS - 1, 1, test);
-  IOLog ("NATIVE_UFS_LOG: write test wrote=%u read=%u end=%u lba=%llx\n",
-         testWrite ? 1 : 0, testRead ? 1 : 0, endWrite ? 1 : 0,
-         (unsigned long long) self->fLogFirst);
+            "tag=%s lba=%llx wrote=%u read=%u", tag ? tag : "?",
+            (unsigned long long) fLogFirst, testWrite ? 1 : 0,
+            testRead ? 1 : 0);
+  logWrite (0, 1, test);
+  bool endWrite = logWrite (H103_LOG_BLOCKS - 1, 1, test);
+  IOLog ("NATIVE_UFS_LOG: write test tag=%s wrote=%u read=%u end=%u lba=%llx\n",
+         tag ? tag : "?", testWrite ? 1 : 0, testRead ? 1 : 0,
+         endWrite ? 1 : 0, (unsigned long long) fLogFirst);
   if (!testWrite || !testRead) {
-    IOSleep (30000);
-    return;
+    if (pause) {
+      IOSleep (30000);
+    }
+    return false;
   }
 
   uint8_t *body = static_cast<uint8_t *> (
     IOMallocAligned (H103_LOG_MSG_BLOCKS * 4096U, 4096));
   if (!body) {
-    return;
+    IOLog ("NATIVE_UFS_LOG: snapshot body allocation failed tag=%s\n",
+           tag ? tag : "?");
+    if (pause) {
+      IOSleep (30000);
+    }
+    return false;
   }
   uint32_t msgBytes = h103CopyMsgbuf (body);
   bool ok = true;
   for (uint32_t offset = 0; ok && offset < H103_LOG_MSG_BLOCKS; offset += 32) {
-    ok = self->logWrite (1 + offset, 32, body + offset * 4096U);
+    ok = logWrite (1 + offset, 32, body + offset * 4096U);
   }
 
   uint8_t *head = static_cast<uint8_t *> (IOMallocAligned (4096, 4096));
   if (!head) {
     IOFreeAligned (body, H103_LOG_MSG_BLOCKS * 4096U);
-    return;
+    IOLog ("NATIVE_UFS_LOG: snapshot header allocation failed tag=%s\n",
+           tag ? tag : "?");
+    if (pause) {
+      IOSleep (30000);
+    }
+    return false;
   }
   memset (head, 0, 4096);
   H103LogHeader h;
@@ -1183,28 +1196,50 @@ NativeUfsProbe::logThread (void *raw, wait_result_t)
   h.version = 3;
   h.header_bytes = sizeof h;
   h.boot_id = h103LogTicks ();
-  h.first_lba = self->fLogFirst;
-  h.window_blocks = self->fLogBlocks;
+  h.first_lba = fLogFirst;
+  h.window_blocks = fLogBlocks;
   h.msg_first = 1;
   h.msg_blocks = H103_LOG_MSG_BLOCKS;
   h.msg_bytes = msgBytes;
   h.slot_first = 257;
   h.slot_blocks = 32;
-  h.slot_count = (self->fLogBlocks > 257) ? (self->fLogBlocks - 257) / 32 : 0;
+  h.slot_count = (fLogBlocks > 257) ? (fLogBlocks - 257) / 32 : 0;
   h.slots_written = 0;
   h.rounds = 1;
   h.state = 2;
   strlcpy (h.tag, "cheeseburger-H103", sizeof h.tag);
   memcpy (head, &h, sizeof h);
-  ok = ok && self->logWrite (0, 1, head);
+  ok = ok && logWrite (0, 1, head);
   if (ok) {
-    ok = self->logSync ();
+    ok = logSync ();
   }
-  IOLog ("NATIVE_UFS_LOG: snapshot ok=%u msg=%u first=%llx blocks=%u\n",
-         ok ? 1 : 0, msgBytes, (unsigned long long) self->fLogFirst,
-         self->fLogBlocks);
+  IOLog ("NATIVE_UFS_LOG: snapshot tag=%s ok=%u msg=%u first=%llx blocks=%u\n",
+         tag ? tag : "?", ok ? 1 : 0, msgBytes,
+         (unsigned long long) fLogFirst, fLogBlocks);
   IOFreeAligned (head, 4096);
   IOFreeAligned (body, H103_LOG_MSG_BLOCKS * 4096U);
+  if (pause) {
+    IOSleep (30000);
+  }
+  return ok;
+}
+
+void
+NativeUfsProbe::h103WindowRead (void)
+{
+  if (gH103WindowSnapshotDone || !fLogFirst || !fLogBlocks) {
+    return;
+  }
+  // The root/SystemOS window reads are a known-running path. Trigger one
+  // post-boot snapshot after enough read traffic has passed, independent of
+  // the heartbeat and the separate log thread.
+  if (gWindowBytes < 64ULL * 1024 * 1024) {
+    return;
+  }
+  gH103WindowSnapshotDone = 1;
+  IOLog ("NATIVE_UFS_LOG: window trigger bytes=%llu\n",
+         (unsigned long long) gWindowBytes);
+  h103Snapshot ("window", true);
 }
 
 bool
@@ -1360,6 +1395,9 @@ NativeUfsWindow::doAsyncReadWrite (IOMemoryDescriptor *buffer, UInt64 block,
   }
   completion->action (completion->target, completion->parameter,
                       ok ? kIOReturnSuccess : kIOReturnIOError, done);
+  if (ok && host) {
+    host->h103WindowRead ();
+  }
   return kIOReturnSuccess;
 }
 
@@ -1940,25 +1978,49 @@ NativeUfsProbe::start (IOService *provider)
   dumpRootMedia ();
   IOLog ("NATIVE_UFS_GPT: start returning published=%u windows=%u\n",
          published ? 1 : 0, windowsPublished);
+  uint32_t skipPattern = 0;
+  PE_parse_boot_argn ("h103-skip-pattern", &skipPattern, sizeof skipPattern);
+  gH103SkipPattern = skipPattern ? 1 : 0;
   thread_t heartbeat = nullptr;
-  if (kernel_thread_start (heartbeatThread, nullptr, &heartbeat) == KERN_SUCCESS) {
+  kern_return_t heartbeatRet = kernel_thread_start (heartbeatThread, nullptr, &heartbeat);
+  IOLog ("NATIVE_UFS_HB: start rc=%x skipPattern=%u\n",
+         heartbeatRet, gH103SkipPattern);
+  if (heartbeatRet == KERN_SUCCESS) {
     thread_deallocate (heartbeat);
   }
 
-  // Persistent log window: the last 32 MiB of userdata_ios. A single snapshot
-  // after root captures the early NATIVE_LEGACY lines still in the kernel ring.
+  // Persistent log window: the last 32 MiB of userdata_ios. Write one
+  // snapshot synchronously from start (the root path is already proven) and
+  // another from the first 64 MiB of window reads. Neither depends on the
+  // heartbeat thread or on a separately created log thread.
   fLogBlocks = H103_LOG_BLOCKS;
   fLogFirst = rootLast >= H103_LOG_BLOCKS ? rootLast + 1 - H103_LOG_BLOCKS : 0;
   fLogImageBytes = rootImageBytes;
   uint32_t logMode = 0;
   PE_parse_boot_argn ("sheng-log", &logMode, sizeof logMode);
-  if (logMode == 1 && fLogFirst && rootFirst &&
-      fLogFirst > rootFirst + (fLogImageBytes + 4095) / 4096 + 256) {
+  bool logSafe = logMode == 1 && fLogFirst && rootFirst &&
+                 fLogFirst >= rootFirst &&
+                 fLogFirst + fLogBlocks <= rootLast + 1;
+  IOLog ("NATIVE_UFS_LOG: setup mode=%u first=%llx blocks=%u root=%llx..%llx "
+         "image=%llx safe=%u\n",
+         logMode, (unsigned long long) fLogFirst, fLogBlocks,
+         (unsigned long long) rootFirst, (unsigned long long) rootLast,
+         (unsigned long long) rootImageBytes, logSafe ? 1 : 0);
+  gH103LogMode = logMode;
+  gH103LogFirst = fLogFirst;
+  gH103RootFirst = rootFirst;
+  gH103RootLast = rootLast;
+  if (logSafe) {
     IOLog ("NATIVE_UFS_LOG: window lba=%llx blocks=%u image=%llx\n",
            (unsigned long long) fLogFirst, fLogBlocks,
            (unsigned long long) fLogImageBytes);
+    IOLog ("NATIVE_UFS_LOG: start snapshot begin\n");
+    bool startOk = h103Snapshot ("start", false);
+    IOLog ("NATIVE_UFS_LOG: start snapshot result=%u\n", startOk ? 1 : 0);
     thread_t logThreadId = nullptr;
-    if (kernel_thread_start (logThread, this, &logThreadId) == KERN_SUCCESS) {
+    kern_return_t logRet = kernel_thread_start (logThread, this, &logThreadId);
+    IOLog ("NATIVE_UFS_LOG: thread start rc=%x\n", logRet);
+    if (logRet == KERN_SUCCESS) {
       thread_deallocate (logThreadId);
     }
   } else {
@@ -1967,13 +2029,5 @@ NativeUfsProbe::start (IOService *provider)
            (unsigned long long) rootFirst, (unsigned long long) rootLast,
            (unsigned long long) rootImageBytes);
   }
-  IOLog ("NATIVE_UFS_LOG: setup mode=%u first=%llx blocks=%u root=%llx..%llx image=%llx\n",
-         logMode, (unsigned long long) fLogFirst, fLogBlocks,
-         (unsigned long long) rootFirst, (unsigned long long) rootLast,
-         (unsigned long long) rootImageBytes);
-  gH103LogMode = logMode;
-  gH103LogFirst = fLogFirst;
-  gH103RootFirst = rootFirst;
-  gH103RootLast = rootLast;
   return published;
 }
