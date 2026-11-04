@@ -2292,5 +2292,16 @@ fill(w-64,h-16) -> fill(56,8)
 ```
 
 其他 display archive、timing、ordering、boot 参数均未改。ADT 与 H103cg
-完全一致（`d98d9522...`）。结果待上机；预期 root 通过，左上角出现三个
-指示块；display provider 仍是 `calls=0`，UI 仍未出现。
+完全一致（`d98d9522...`）。
+
+上机结果：**root 通过，`calls=0`，左上角三个指示块没有出现**。
+
+原因：当前 `NativeUfsProbe` 的 heartbeat 没有调用
+`native_legacy_test_pattern()`。H103cg 原镜像的 probe 有周期重绘调用；
+clean rebuild 的 probe archive 丢失了该调用，因此 `drawTestPattern()`
+从未执行。H103da 只是把三个 `fill()` 坐标编译进 archive，并没有改变
+“谁来画”。
+
+下一步 H103db：在 UFS heartbeat 恢复
+`native_legacy_test_pattern()` 调用，让左上角三个块周期性重绘；root
+修复（H103cg-6）保持不变。display provider 仍是 `calls=0`，UI 仍未出现。

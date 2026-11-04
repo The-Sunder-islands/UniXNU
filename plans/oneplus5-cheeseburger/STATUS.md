@@ -2185,8 +2185,13 @@ payload: 9ebfe2ec3dbc7ae578d7683d376a3b4e9b583268690e8566dfed6b053ec1944e
 ```
 
 基线 H103cg-6（`userdata_ios` probe + window 修复）；display 只把三个
-16×16 指示块移到左上角 `(8,8)/(32,8)/(56,8)`，其他不变。结果待上机；
-预期 root 通过，display provider 仍 `calls=0`。
+16×16 指示块移到左上角 `(8,8)/(32,8)/(56,8)`，其他不变。
+
+上机：**root 通过，`calls=0`，左上角三个块没有出现**。当前
+`NativeUfsProbe` heartbeat 没有调用 `native_legacy_test_pattern()`，
+clean rebuild 丢失了 H103cg 的周期重绘调用，`drawTestPattern()` 从未
+执行；坐标本身已编译进 archive。下一步 H103db：恢复 heartbeat 调用，
+验证左上角可见；display provider 仍 `calls=0`。
 
 ### 关键产物
 
