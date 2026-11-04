@@ -3301,3 +3301,35 @@ boot:    614c83a5d912ca4c5ab815190e95122a30a2f972518d89fcee1fc73763ea1f59
   `sheng-log=1` 和 slot；
 - 仍不出现：H103bd display archive 的 `NATIVE_LEGACY_STATE/CLIENTS` 版本
   还有别的行为，必须找回那份 archive。
+
+## 78. H103ec：UFS 重绘 + `sheng-log=1` + 2 秒 slot（2026-11-05）
+
+`boot-H103eb-bdargs.img` 上机后右上 2×2 出现，确认 H103bd 的面板可见性
+来自 **UFS 完成路径每 64 条命令重绘**，不是 10 秒心跳单独维持。
+
+H103ec 不重编内核，只把 H103bd payload 参数加一项 `sheng-log=1`：
+
+```text
+kernel: 91959fea... (H103eb, UFS 完成路径先 pattern 再 PROGRESS)
+payload: H103bd 原始参数 + sheng-log=1
+slot: 独立 h103SlotThread，每 2 秒写 userdata_ios
+display: 5f29dde
+```
+
+候选：
+
+```text
+kernel:  91959feaa38bf249f91cfe6b534968b00498817cc5d704bffe377169d00ba691
+payload: 6160640a420c170ab779af16af94e41bea58fe531e2d8f67b763c021b0330424
+boot:    a03f380ded8ff9a3519f217abf0e4f966ca782bf027665e86ce04ae22a20ae1a
+```
+
+上机验证：
+
+- 右上 2×2 仍在；
+- `NATIVE_UFS_ALIVE` 每 10 秒一条；
+- TWRP 读 `userdata_ios` 最后 32 MiB 的最新 slot，`slots_written`
+  应持续增长。
+
+若 `sheng-log=1` 再次让 2×2 消失，说明问题在日志窗口/早期窗口读，而不是
+slot 线程本身；下一步只在 `sheng-log` 打开时延迟窗口初始化。

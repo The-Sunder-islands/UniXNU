@@ -2533,6 +2533,19 @@ H103eb payload: 32963f1f9e9f4e90af00fa1cbb3cef829cd143fbf0e7c986902253f53959cfc1
 H103eb boot:    614c83a5d912ca4c5ab815190e95122a30a2f972518d89fcee1fc73763ea1f59
 ```
 
+H103eb-bdargs 上机确认右上 2×2 出现。H103ec 保持同一个 H103eb 内核，
+只把 H103bd payload 参数加一项 `sheng-log=1`，让独立的 2 秒 slot 线程
+真正写入 `userdata_ios`：
+
+```text
+H103ec kernel:  91959feaa38bf249f91cfe6b534968b00498817cc5d704bffe377169d00ba691
+H103ec payload: 6160640a420c170ab779af16af94e41bea58fe531e2d8f67b763c021b0330424
+H103ec boot:    a03f380ded8ff9a3519f217abf0e4f966ca782bf027665e86ce04ae22a20ae1a
+```
+
+上机判读：2×2 仍在且 TWRP 能读到持续更新的 `SHLOG001` 最新 slot，就说明
+H103bd 面板 + 2 秒持久日志可以共存。
+
 ### 关键产物
 
 ```text
