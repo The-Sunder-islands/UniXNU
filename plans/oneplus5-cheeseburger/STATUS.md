@@ -2237,6 +2237,21 @@ payload: 310053dbc060c32d5c20ac13ce9edbe24a616ab888e71d0037b19f4aaeb02335
 反汇编已确认 `IOLog -> native_legacy_test_pattern` 直接调用，和 H103cg
 原 kernel 一致。结果待上机。
 
+### H103de 候选（2026-11-04）
+
+```text
+boot:    c21879d16a8351ebfcd0dd0f11dcace35241af9c88a2c0d32007fa914b80be0c
+kernel:  1476ba31c9c0ecb6ceb9eb5145e3291a577821328b9a50f5d040745c967b3846
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: e777c4e1fc6f0aaf5d0d353ac309683781398ccc3d7ccc73e8a1b4f01eafd30c
+```
+
+`NativeUfsProbe` 增加 `sheng-log=1` 持久化快照：写 `userdata_ios` 末尾
+32 MiB 的 `SHLOG001` v3 头 + 1 MiB kernel msgbuf；probe start 后等待 20 秒
+（root 完成）写一次；WRITE(10)+SYNCHRONIZE CACHE；不碰 Android
+`userdata`/display archive。新增 `scripts/h103-log-pull.py` 从 TWRP 只读
+拉取并解析。结果待上机。
+
 ### 关键产物
 
 ```text

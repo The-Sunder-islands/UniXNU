@@ -2385,3 +2385,39 @@ fffffff0079b1644  bl _native_legacy_test_pattern
 与 H103cg 原 kernel 的 `IOLog -> native_legacy_test_pattern` 直接调用一致。
 display archive 仍是 H103da 的左上角三个块；root 修复不变。结果待上机；
 预期右上 2×2 和左上三个块可见；`calls=0` 不变。
+
+## 56. H103de：sheng-log 持久化日志快照（2026-11-04）
+
+候选 `boot-H103de.img`：
+
+```text
+boot:    c21879d16a8351ebfcd0dd0f11dcace35241af9c88a2c0d32007fa914b80be0c
+kernel:  1476ba31c9c0ecb6ceb9eb5145e3291a577821328b9a50f5d040745c967b3846
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: e777c4e1fc6f0aaf5d0d353ac309683781398ccc3d7ccc73e8a1b4f01eafd30c
+```
+
+移植内容：
+
+- `NativeUfsProbe` 增加只写 `userdata_ios` 末尾 32 MiB 的日志窗口：
+  ```text
+  logFirst = rootLast + 1 - 8192
+  logBlocks = 8192
+  ```
+- 窗口内写 `SHLOG001` v3 头 + 1 MiB kernel msgbuf（blocks 1..256）；
+- 用 probe 自己的 UFS queue 发送 WRITE(10) + SYNCHRONIZE CACHE，只在 `sheng-log=1` 时启用；
+- 日志线程在 probe start 后等待 20 秒（root 完成）再写一次快照；
+- 不碰 Android `userdata`，不碰 display archive/root 修复；
+- 新增 `scripts/h103-log-pull.py`：TWRP 里只读 `userdata_ios` 最后 32 MiB，解析 `SHLOG001` 并输出报告。
+
+上机步骤：
+
+1. 启动 H103de，等待约 30 秒；
+2. 重启到 TWRP（仍然只 `fastboot boot`，不安装）；
+3. 在 TWRP 的 adb 环境运行：
+   ```sh
+   python scripts/h103-log-pull.py --adb adb
+   ```
+4. 把生成的 `h103-log-*.txt` 发回；重点查 `NATIVE_LEGACY`/`NATIVE_UFS_ALIVE`。
+
+结果待上机；若窗口是空的，说明 WRITE10/窗口校验失败，脚本会报 no SHLOG001。

@@ -101,6 +101,61 @@ heartbeatThread (void *, wait_result_t)
 #define UFS_FW_DATA_MAX 0x700U
 #define UFS_DATA_MAX 0x20000U
 
+// H103 persistent log snapshot: SHLOG001 v3 header + 1 MiB kernel msgbuf in the
+// last 32 MiB of userdata_ios. Written once after root; the boot log ring holds
+// the early NATIVE_LEGACY lines. TWRP reads the window back read-only.
+#define H103_LOG_BLOCKS 8192U
+#define H103_LOG_MSG_BLOCKS 256U
+
+struct H103LogHeader {
+  char magic[8];
+  uint32_t version, header_bytes;
+  uint64_t boot_id;
+  uint64_t first_lba;
+  uint32_t window_blocks, msg_first, msg_blocks, msg_bytes;
+  uint32_t slot_first, slot_blocks, slot_count, slots_written;
+  uint32_t uptime_s, rounds, write_errors, gpt_open, gpt_last, state;
+  char tag[32];
+  uint32_t export_first, export_blocks, export_bytes, export_generation;
+  uint32_t export_below;
+};
+
+struct H103MsgBuf {
+  int msg_magic, msg_size, msg_bufx, msg_bufr;
+  char *msg_bufc;
+};
+extern "C" struct H103MsgBuf *msgbufp;
+
+static uint64_t
+h103LogTicks (void)
+{
+  uint64_t value = 0;
+  __asm__ volatile ("isb\n\tmrs %0, cntpct_el0" : "=r" (value));
+  return value;
+}
+
+static uint32_t
+h103CopyMsgbuf (uint8_t *out)
+{
+  memset (out, 0, H103_LOG_MSG_BLOCKS * 4096U);
+  struct H103MsgBuf *m = msgbufp;
+  if (!m || !m->msg_bufc || m->msg_size <= 0) {
+    return 0;
+  }
+  int size = m->msg_size, x = m->msg_bufx;
+  if (x < 0 || x >= size) {
+    x = 0;
+  }
+  uint32_t n = 0;
+  for (int i = 0; i < size && n < H103_LOG_MSG_BLOCKS * 4096U; ++i) {
+    char c = m->msg_bufc[(x + i) % size];
+    if (c) {
+      out[n++] = static_cast<uint8_t> (c);
+    }
+  }
+  return n;
+}
+
 #define UFS_REG_IS 0x20U
 #define UFS_REG_IE 0x24U
 #define UFS_REG_HCS 0x30U
@@ -228,6 +283,12 @@ class NativeUfsProbe : public IOService {
   OSSharedPtr<IOMemoryMap> fUcdMap;
   IOLock *fLock = nullptr;
   bool fReady = false;
+  uint64_t fLogFirst = 0;
+  uint32_t fLogBlocks = 0;
+  uint64_t fLogImageBytes = 0;
+  static void logThread (void *, wait_result_t);
+  bool logWrite (uint64_t rel, uint32_t blocks, const void *src);
+  bool logSync (void);
 
 public:
   bool start (IOService *provider) override;
@@ -441,6 +502,8 @@ readCommandAllowed (unsigned opcode, unsigned direction, unsigned bytes)
     case 0x25: return direction == 2 && bytes == 8; // READ CAPACITY(10)
     case 0x9e: return direction == 2 && bytes == 32; // READ CAPACITY(16)
     case 0x28: return direction == 2 && bytes != 0; // READ(10)
+    case 0x2a: return direction == 1 && bytes != 0; // WRITE(10), persistent log
+    case 0x35: return direction == 0 && bytes == 0; // SYNCHRONIZE CACHE, log
     default: return false;
   }
 }
@@ -810,6 +873,65 @@ ufsCommand (UfsQueue *q, uint8_t lun, const uint8_t *cdb, unsigned bytes, void *
 }
 
 static bool
+ufsWriteCommand (UfsQueue *q, uint8_t lun, const uint8_t *cdb, unsigned bytes,
+                 const void *src)
+{
+  if (!q || q->poisoned || !src || !bytes || bytes > q->dataCapacity ||
+      (bytes & 3) || read32 (q->hc, UFS_REG_UTRLDBR)) {
+    return false;
+  }
+  if (src != q->data) {
+    memcpy (q->data, src, bytes);
+  }
+  zero32 (q->ucd, UFS_FW_UCD_SIZE);
+  uint8_t *req = q->ucd;
+  req[0] = 1;
+  req[1] = 0x20;
+  req[2] = lun;
+  req[3] = 1;
+  putBe32 (req + 12, bytes);
+  memcpy (req + 16, cdb, 16);
+  cacheClean (q->data, bytes);
+  if (!ufsSubmit (q, 1, bytes)) {
+    return false;
+  }
+  const uint8_t *response = req + UFS_RSP_OFFSET;
+  if (response[0] != 0x21 || response[2] != lun || response[3] != 1 ||
+      response[4] || response[6] || response[7] || response[10] ||
+      response[11] || getBe32 (response + 12)) {
+    IOLog ("NATIVE_UFS_LOG: bad write response type=%x lun=%x tag=%x flags=%x r6=%x status=%x residual=%x\n",
+           response[0], response[2], response[3], response[4], response[6],
+           response[7], getBe32 (response + 12));
+    return false;
+  }
+  return true;
+}
+
+static bool
+ufsSync (UfsQueue *q)
+{
+  if (!q || q->poisoned || read32 (q->hc, UFS_REG_UTRLDBR)) {
+    return false;
+  }
+  zero32 (q->ucd, UFS_FW_UCD_SIZE);
+  uint8_t *req = q->ucd;
+  req[0] = 1;
+  req[1] = 0;
+  req[2] = 0;
+  req[3] = 1;
+  req[16] = 0x35;
+  if (!ufsSubmit (q, 0, 0)) {
+    return false;
+  }
+  const uint8_t *response = req + UFS_RSP_OFFSET;
+  if (response[0] != 0x21 || response[3] != 1 || response[4] ||
+      response[6] || response[7] || response[10] || response[11]) {
+    return false;
+  }
+  return true;
+}
+
+static bool
 ufsNop (UfsQueue *q)
 {
   IOLog ("NATIVE_UFS_NOP: enter\n");
@@ -935,6 +1057,113 @@ bool
 NativeUfsProbe::readWindow4k (uint64_t lba, void *out)
 {
   return readWindowBulk (lba, 1, out);
+}
+
+bool
+NativeUfsProbe::logWrite (uint64_t rel, uint32_t blocks, const void *src)
+{
+  if (!fReady || !fLock || !src || !blocks || rel >= fLogBlocks ||
+      blocks > fLogBlocks - rel || blocks > UFS_DATA_MAX / 4096) {
+    return false;
+  }
+  IOLockLock (fLock);
+  uint8_t cdb[16] = { 0x2a };
+  putBe32 (cdb + 2, static_cast<uint32_t> (fLogFirst + rel));
+  cdb[7] = static_cast<uint8_t> (blocks >> 8);
+  cdb[8] = static_cast<uint8_t> (blocks);
+  bool ok = ufsWriteCommand (&fQueue, 0, cdb, blocks * 4096U, src);
+  IOLockUnlock (fLock);
+  return ok;
+}
+
+bool
+NativeUfsProbe::logSync (void)
+{
+  if (!fReady || !fLock) {
+    return false;
+  }
+  IOLockLock (fLock);
+  bool ok = ufsSync (&fQueue);
+  IOLockUnlock (fLock);
+  return ok;
+}
+
+void
+NativeUfsProbe::logThread (void *raw, wait_result_t)
+{
+  NativeUfsProbe *self = static_cast<NativeUfsProbe *> (raw);
+  if (!self) {
+    return;
+  }
+  thread_set_thread_name (current_thread (), "h103_log");
+  // Let root mount and the early display/root messages enter the kernel ring.
+  IOSleep (20000);
+  if (!self->fLogFirst || !self->fLogBlocks || !self->fReady || !self->fLock) {
+    return;
+  }
+  uint8_t first[4096] = {};
+  if (!self->readWindow4k (self->fLogFirst, first)) {
+    IOLog ("NATIVE_UFS_LOG: window read failed lba=%llx\n",
+           (unsigned long long) self->fLogFirst);
+    return;
+  }
+  bool empty = true;
+  for (unsigned i = 0; i < sizeof (first); ++i) {
+    if (first[i]) {
+      empty = false;
+      break;
+    }
+  }
+  if (!empty && memcmp (first, "SHLOG001", 8) != 0) {
+    IOLog ("NATIVE_UFS_LOG: window not empty and not SHLOG001\n");
+    return;
+  }
+
+  uint8_t *body = static_cast<uint8_t *> (
+    IOMallocAligned (H103_LOG_MSG_BLOCKS * 4096U, 4096));
+  if (!body) {
+    return;
+  }
+  uint32_t msgBytes = h103CopyMsgbuf (body);
+  bool ok = true;
+  for (uint32_t offset = 0; ok && offset < H103_LOG_MSG_BLOCKS; offset += 32) {
+    ok = self->logWrite (1 + offset, 32, body + offset * 4096U);
+  }
+
+  uint8_t *head = static_cast<uint8_t *> (IOMallocAligned (4096, 4096));
+  if (!head) {
+    IOFreeAligned (body, H103_LOG_MSG_BLOCKS * 4096U);
+    return;
+  }
+  memset (head, 0, 4096);
+  H103LogHeader h;
+  memset (&h, 0, sizeof h);
+  memcpy (h.magic, "SHLOG001", 8);
+  h.version = 3;
+  h.header_bytes = sizeof h;
+  h.boot_id = h103LogTicks ();
+  h.first_lba = self->fLogFirst;
+  h.window_blocks = self->fLogBlocks;
+  h.msg_first = 1;
+  h.msg_blocks = H103_LOG_MSG_BLOCKS;
+  h.msg_bytes = msgBytes;
+  h.slot_first = 257;
+  h.slot_blocks = 32;
+  h.slot_count = (self->fLogBlocks > 257) ? (self->fLogBlocks - 257) / 32 : 0;
+  h.slots_written = 0;
+  h.rounds = 1;
+  h.state = 2;
+  strlcpy (h.tag, "cheeseburger-H103", sizeof h.tag);
+  memcpy (head, &h, sizeof h);
+  ok = ok && self->logWrite (0, 1, head);
+  if (ok) {
+    ok = self->logSync ();
+  }
+  IOLog ("NATIVE_UFS_LOG: snapshot ok=%u msg=%u first=%llx blocks=%u\n",
+         ok ? 1 : 0, msgBytes, (unsigned long long) self->fLogFirst,
+         self->fLogBlocks);
+  IOFreeAligned (head, 4096);
+  IOFreeAligned (body, H103_LOG_MSG_BLOCKS * 4096U);
 }
 
 bool
@@ -1579,6 +1808,7 @@ NativeUfsProbe::start (IOService *provider)
   char rootName[4][33] = {};
   uint64_t rootOffset[4] = {};
   uint64_t rootSize[4] = {};
+  uint64_t rootImageBytes = 0;
   unsigned rootWindows = 0;
   {
     uint8_t header[4096] = {};
@@ -1594,6 +1824,7 @@ NativeUfsProbe::start (IOService *provider)
       IOLog ("NATIVE_UFS_ROOT: userdata_ios magic=%08x/%08x ver=%u windows=%u image=%llx\n",
              magic, magic2, version, windows, imageBytes);
       if (magic == 0x474e4853U && magic2 == 0x544f4f52U && windows <= 4) {
+        rootImageBytes = imageBytes;
         for (uint32_t index = 0; index < windows; index++) {
           const uint8_t *entry = header + 24 + index * 128;
           char name[33];
@@ -1671,6 +1902,29 @@ NativeUfsProbe::start (IOService *provider)
   thread_t heartbeat = nullptr;
   if (kernel_thread_start (heartbeatThread, nullptr, &heartbeat) == KERN_SUCCESS) {
     thread_deallocate (heartbeat);
+  }
+
+  // Persistent log window: the last 32 MiB of userdata_ios. A single snapshot
+  // after root captures the early NATIVE_LEGACY lines still in the kernel ring.
+  fLogBlocks = H103_LOG_BLOCKS;
+  fLogFirst = rootLast >= H103_LOG_BLOCKS ? rootLast + 1 - H103_LOG_BLOCKS : 0;
+  fLogImageBytes = rootImageBytes;
+  uint32_t logMode = 0;
+  PE_parse_boot_argn ("sheng-log", &logMode, sizeof logMode);
+  if (logMode == 1 && fLogFirst && rootFirst &&
+      fLogFirst > rootFirst + (fLogImageBytes + 4095) / 4096 + 256) {
+    IOLog ("NATIVE_UFS_LOG: window lba=%llx blocks=%u image=%llx\n",
+           (unsigned long long) fLogFirst, fLogBlocks,
+           (unsigned long long) fLogImageBytes);
+    thread_t logThreadId = nullptr;
+    if (kernel_thread_start (logThread, this, &logThreadId) == KERN_SUCCESS) {
+      thread_deallocate (logThreadId);
+    }
+  } else {
+    IOLog ("NATIVE_UFS_LOG: disabled mode=%u first=%llx root=%llx..%llx image=%llx\n",
+           logMode, (unsigned long long) fLogFirst,
+           (unsigned long long) rootFirst, (unsigned long long) rootLast,
+           (unsigned long long) rootImageBytes);
   }
   return published;
 }
