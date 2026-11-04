@@ -2546,6 +2546,25 @@ H103ec boot:    a03f380ded8ff9a3519f217abf0e4f966ca782bf027665e86ce04ae22a20ae1a
 上机判读：2×2 仍在且 TWRP 能读到持续更新的 `SHLOG001` 最新 slot，就说明
 H103bd 面板 + 2 秒持久日志可以共存。
 
+H103ed 把右下角三个 16×16 状态块移到左上角（CPU 频率 x=0、A540 x=20、
+心跳 x=40），并在 payload 里补上 `native-cpufreq-early=2`。当前内核
+（H103eb）其实已经链入了 `NATIVE_CPUFREQ_EARLY` 代码，只是 H103bd 参数
+没有这个 boot arg；H103cz 当时传了，所以频率块是绿色。
+
+```text
+H103ed XNU:     ed750931b794ebe206e1fd5aada71d5459fba0268b77e597b33c010de5e4fdb9
+H103ed kernel:  fec7abd797ce920211cae12f9135ae5e05b3ac9cca70e91392123cdb3f4fbc40
+H103ed payload: 0d0a2176c87ee724b9a3c17c546e9d0708fddfbd4c3b17331b927235c5622b4d
+H103ed boot:    59908da2f8804aa2723b1d10ad57254001356129e38effca9bcdeb0850c4c059
+display:        adf38de
+```
+
+注意：`NATIVE_CPUFREQ_EARLY` 目前只存在于 Mac 构建缓存里的
+`build/sheng-platform-power/ShengPlatformPowerGlue.o` /
+`libShengPlatformPower.a`（11 月 4 日 15:57），当前设备仓库的
+`ShengPlatformPowerGlue.cpp` 已被覆盖成短版本。重建该 archive 前必须先把
+早期 CPUFREQ 源码恢复，否则会丢失 `native-cpufreq-early=2` 的实际编程。
+
 ### 关键产物
 
 ```text

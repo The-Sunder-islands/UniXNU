@@ -3333,3 +3333,49 @@ boot:    a03f380ded8ff9a3519f217abf0e4f966ca782bf027665e86ce04ae22a20ae1a
 
 若 `sheng-log=1` 再次让 2×2 消失，说明问题在日志窗口/早期窗口读，而不是
 slot 线程本身；下一步只在 `sheng-log` 打开时延迟窗口初始化。
+
+## 79. H103ed：三个状态块移到左上，恢复 CPUFREQ early（2026-11-05）
+
+H103ec 上机后 2×2 和 slot 都正常。用户要求：
+
+1. 把右下角三个 16×16 状态块移到屏幕左上角；
+2. CPU 频率块之前是红色，H103cz 时是绿色，恢复正常的 CPU 频率。
+
+代码改动：
+
+```text
+NativeLegacyDisplay::drawTestPattern()
+  CPU 频率块:  (0,0,16,16)
+  A540 块:     (20,0,16,16)
+  心跳块:      (40,0,16,16)
+```
+
+频率块的红色不是测量错误：H103cz 的 payload 带 `native-cpufreq-early=2`，
+会触发内核里的 `NATIVE_CPUFREQ_EARLY` 代码去编程 OSM；H103bd 参数没有
+这个 arg，OSM 保持 bootloader 的低频，`sheng_cpufreq_probe()` 于是读到
+`<1 GHz`，状态为红。H103ed 在 H103ec 的 payload 上只补：
+
+```text
+sheng-log=1 native-cpufreq-early=2
+```
+
+内核仍包含 `NATIVE_CPUFREQ_EARLY`（`strings` 可见 7 处），无需改源码。
+但注意该代码目前来自 Mac 构建缓存 `build/sheng-platform-power/` 的
+11 月 4 日 archive；设备仓库当前 `ShengPlatformPowerGlue.cpp` 是短版本，
+重建 archive 前必须先恢复早期 CPUFREQ 源码。
+
+候选：
+
+```text
+XNU:     ed750931b794ebe206e1fd5aada71d5459fba0268b77e597b33c010de5e4fdb9
+kernel:  fec7abd797ce920211cae12f9135ae5e05b3ac9cca70e91392123cdb3f4fbc40
+payload: 0d0a2176c87ee724b9a3c17c546e9d0708fddfbd4c3b17331b927235c5622b4d
+boot:    59908da2f8804aa2723b1d10ad57254001356129e38effca9bcdeb0850c4c059
+display: adf38de
+```
+
+上机判读：
+
+- 左上三个块出现，最左边 CPU 块应为绿色；
+- 右上 2×2 仍在；
+- TWRP slot 继续更新。
