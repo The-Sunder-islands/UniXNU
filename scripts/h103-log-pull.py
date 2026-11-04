@@ -187,6 +187,27 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     header = decode_header(window)
+    slot_count = header["slot_count"]
+    slots_written = header["slots_written"]
+    if slots_written and slot_count:
+        slot = (slots_written - 1) % slot_count
+        slot_blocks = header["slot_blocks"]
+        slot_offset = (header["slot_first"] + slot * slot_blocks) * BLOCK
+        msg_bytes = min(header["msg_bytes"], slot_blocks * BLOCK)
+        body = window[slot_offset:slot_offset + msg_bytes]
+        text = body.decode("utf-8", "replace").rstrip("\0 \n")
+        report = args.output or pathlib.Path(
+            "h103-log-" + time.strftime("%Y%m%d-%H%M%S") + ".txt")
+        write_report(header, text, report)
+        print(f"partition bytes: {size if size is not None else 'from file'}")
+        print(f"window: first_lba={header['first_lba']} blocks={header['window_blocks']} "
+              f"slot={slot} slots_written={slots_written}/{slot_count} "
+              f"msg_bytes={msg_bytes} state={header['state']} tag={header['tag']}")
+        print(f"report: {report}")
+        print("-" * 72)
+        print("\n".join(text.splitlines()[-80:]))
+        return 0
+
     msg_bytes = min(header["msg_bytes"], header["msg_blocks"] * BLOCK)
     body = window[header["msg_first"] * BLOCK:
                    header["msg_first"] * BLOCK + msg_bytes]

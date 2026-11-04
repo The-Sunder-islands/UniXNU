@@ -2442,6 +2442,18 @@ H103du kernel:     2e660304ece04bfff8638583841be9629ce4517fd950f95b69557aa17db3f
 H103du payload:    c1e7d4a2a77cea2e088da84f8951b739fc40d8435314076c33578208e80d3c59
 ```
 
+H103du 仍在 late-window 的 1 MiB body/header 处停住。H103dv 改为
+heartbeat 每 2 秒写 128 KiB slot，关闭窗口大快照；puller 读最新 slot。
+显示侧增加 `NATIVE_LEGACY_PATTERN` 打点。
+
+```text
+H103dv boot:       4ed5ce91831621d2b4868f3d88b290d3421c50e61dcb6647b69162a8c1589676
+H103dv kernel pre: 441f56c0d14157736532afeace2b2a892ab79acac229f14fdc58d62060fb0b69
+H103dv kernel:     593be1065ebfc7f3e0633c66ed0e826178c4b66a2b8ee8062eec71e568962c32
+H103dv payload:    ad3b2e80ddd06480261db84ec1698a3c39d39ad64eb1af52fd85044bf76db364
+display:           03fa715 (GopFramebuffer display-op5)
+```
+
 ### 关键产物
 
 ```text

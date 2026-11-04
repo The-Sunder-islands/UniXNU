@@ -3023,3 +3023,55 @@ payload:    c1e7d4a2a77cea2e088da84f8951b739fc40d8435314076c33578208e80d3c59
 - TWRP 拉到 `SHLOG001` 且时间戳到 1 GiB 之后：late 窗口成功；
 - 如果文件仍是早期快照，先确认 puller 是否用了新脚本的 flush/direct；
 - 仍只写 `userdata_ios`，不碰 Android `userdata`。
+
+## 71. H103dv：2 秒 slot 实时日志 + 2×2 绘制打点（2026-11-05）
+
+H103du 仍然在 `write test tag=late-window` 后停住，因为窗口快照还要写
+1 MiB body/header。H103dv 改成真正的实时写入：
+
+```text
+heartbeat 改成 2 秒
+每 2 秒：
+  h103SlotWrite()
+  拷贝最新 128 KiB msgbuf 到 slot
+  写 slot_first + slot * slot_blocks
+  更新 header slots_written/rounds/state=3
+  不写 1 MiB body
+  不调用 logSync，WRITE10 继续 FUA
+```
+
+窗口读的 64 MiB/1 GiB 大快照全部关闭；heartbeat every 2s 同时重绘 2×2。
+
+显示侧增加最小诊断日志：
+
+```text
+NATIVE_LEGACY_PATTERN: enter base=... w=... h=... stride=...
+NATIVE_LEGACY_PATTERN: panel=... x0=... y0=... stage=... client=... calls=...
+NATIVE_LEGACY_PATTERN: exit blink=...
+```
+
+如果调用执行但屏幕还是空白，就能区分是坐标/framebuffer/stride 问题，还是
+后续 backboardd 覆盖。
+
+puller 现在优先读最新 slot：
+
+```text
+slot = (slots_written - 1) % slot_count
+读取 slot_first + slot * slot_blocks
+回退到 msg_first body
+```
+
+候选：
+
+```text
+boot:       4ed5ce91831621d2b4868f3d88b290d3421c50e61dcb6647b69162a8c1589676
+kernel pre: 441f56c0d14157736532afeace2b2a892ab79acac229f14fdc58d62060fb0b69
+kernel:     593be1065ebfc7f3e0633c66ed0e826178c4b66a2b8ee8062eec71e568962c32
+ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload:    ad3b2e80ddd06480261db84ec1698a3c39d39ad64eb1af52fd85044bf76db364
+display:    03fa715 (GopFramebuffer display-op5)
+```
+
+上机：每 2 秒应能看到 `NATIVE_LEGACY_PATTERN` 三条日志，屏幕右上 2×2 和
+左上三块应重绘；TWRP puller 应读到 `slot=... slots_written=...` 的最新
+128 KiB 日志。仍只写 `userdata_ios`。

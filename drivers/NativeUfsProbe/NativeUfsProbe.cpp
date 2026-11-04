@@ -49,15 +49,12 @@ static volatile uint32_t gH103LogMode;
 static volatile uint64_t gH103LogFirst;
 static volatile uint64_t gH103RootFirst;
 static volatile uint64_t gH103RootLast;
-static volatile int gH103LogLatePaused;
 static uint64_t gH103HeartbeatStart;
 static volatile int gH103SkipPattern;
-static volatile int gH103WindowSnapshotDone;
-static volatile int gH103LateWindowSnapshotDone;
+static uint32_t gH103SlotCursor;
 class NativeUfsProbe;
 static NativeUfsProbe *gH103Probe;
-static volatile int gH103LateSnapshotDone;
-static bool h103LateSnapshotThunk (void);
+static void h103SlotWriteThunk (void);
 
 // H103cg's probe periodically redrew the GOP test pattern from its heartbeat.
 // The display archive is force-loaded into the kernel and exports this symbol;
@@ -71,24 +68,9 @@ heartbeatThread (void *, wait_result_t)
 {
   gH103HeartbeatStart = mach_absolute_time ();
   IOLog ("NATIVE_UFS_HB: enter\n");
-  unsigned hbTicks = 0;
   for (;;) {
-    IOSleep (10000);
-    hbTicks++;
-    if (!gH103LogLatePaused && hbTicks >= 5) {
-      gH103LogLatePaused = 1;
-      IOLog ("NATIVE_UFS_LOG: late mode=%u first=%llx root=%llx..%llx\n",
-             gH103LogMode, (unsigned long long) gH103LogFirst,
-             (unsigned long long) gH103RootFirst,
-             (unsigned long long) gH103RootLast);
-      IOSleep (30000);
-    }
-    if (!gH103LateSnapshotDone && hbTicks >= 12) {
-      gH103LateSnapshotDone = 1;
-      IOLog ("NATIVE_UFS_LOG: late snapshot tick=%u\n", hbTicks);
-      bool lateOk = h103LateSnapshotThunk ();
-      IOLog ("NATIVE_UFS_LOG: late snapshot result=%u\n", lateOk ? 1 : 0);
-    }
+    IOSleep (2000);
+    h103SlotWriteThunk ();
     uint64_t winFlight = gWindowInFlight;
     uint64_t ufsFlight = gUfsInFlight;
     IOLog ("NATIVE_UFS_ALIVE: winFlight=%llu ufsFlight=%llu cmds=%llu "
@@ -185,6 +167,27 @@ h103CopyMsgbuf (uint8_t *out)
     if (c) {
       out[n++] = static_cast<uint8_t> (c);
     }
+  }
+  return n;
+}
+
+static uint32_t
+h103CopyMsgbufTail (uint8_t *out, uint32_t cap)
+{
+  memset (out, 0, cap);
+  struct H103MsgBuf *m = msgbufp;
+  if (!m || !m->msg_bufc || m->msg_size <= 0) {
+    return 0;
+  }
+  int size = m->msg_size, x = m->msg_bufx;
+  if (x < 0 || x >= size) {
+    x = 0;
+  }
+  uint32_t n = (cap < static_cast<uint32_t> (size)) ? cap : static_cast<uint32_t> (size);
+  uint32_t start = (static_cast<uint32_t> (x) + static_cast<uint32_t> (size) - n) %
+                   static_cast<uint32_t> (size);
+  for (uint32_t i = 0; i < n; ++i) {
+    out[i] = static_cast<uint8_t> (m->msg_bufc[(start + i) % static_cast<uint32_t> (size)]);
   }
   return n;
 }
@@ -329,6 +332,7 @@ class NativeUfsProbe : public IOService {
 public:
   bool start (IOService *provider) override;
   bool h103Snapshot (const char *tag, bool pause, bool verify);
+  void h103SlotWrite (void);
   void h103SingleWrite (void);
   void h103WindowRead (void);
   bool readBlocks (uint8_t unit, uint64_t block, uint64_t count, uint32_t blockSize,
@@ -340,13 +344,12 @@ public:
 OSDefineMetaClassAndStructors (NativeUfsProbe, IOService)
 OSDefineMetaClassAndStructors (NativeUfsLun, IOBlockStorageDevice)
 
-static bool
-h103LateSnapshotThunk (void)
+static void
+h103SlotWriteThunk (void)
 {
-  if (!gH103Probe) {
-    return false;
+  if (gH103Probe) {
+    gH103Probe->h103SlotWrite ();
   }
-  return gH103Probe->h103Snapshot ("late", true, false);
 }
 OSDefineMetaClassAndStructors (NativeUfsWindow, IOBlockStorageDevice)
 
@@ -1304,26 +1307,59 @@ NativeUfsProbe::h103Snapshot (const char *tag, bool pause, bool verify)
 }
 
 void
-NativeUfsProbe::h103WindowRead (void)
+NativeUfsProbe::h103SlotWrite (void)
 {
-  if (!fLogFirst || !fLogBlocks) {
+  if (!fLogFirst || !fLogBlocks || !fReady || !fLock || !fLogDma) {
     return;
   }
-  // The root/SystemOS window reads are a known-running path. Take an early
-  // snapshot at 64 MiB and a late one at 1 GiB, independent of the heartbeat.
-  if (!gH103WindowSnapshotDone && gWindowBytes >= 64ULL * 1024 * 1024) {
-    gH103WindowSnapshotDone = 1;
-    IOLog ("NATIVE_UFS_LOG: window trigger bytes=%llu\n",
-           (unsigned long long) gWindowBytes);
-    h103Snapshot ("window", false, false);
+  const uint32_t slotCount = (fLogBlocks > 257) ? (fLogBlocks - 257) / 32 : 0;
+  if (!slotCount) {
+    return;
   }
-  if (!gH103LateWindowSnapshotDone &&
-      gWindowBytes >= 1024ULL * 1024 * 1024) {
-    gH103LateWindowSnapshotDone = 1;
-    IOLog ("NATIVE_UFS_LOG: late-window trigger bytes=%llu\n",
-           (unsigned long long) gWindowBytes);
-    h103Snapshot ("late-window", false, false);
+  uint8_t *body = static_cast<uint8_t *> (IOMallocAligned (32U * 4096U, 4096));
+  if (!body) {
+    return;
   }
+  uint32_t n = h103CopyMsgbufTail (body, 32U * 4096U);
+  uint32_t slot = gH103SlotCursor % slotCount;
+  bool ok = logWrite (257U + slot * 32U, 32, body);
+  if (ok) {
+    H103LogHeader h;
+    memset (&h, 0, sizeof h);
+    memcpy (h.magic, "SHLOG001", 8);
+    h.version = 3;
+    h.header_bytes = sizeof h;
+    h.boot_id = h103LogTicks ();
+    h.first_lba = fLogFirst;
+    h.window_blocks = fLogBlocks;
+    h.msg_first = 1;
+    h.msg_blocks = H103_LOG_MSG_BLOCKS;
+    h.msg_bytes = n;
+    h.slot_first = 257;
+    h.slot_blocks = 32;
+    h.slot_count = slotCount;
+    h.slots_written = gH103SlotCursor + 1;
+    h.rounds = gH103SlotCursor + 1;
+    h.state = 3;
+    strlcpy (h.tag, "cheeseburger-H103", sizeof h.tag);
+    uint8_t *head = static_cast<uint8_t *> (IOMallocAligned (4096, 4096));
+    if (head) {
+      memset (head, 0, 4096);
+      memcpy (head, &h, sizeof h);
+      if (logWrite (0, 1, head)) {
+        gH103SlotCursor++;
+      }
+      IOFreeAligned (head, 4096);
+    }
+  }
+  IOFreeAligned (body, 32U * 4096U);
+}
+
+void
+NativeUfsProbe::h103WindowRead (void)
+{
+  // The real-time slot writer in the heartbeat owns the persistent log now.
+  // Do not write a 1 MiB body from the storage completion path.
 }
 
 static uint8_t gH103Test[4096] __attribute__((aligned(4096)));
