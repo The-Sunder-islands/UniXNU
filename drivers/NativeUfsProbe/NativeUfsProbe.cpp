@@ -1119,6 +1119,30 @@ NativeUfsProbe::logThread (void *raw, wait_result_t)
     return;
   }
 
+  // Single-block write/readback self-test before the body. If it remains in
+  // the window the TWRP puller can distinguish a broken WRITE(10) from an
+  // incomplete SHLOG001 header/body. On failure hold the screen long enough
+  // to photograph the NATIVE_UFS_LOG line.
+  uint8_t test[4096] = {};
+  memcpy (test, "H103TEST", 8);
+  snprintf (reinterpret_cast<char *> (test + 16), 128,
+            "lba=%llx wrote=0 read=0", (unsigned long long) self->fLogFirst);
+  bool testWrite = self->logWrite (0, 1, test);
+  uint8_t check[4096] = {};
+  bool testRead = testWrite && self->readWindow4k (self->fLogFirst, check) &&
+                  memcmp (check, "H103TEST", 8) == 0;
+  snprintf (reinterpret_cast<char *> (test + 16), 128,
+            "lba=%llx wrote=%u read=%u", (unsigned long long) self->fLogFirst,
+            testWrite ? 1 : 0, testRead ? 1 : 0);
+  self->logWrite (0, 1, test);
+  IOLog ("NATIVE_UFS_LOG: write test wrote=%u read=%u lba=%llx\n",
+         testWrite ? 1 : 0, testRead ? 1 : 0,
+         (unsigned long long) self->fLogFirst);
+  if (!testWrite || !testRead) {
+    IOSleep (30000);
+    return;
+  }
+
   uint8_t *body = static_cast<uint8_t *> (
     IOMallocAligned (H103_LOG_MSG_BLOCKS * 4096U, 4096));
   if (!body) {

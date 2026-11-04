@@ -2252,6 +2252,20 @@ payload: e777c4e1fc6f0aaf5d0d353ac309683781398ccc3d7ccc73e8a1b4f01eafd30c
 `userdata`/display archive。新增 `scripts/h103-log-pull.py` 从 TWRP 只读
 拉取并解析。结果待上机。
 
+### H103df 候选（2026-11-04）
+
+H103de 的 32 MiB 窗口全 0；H103df 在 body/header 前先写一个
+`H103TEST` 块并读回，失败时停屏 30 秒。puller 识别 `H103TEST`。
+
+```text
+boot:    2a998098c4c2c147d0d52ad71997e98d67eb3cbc75616a76c1ebd43daaafe4f3
+kernel:  87aff456682aaa40b8aaff49d6606268fd578c9310fdbab9bb3ecb8cae5a2eaa
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: faed19554139fd3457b566715963a5b752175b1041a38700ce83569557afb70b
+```
+
+结果待上机。
+
 ### 关键产物
 
 ```text

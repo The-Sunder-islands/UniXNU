@@ -2421,3 +2421,33 @@ payload: e777c4e1fc6f0aaf5d0d353ac309683781398ccc3d7ccc73e8a1b4f01eafd30c
 4. 把生成的 `h103-log-*.txt` 发回；重点查 `NATIVE_LEGACY`/`NATIVE_UFS_ALIVE`。
 
 结果待上机；若窗口是空的，说明 WRITE10/窗口校验失败，脚本会报 no SHLOG001。
+
+## 57. H103df：log 写自检（2026-11-04）
+
+H103de 拉回的 32 MiB `userdata_ios` 窗口是**全 0**，payload 确实带
+`sheng-log=1`，说明 body 一个块都没写。H103df 在写 body/header 前先做
+单块写+读回：
+
+```text
+write block 0 = "H103TEST" + lba/wrote/read
+read block 0 back
+IOLog("NATIVE_UFS_LOG: write test wrote=%u read=%u lba=%llx")
+失败时 IOSleep(30000) 停屏，便于拍照
+```
+
+`scripts/h103-log-pull.py` 现在也识别 `H103TEST`：
+
+- 看到 `H103TEST`：写路径/窗口 offset 正常，问题在 body/header；
+- 没有 `H103TEST`：线程没跑、窗口 offset 不对，或 WRITE10 失败。
+
+候选：
+
+```text
+boot:    2a998098c4c2c147d0d52ad71997e98d67eb3cbc75616a76c1ebd43daaafe4f3
+kernel:  87aff456682aaa40b8aaff49d6606268fd578c9310fdbab9bb3ecb8cae5a2eaa
+ADT:     d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload: faed19554139fd3457b566715963a5b752175b1041a38700ce83569557afb70b
+```
+
+上机：启动后等 60 秒，进 TWRP 拉窗口；若脚本打印
+`H103 write self-test block present`，把 `wrote/read` 发回。

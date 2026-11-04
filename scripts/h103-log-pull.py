@@ -103,6 +103,11 @@ def pull_window(adb_path: str, serial: str | None, part: str,
     return size
 
 
+def decode_test(data: bytes) -> str:
+    text = data[:256].split(b"\0", 1)[0].decode("ascii", "replace")
+    return text.replace("\r", " ").replace("\n", " ")
+
+
 def decode_header(data: bytes) -> dict:
     if len(data) < HDR.size:
         raise SystemExit("window is shorter than the header")
@@ -159,6 +164,16 @@ def main(argv: list[str] | None = None) -> int:
         window_path = args.keep_window or pathlib.Path("h103log.bin")
         size = pull_window(adb_path, args.serial, part, window_path)
         window = window_path.read_bytes()
+
+    if window[:8] == b"H103TEST":
+        text = decode_test(window)
+        report = args.output or pathlib.Path(
+            "h103-log-" + time.strftime("%Y%m%d-%H%M%S") + ".txt")
+        report.write_text("H103 write self-test\n" + text + "\n", encoding="utf-8")
+        print("H103 write self-test block present:")
+        print(text)
+        print(f"report: {report}")
+        return 0
 
     header = decode_header(window)
     msg_bytes = min(header["msg_bytes"], header["msg_blocks"] * BLOCK)
