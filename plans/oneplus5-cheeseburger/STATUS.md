@@ -2368,6 +2368,16 @@ H103dn kernel:     2a86871c25939305e32bcfb72dd2c75d25baf8914a57f262ddf29a2fed20b
 H103dn payload:    8700cc6deb106c3697fcab7bfb12e0074c51955be060c247ce0f66f27d5e4b6e
 ```
 
+H103dn 仍在 window trigger 后 panic，无 `write test`。H103do 只做单块
+WRITE(10)，不写 body/header，不读回，用于隔离写命令本身。
+
+```text
+H103do boot:       7c9c92d6fcbc0ee4ada709dbe991974dd632bb1496e0786de71ee5b3f3190235
+H103do kernel pre: d5a08ec5023c0e3b3a0b8cf51392400497137e40c1bf2dcaf1a049135c18ae3a
+H103do kernel:     7d4d9969d65d9d478a02f6b03be69fa3ff920b3089bb39149d477f37c3f7d097
+H103do payload:    8ee9f42772bfa247c9f6cbf2138d503533c7b6e994806061fe450d4f3fc5fd92
+```
+
 ### 关键产物
 
 ```text

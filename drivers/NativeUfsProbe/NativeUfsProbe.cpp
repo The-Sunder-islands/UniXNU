@@ -318,6 +318,7 @@ class NativeUfsProbe : public IOService {
 public:
   bool start (IOService *provider) override;
   bool h103Snapshot (const char *tag, bool pause, bool verify);
+  void h103SingleWrite (void);
   void h103WindowRead (void);
   bool readBlocks (uint8_t unit, uint64_t block, uint64_t count, uint32_t blockSize,
                    IOMemoryDescriptor *dst, uint64_t *done);
@@ -1287,7 +1288,32 @@ NativeUfsProbe::h103WindowRead (void)
   gH103WindowSnapshotDone = 1;
   IOLog ("NATIVE_UFS_LOG: window trigger bytes=%llu\n",
          (unsigned long long) gWindowBytes);
-  h103Snapshot ("window", true, false);
+  h103SingleWrite ();
+}
+
+static uint8_t gH103Test[4096] __attribute__((aligned(4096)));
+
+void
+NativeUfsProbe::h103SingleWrite (void)
+{
+  if (!fLogFirst || !fLogBlocks || !fReady || !fLock ||
+      !fLogData || !fLogDataPhys) {
+    IOLog ("NATIVE_UFS_LOG: single write skipped first=%llx ready=%u "
+           "lock=%u dma=%u\n", (unsigned long long) fLogFirst,
+           fReady ? 1 : 0, fLock ? 1 : 0,
+           (fLogData && fLogDataPhys) ? 1 : 0);
+    return;
+  }
+  memset (gH103Test, 0, sizeof gH103Test);
+  memcpy (gH103Test, "H103TEST", 8);
+  snprintf (reinterpret_cast<char *> (gH103Test + 16), 128,
+            "single lba=%llx", (unsigned long long) fLogFirst);
+  IOLog ("NATIVE_UFS_LOG: single write begin lba=%llx\n",
+         (unsigned long long) fLogFirst);
+  bool ok = logWrite (0, 1, gH103Test);
+  IOLog ("NATIVE_UFS_LOG: single write result=%u lba=%llx\n",
+         ok ? 1 : 0, (unsigned long long) fLogFirst);
+  IOSleep (30000);
 }
 
 bool

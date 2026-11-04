@@ -2717,3 +2717,38 @@ payload:    8700cc6deb106c3697fcab7bfb12e0074c51955be060c247ce0f66f27d5e4b6e
 若 H103dn 仍在 `window trigger` 后 panic，则问题不在 readData 的 CPU
 写，而在 `ufsWriteCommand`/`ufsSubmit` 的 WRITE(10) 本身；下一步只写一个
 块到窗口首块，不再写 1 MiB body/header。
+
+## 64. H103do：单块 WRITE(10) 隔离（2026-11-04）
+
+H103dn 仍在 `window trigger bytes=67695616` 后 panic，没有出现
+`write test`。独立 log DMA 没有解决问题，说明故障在单块 WRITE(10) 本身
+或它之后的 UFS 状态，而不是 1 MiB body/header。
+
+H103do 把窗口触发后的动作缩到最小：
+
+```text
+单块 gH103Test[4096]（4 KiB 对齐静态缓冲）
+IOLog("NATIVE_UFS_LOG: single write begin lba=...")
+logWrite(0, 1, gH103Test)   // 只写窗口首块
+IOLog("NATIVE_UFS_LOG: single write result=0/1 lba=...")
+IOSleep(30000)
+```
+
+不写第二块、不写末块、不写 body、不写 header、不读回。
+
+候选：
+
+```text
+boot:       7c9c92d6fcbc0ee4ada709dbe991974dd632bb1496e0786de71ee5b3f3190235
+kernel pre: d5a08ec5023c0e3b3a0b8cf51392400497137e40c1bf2dcaf1a049135c18ae3a
+kernel:     7d4d9969d65d9d478a02f6b03be69fa3ff920b3089bb39149d477f37c3f7d097
+ADT:        d98d9522451a66bd380a3e45e0f8d5b7df417b8d5a8fd2c4a847b6a21d695fef
+payload:    8ee9f42772bfa247c9f6cbf2138d503533c7b6e994806061fe450d4f3fc5fd92
+```
+
+判读：
+
+- 有 `single write begin` 后 panic：单块 WRITE(10) 本身故障；
+- 有 `single write result=1`：单块写成功，TWRP 应能看到 `H103TEST`；
+- `single write result=0`：WRITE10 返回失败，查响应/窗口；
+- 连 `single write begin` 都没有：64 MiB 触发或 `h103SingleWrite` 没走到。
