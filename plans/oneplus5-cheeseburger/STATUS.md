@@ -2722,8 +2722,11 @@ display archive。若 rc 仍非 0，先查 prelink 注册，不要动 A540。
 
 设备仓库已整理提交：`2400c54`（config）、`19d46d6`（ufs）、
 `6fef5db`（power）、`9ad41b0`（adt）、`2bf3c61`（patch tool）、
-`aa9bc99`（lock/gitignore）。DinnerABC 逐字节副本和 SystemVolume.im4p
-只留在本地，未提交。
+`097d00c`（lock + bring-up inputs）。origin/main 原本已在 `5ad54e2`
+跟踪 11 个 DinnerABC 文件、`SystemVolume.im4p` 和 `cpu-tables.h`；本地
+H103 线已 merge origin/main（`1ca9258`），这些文件不再被忽略。合并后的
+`main` 尚未 push：本机没有 GitHub 凭据；bundle 在
+`/tmp/opencode/uniXNU-cheeseburger-main.bundle`。
 
 ### 关键产物
 

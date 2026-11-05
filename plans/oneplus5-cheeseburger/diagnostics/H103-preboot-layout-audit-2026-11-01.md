@@ -3847,22 +3847,24 @@ IOGPUFamily 一行；没有把这些改动一起提交。
 aa9bc99 chore: pin fetched sources and ignore external bring-up inputs
 ```
 
-以下文件与 `~/DinnerABC` 逐字节相同，AGENTS 禁止导入，因此只留在
-构建机本地并加入 `.gitignore`，没有提交：
+用户随后明确要求：与 `~/DinnerABC` 逐字节相同、且被构建依赖的文件要
+提交到 GitHub，不再忽略。检查发现 **origin/main 已经在 `5ad54e2` 中跟踪
+这 11 个文件**（内容与本地副本逐字节相同），同时还跟踪
+`scripts/data/SystemVolume.im4p` 和 `scripts/cpu-tables.h`。Mac 本地
+`main` 是另一条 6-commit 线，并且把 11 个文件 ignore 了；直接 push 会把
+它们从 origin 删除。
 
-```text
-scripts/CheeseburgerPlatformPower.cpp
-scripts/LogWindowConfig.h
-scripts/ReadPolicy.h
-scripts/ResponsePolicy.h
-scripts/RootDiagnostics.h
-scripts/RootLayout.h
-scripts/RootPublication.h
-scripts/RootTransportLayout.h
-scripts/RootWindowRead.h
-scripts/TransferPoll.h
-scripts/VerifiedBlockPolicy.h
-```
+处理结果：
 
-`scripts/data/SystemVolume.im4p` 是 IPSW 里的 system-volume auth blob，也
-不提交，只保留在本地。`unixnu.lock` 记录解析后的源码 commit，已提交。
+- 11 个 DinnerABC 文件和 `SystemVolume.im4p` 从 `.gitignore` 移除并跟踪；
+- 把 `origin/main` merge 进本地 H103 线，merge commit `1ca9258`；
+- 冲突只有 `scripts/ShengPlatformPowerGlue.cpp`，保留本地短版本；
+- `board.toml`、`defconfig`、`IOStorageFamily-bindings.json`、
+  `patch-panic-only.py`、`unixnu.lock` 保留本地 H103 版本；
+- `runtime/RootAuth.cpp` 按 origin 删除；`scripts/RootAuth.cpp` 仍在；
+- `backup/h103-local-six` 保留合并前的 6 个 commit。
+
+合并后的 `main` 未 push：Mac/Linux/Windows 都没有 GitHub 凭据（HTTPS 无
+credential helper、无 SSH key）。本地 bundle：
+`/tmp/opencode/uniXNU-cheeseburger-main.bundle`（Mac 上为
+`/tmp/uniXNU-cheeseburger-main.bundle`）。
