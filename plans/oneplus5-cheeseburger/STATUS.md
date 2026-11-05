@@ -2812,6 +2812,35 @@ H104b payload: 4dda07372741ebc7b65a0f6cf873c974fc9c670b8f167f4ca55eeebb68ee84dd
 H104b boot:    8cc632f2f1fc12714fd7a05fae6a76face35ac73714962db5f2b19171688dcec
 ```
 
+H104b 上机恢复到已知显示关口：
+
+```text
+519.691 backboardd/55 实际 exec
+526.480 NATIVE_DISPLAY_OPEN service=NativeLegacyDisplay
+        process=IOMFB_FDR_Loader grant=backboardd match=0
+526.505 NATIVE_LEGACY: client enter pid=78 comm=IOMFB_FDR_Loader
+531.238 KextLog: driverkitd is active
+```
+
+2×2：左上白（SpringBoard+backboardd）、右上黄（IOMFB_FDR client）、
+左下蓝（calls<10）、右下灰（无 transfer/swap/IKit match）。A540 块黑是
+预期。结论：backboardd 已起来，但先打开显示的是 IOMFB_FDR_Loader；
+backboardd 仍未打开显示。
+
+H104c 在 display client 的 externalMethod wrapper 里打印前 16 次
+`selector/status`，用来定位 FDR loader 停在哪个 selector。
+
+```text
+H104c kernel:  365f6f6eb22bb2331a386d7b179a113bb57bb55bf219a917fa7475ef2206a22b
+H104c payload: fc455727471d8c5be0e006029741fed79b6e59a1d792ffac91a14b7dca7f6d22
+H104c boot:    e3ba65d79b7c8f62c24e8d0ef2a62c983517df979e478a550b0b5bb3e3fd80ef
+```
+
+判读：看 `NATIVE_LEGACY: client sel pid=78 selector=... status=...`。
+若某个 selector 返回非 0 或之后没有新 selector，下一步实现/补该 selector
+或检查 FDR loader 等待的 kext/数据。若 selector 正常但 backboardd 仍不
+打开显示，转向 backboardd/CoreAnimation 的 provider 等待。
+
 判读：应恢复到 `driverkitd is active`、`comm=backboardd` 实际 exec、2×2
 左上变白；A540 块会变黑（没有 probe）。若仍停 `driverkitd not active`，
 说明 A540 类注册也不是原因，需要查 H103fo→H103fs 之间的其他差异。

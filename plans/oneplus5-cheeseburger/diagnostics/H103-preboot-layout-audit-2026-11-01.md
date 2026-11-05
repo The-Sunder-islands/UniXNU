@@ -4192,3 +4192,51 @@ boot:    8cc632f2f1fc12714fd7a05fae6a76face35ac73714962db5f2b19171688dcec
   独立类加载，要么先回到 backboardd/显示 provider。
 - 仍停 `driverkitd not active`：A540 类注册也不是原因，需比较
   H103fo/H103fs 的其余 display archive 差异。
+
+## 98. H104b 结果与 H104c：FDR client selector 跟踪（2026-11-05）
+
+H104b 是 A540 类注册移除后的干净基线，恢复到已知显示关口：
+
+```text
+348.590 NATIVE_LEGACY: probe enter
+495.270 SpringBoard/27
+519.691 backboardd/55 实际 exec
+526.480 NATIVE_DISPLAY_OPEN service=NativeLegacyDisplay
+        process=IOMFB_FDR_Loader grant=backboardd match=0
+526.505 NATIVE_LEGACY: client enter pid=78 comm=IOMFB_FDR_Loader type=0
+526.527 NATIVE_LEGACY: client observed status=0
+531.238 KextLog: driverkitd is active
+```
+
+2×2：白（SpringBoard+backboardd）/黄（IOMFB_FDR client）/蓝（calls<10）/
+灰（无 transfer/swap/IKit match）。A540 块黑（未 probe）。
+
+这说明：
+
+- A540 类注册确实是 H103fs/H104a 的 driverkitd 交接阻塞点；
+- 移除后 backboardd 能实际 exec，系统到 `driverkitd active`；
+- 显示由 **IOMFB_FDR_Loader** 先打开，backboardd 仍未打开；
+- loader 只做了少量 selector，没有 transfer。
+
+H104c 在 `LegacyDisplayProbe.cpp` 的 `wrappedExternal` 里增加前 16 次
+selector 日志：
+
+```text
+NATIVE_LEGACY: client sel pid=78 selector=<n> status=<x>
+```
+
+候选：
+
+```text
+kernel:  365f6f6eb22bb2331a386d7b179a113bb57bb55bf219a917fa7475ef2206a22b
+payload: fc455727471d8c5be0e006029741fed79b6e59a1d792ffac91a14b7dca7f6d22
+boot:    e3ba65d79b7c8f62c24e8d0ef2a62c983517df979e478a550b0b5bb3e3fd80ef
+```
+
+判读：
+
+- 有 selector 非 0 或序列中断：定位到具体 FDR selector，下一步补实现/
+  检查参数。
+- selector 全 0 但不再增加：loader 在等外部 kext/数据，转查 FDR 依赖。
+- selector 正常但 backboardd 仍不开显示：转 backboardd/CoreAnimation
+  provider 等待，而不是继续 FDR selector。
