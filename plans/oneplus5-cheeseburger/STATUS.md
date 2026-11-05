@@ -3203,9 +3203,16 @@ H105 只改 `drivers/NativeUfsProbe/NativeUfsProbe.cpp`：
 
 ```text
 H105 kernel:  75546e700157a63be8eca9ac0b9ca4c3c9c3db559afe7d807deb23e488978e08
-H105 payload: e42bca5b8fe9650df04dbe3daaaad767969a3633900d7e8f172538c493153ddb
-H105 boot:    15d5377c4b2a00b54bbe4749db9e1fe229409d483a191d77fe76a16ec5d9d238
+H105 payload: e462dfc082025f1363da0bb6a9116df57335f3594891422dbe94359eeb9ba385
+H105 boot:    abd0c569b346735c82fc47b23047422785eed67088536fd07d61a2d261f17afa
 ```
+
+基线是 `boot-H104b-slot0-noiogpu.img`（`7928c93b…`，稳定白基线）：payload、
+ADT、trust cache、scratch-data、args 全部沿用，只替换
+`EFI/UniXNU/Payloads/kernel.macho`；boot image 的 firmware 字段
+（`163917aa…`）也与它相同，因此 H105 与该基线的差异只有 kernel。
+该基线的 `unixnu.toml`（`4cbe8cbd…`，含 `h103-slot=0 h103-load-iogpu=0`、
+无 `-v debug=0x14e boot-progress=2`）和 ADT（`e78e9857…`）与 H104j 相同。
 
 镜像位置：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H105.img`（已在
 Windows 上核对 SHA-256 与长度 81,147,904 B）；Mac `~/h103/boot-H105.img`；
@@ -3228,20 +3235,20 @@ H104j kernel 备份（Mac）：`~/UniXNU/out/cheeseburger/kernel/kernel-H104j.ma
 
 payload 与 boot image：
 
-- payload 以 **H104j 的 `boot-H104j.img` 内的 payload 为基线**，只替换
+- payload 以 **`boot-H104b-slot0-noiogpu.img` 内的 payload 为基线**，只替换
   `EFI/UniXNU/Payloads/kernel.macho`。核对结果：`unixnu.toml`（args）、
-  `kernel.macho.adt`（`e78e9857…`）、trust cache、scratch-data 与 H104j
+  `kernel.macho.adt`（`e78e9857…`）、trust cache、scratch-data 与该基线
   完全一致，仅 kernel 不同；
-- 先用 H103ea 的 payload 打过一版（boot `23f66e5e…`），随后发现两者
-  并不相同：H104j 的 args 没有 `-v debug=0x14e boot-progress=2`，并在末尾
-  多了 `h103-slot=0 h103-load-iogpu=0`，ADT 也已更新（`e78e9857…` 对
-  H103ea 的 `d98d9522…`）。那一版作废，不要上机；
-- boot image 用 `scripts/make-bootimg.py` 打包，firmware 字段与 H104j
-  相同（`163917aa…`），因此与 H104j 的差异只有 payload 内的 kernel。
+- 打包过程中走过两个作废版本：先用 H103ea 的 payload（boot `23f66e5e…`），
+  其 args 多 `-v debug=0x14e boot-progress=2`、缺 `h103-slot=0
+  h103-load-iogpu=0`，ADT 也是旧的 `d98d9522…`；再用 H104j 的 payload
+  （boot `15d5377c…`）。两者都不要上机；
+- boot image 用 `scripts/make-bootimg.py` 打包，firmware 字段与基线
+  相同（`163917aa…`），因此与基线的差异只有 payload 内的 kernel。
 
 判读：左上白后约 2 s 应出现 `NATIVE_PROC_DUMP: trigger stage=1`，再过约
 10 s 出现 `stage=2`；随后是 `begin/find/pid=…/threads=…/NATIVE_PROC_THREAD`
-和 `end`。四个 pid 与 H104j 日志一致（launchd=1、backboardd=55、
+和 `end`。四个 pid 与该基线日志一致（launchd=1、backboardd=55、
 driverkitd=63、IOMFB_FDR_Loader=78）。
 
 ## 更新规则
