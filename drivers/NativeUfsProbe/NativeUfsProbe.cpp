@@ -151,9 +151,9 @@ heartbeatThread (void *, wait_result_t)
            (unsigned long long) gUfsLastBytes,
            (unsigned long long) gWindowLastReqBlock,
            (unsigned long long) gWindowLastReqCount);
-    if (!gH103SkipPattern && !gH103HbTimerOn) {
-      native_legacy_test_pattern ();
-    }
+    // H104j: dump before the 2x2 draw, and stop drawing once backboardd is
+    // up. The loader's display open can block the pattern draw, which would
+    // otherwise stop this thread before the dump.
     if (!gH104DumpDone && (native_boot_flags & 4)) {
       uint64_t now = mach_absolute_time ();
       if (!gH104BackboarddTicks) {
@@ -162,6 +162,9 @@ heartbeatThread (void *, wait_result_t)
         gH104DumpDone = 1;
         h104DumpProcs ();
       }
+    }
+    if (!gH103SkipPattern && !gH103HbTimerOn && !(native_boot_flags & 4)) {
+      native_legacy_test_pattern ();
     }
     uint64_t start = gWindowStartTicks;
     if (gWindowInFlight && start && mach_absolute_time () - start > 10 * 19200000ULL) {
