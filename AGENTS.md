@@ -51,6 +51,12 @@ git clone https://github.com/lss717/UniXNU-cheeseburger
     host with GNU mtools 4.0.43 it currently stops at
     `FAIL: payload volume is reproducible` — confirm on macOS before treating
     that as a source regression)
+- Wait for a build by letting the build command itself return. Run it in the
+  foreground (an SSH call to the macOS host returns when the build ends), or
+  if it must run in the background, read its log once at completion. Do not
+  put `sleep`/polling loops or repeated status checks between commands: a
+  `sleep` is not a completion signal, and every poll costs more wall time than
+  reading the final log.
 - Documentation: `cd docs && npm ci && npm run build`; keep `docs/` and
   `docs/zh/` pages and `docs/.vitepress/config.mts` in sync.
 
