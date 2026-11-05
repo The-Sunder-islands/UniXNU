@@ -86,6 +86,16 @@ void timer_call_free (timer_call_t call);
 static timer_call_t gH103TimerCall;
 static volatile uint32_t gH103TimerFires;
 static void h103TimerCallFunc (timer_call_param_t, timer_call_param_t);
+// H103fn: post-root IOGPUFamily load probe. The display archive's A540 stub
+// cannot be called before user space is up (A1 panicked); this only tests
+// whether the kext can be loaded after SpringBoard exec, without touching the
+// display archive.
+extern "C" kern_return_t OSKextLoadKextWithIdentifier (const char *);
+extern "C" volatile uint32_t native_boot_flags;
+static volatile int gH103LoadIogpu;
+static volatile int gH103IogpuTried;
+static volatile uint32_t gH103IogpuRc = 0xffffffffU;
+static void h103MaybeLoadIogpu (void);
 extern "C" {
 volatile uint32_t native_h103_slot_state = 0;
 }
@@ -152,6 +162,25 @@ h103TimerCallFunc (timer_call_param_t, timer_call_param_t)
   if (gH103TimerCall) {
     timer_call_enter (gH103TimerCall, mach_absolute_time () + 19200000ULL, 0);
   }
+}
+
+// H103fn: only trigger after SpringBoard has exec'd, i.e. after user space and
+// kextd/driverkitd are running. Never call this pre-root.
+static void
+h103MaybeLoadIogpu (void)
+{
+  if (!gH103LoadIogpu || gH103IogpuTried) {
+    return;
+  }
+  if (!(native_boot_flags & 8)) {
+    return;
+  }
+  gH103IogpuTried = 1;
+  IOLog ("NATIVE_IOGPU_LOAD: begin flags=%x\n", native_boot_flags);
+  kern_return_t kr = OSKextLoadKextWithIdentifier ("com.apple.iokit.IOGPUFamily");
+  gH103IogpuRc = static_cast<uint32_t> (kr);
+  IOLog ("NATIVE_IOGPU_LOAD: rc=%x flags=%x\n", gH103IogpuRc,
+         native_boot_flags);
 }
 
 // H103ea: the 2-second slot is a separate thread. H103bd's heartbeat is left
@@ -440,6 +469,7 @@ h103SlotTick (void)
   if (!gH103SlotMode) {
     return;
   }
+  h103MaybeLoadIogpu ();
   uint64_t interval = gH103SlotMode == 2 ? 2 * 19200000ULL : 19200000ULL / 2;
   uint64_t now = mach_absolute_time ();
   if (!gH103LastSlotTicks) {
@@ -2479,9 +2509,12 @@ NativeUfsProbe::start (IOService *provider)
   uint32_t hbTimer = 0;
   PE_parse_boot_argn ("h103-hb-timer", &hbTimer, sizeof hbTimer);
   gH103HbTimerOn = hbTimer <= 2 ? static_cast<int> (hbTimer) : 1;
+  uint32_t loadIogpu = 0;
+  PE_parse_boot_argn ("h103-load-iogpu", &loadIogpu, sizeof loadIogpu);
+  gH103LoadIogpu = loadIogpu ? 1 : 0;
   gH103StartTicks = mach_absolute_time ();
-  IOLog ("NATIVE_UFS_HB: slotMode=%d hbTimer=%d\n",
-         gH103SlotMode, gH103HbTimerOn);
+  IOLog ("NATIVE_UFS_HB: slotMode=%d hbTimer=%d loadIogpu=%d\n",
+         gH103SlotMode, gH103HbTimerOn, gH103LoadIogpu);
   thread_t heartbeat = nullptr;
   kern_return_t heartbeatRet = kernel_thread_start (heartbeatThread, nullptr, &heartbeat);
   IOLog ("NATIVE_UFS_HB: start rc=%x skipPattern=%u\n",

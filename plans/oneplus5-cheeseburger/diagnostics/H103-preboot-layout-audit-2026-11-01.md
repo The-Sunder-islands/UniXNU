@@ -3707,3 +3707,76 @@ boot:    fd9c21497e22d95381ee661c7cc5a1067014d673f100de0e0839910cf46d2e92
 - 停点后 `uptime_s`/`diag_cmds` 继续增长 → 系统没有死，只是显示/FDR
   关口空闲；
 - `diag_cmds`/`uptime_s` 停在最后一条 msg → 更可能是真挂死或完全无 I/O。
+
+## 89. H103fm 结果与 H103fn 的 post-root IOGPU 测试（2026-11-05）
+
+H103fm 日志 `/home/ls/UniXNU/h103-log-20261105-132425.txt`：
+
+```text
+907.785 NATIVE_UFS_HB_TIMER: timer_call start 0xfffffff4dd1c3780
+909.044 NATIVE_UFS_SLOT: attempt=1 ... fires=0
+...
+913.112 NATIVE_UFS_SLOT: attempt=8 ... fires=0
+```
+
+`timer_call` 也没有触发，前 8 次 slot 的 `fires=0`。所以
+`IOTimerEventSource`、`IOSleep`、`timer_call` 三条周期路径在这套内核上
+都不可用；第 3 块不应再当作 liveness 指示。
+
+日志实际继续到：
+
+```text
+1072.856 KextLog: driverkitd is active
+1073.197 UserEventAgent crossed thread count high watermark
+1073.261 ... containermanagerd.system
+1073.341 ... analyticsd
+1074.195 ... misd
+1075.605 ... containermanagerd
+1076.640 ... eligibilityd
+1077.425 eligibilityd/89 exec
+```
+
+UFS 起点 907.7，最后日志 1077.4，即 169.7 s；header：
+
+```text
+slots_written=123
+uptime_s=169
+diag_cmds=31170
+diag_last_lba=0x18303140
+diag_last_bytes=131072
+diag_flags=2
+diag_loops=1661
+```
+
+`uptime_s=169` 与最后日志同一秒，`diag_cmds=31170` 说明读路径一直工作到
+停点。`diag_flags=2` 是最后一次 header 写入时有一个 window read 在飞，
+但日志继续到 eligibilityd，不能据此判 UFS stall。
+
+结论：第 3 块静止是定时器不可用，不是死机。系统停在已知的显示/FDR
+关口，下一步回到显示 provider，而不是继续调 UFS 或定时器。
+
+H103fn 是一个不改 display archive 的最小 post-root 测试：
+
+```text
+h103-load-iogpu=1
+  在 native_boot_flags & 8（SpringBoard 已 exec）之后，从 UFS 读路径
+  调用一次 OSKextLoadKextWithIdentifier("com.apple.iokit.IOGPUFamily")
+  只打印 NATIVE_IOGPU_LOAD: begin/rc，不调用 A540 probe，不发布服务
+```
+
+候选：
+
+```text
+kernel:  98117070e625c96591991b0c61198192a15cbe89686f08619b1ba5fb17fa8190
+payload: 3edc860a3a7008efce00d4601bcdc49738ac8d47a766e020c3fdc68701d023e1
+boot:    7ba4b9a64256f7ed7825d82ffedbcd0e229a16ae0218765ebd8abefd37d163ac
+```
+
+判读：
+
+- `rc=0`：IOGPUFamily 可以在 post-root 加载；下一步才考虑修 A540 probe
+  的反向返回值判断并发布最小 `IOAcceleratorES`（会改 display archive，
+  失败即回退）；
+- `rc!=0`：post-root 也加载不了，需要把 IOGPUFamily 放进 prelink roots
+  或改用户态加载时序；
+- `begin` 之后日志停住：加载请求阻塞在读线程，记录后回退 H103fm。

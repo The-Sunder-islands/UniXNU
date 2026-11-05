@@ -2679,6 +2679,23 @@ H103fm payload: 8bb388f503fe8ff97ca5a27db30eff6ff5bc2877ed009f02893b58f04c47fd58
 H103fm boot:    fd9c21497e22d95381ee661c7cc5a1067014d673f100de0e0839910cf46d2e92
 ```
 
+H103fm 上机：`timer_call` 也没有触发（前 8 次 slot 都是 `fires=0`），
+说明 kernel thread/timer 唤醒在这套 bring-up 里整体不可用；第 3 块不能
+作为死机指示。日志实际继续到 `eligibilityd`（1077.4，UFS 起点 907.7），
+header `uptime_s=169`、`diag_cmds=31170`，说明停点之后 UFS 读路径还活着。
+`diag_flags=2` 表示最后一次 header 写入时有一个 window read 在飞，但日志
+继续，不能据此判 stall。
+
+H103fn 做 post-root `IOGPUFamily` 加载测试（不改 display archive）：
+`h103-load-iogpu=1`，在 `native_boot_flags & 8`（SpringBoard exec）后从
+UFS 读路径调用一次 `OSKextLoadKextWithIdentifier`，只记录返回码。
+
+```text
+H103fn kernel:  98117070e625c96591991b0c61198192a15cbe89686f08619b1ba5fb17fa8190
+H103fn payload: 3edc860a3a7008efce00d4601bcdc49738ac8d47a766e020c3fdc68701d023e1
+H103fn boot:    7ba4b9a64256f7ed7825d82ffedbcd0e229a16ae0218765ebd8abefd37d163ac
+```
+
 ### 关键产物
 
 ```text
