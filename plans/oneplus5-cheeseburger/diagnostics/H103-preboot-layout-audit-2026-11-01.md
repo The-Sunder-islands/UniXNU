@@ -3655,3 +3655,55 @@ H103fl-noslot payload c5985776... boot e9fdecef...
   或内核已挂；
 - 若出现 `NATIVE_UFS_HB_TIMER: stall ...` → 有 UFS 命令在飞超过 5 秒；
 - 对比 `H103fl` 与 `H103fl-noslot` 可排除 slot 写入对停点的影响。
+
+## 88. H103fl 的定时器结果与 H103fm（2026-11-05）
+
+H103fl 日志 `/home/ls/UniXNU/h103-log-20261105-124046.txt`：
+
+```text
+1500.266 NATIVE_UFS_HB: slotMode=1 hbTimer=1
+1500.266 NATIVE_UFS_HB_TIMER: start loop=0xfffffff3d7a8f060 timer=0xfffffff3d79ff0e0
+```
+
+之后**没有** `NATIVE_UFS_HB_TIMER: fire=1`。IOTimerEventSource 的 start
+成功，但 1 Hz 定时器从未触发，和 `IOSleep` 一样依赖 kernel thread 唤醒。
+因此：
+
+- 第 3 块静止时，不能判定内核死机；
+- 停点前 slot 一直正常：`slots_written=125`、`uptime_s=167`、
+  `write_errors=0`；
+- `uptime_s=167` 与最后一条 msg `1667.565`（UFS 起点 1500.18）吻合，
+  说明最后一次 slot 写就发生在最后一条日志时。
+
+H103fl-noslot 串口截图停在 `logd_helper`（1651.9），但 H103fl 的 msgbuf
+继续到 `driverkitd active`（1667.5）；noslot 只是控制台输出更早停止，
+不能据此说它更早挂死。
+
+H103fm 只改 UFS 驱动：
+
+```text
+h103-hb-timer=2   timer_call_alloc/timer_call_enter，1 Hz，在定时器中断
+                  上下文调用 native_legacy_test_pattern()
+header liveness   msg 不变时每 2 秒只重写 header，uptime_s 继续前进即
+                  证明停点后仍有完成的 UFS 读
+diag_*            export_first/blocks/bytes/generation/below 改名并填值
+                  diag_flags bit0/1=in_flight，bit8+=timer fires
+```
+
+候选：
+
+```text
+kernel:  8b6da448afb00e64868bcee1c0f7bd49026a72f860663e0dfaf0c77fd9b52698
+payload: 8bb388f503fe8ff97ca5a27db30eff6ff5bc2877ed009f02893b58f04c47fd58
+boot:    fd9c21497e22d95381ee661c7cc5a1067014d673f100de0e0839910cf46d2e92
+```
+
+判读：
+
+- 第 3 块 1 Hz 闪 → timer_call 生效，内核活着；`diag_flags` 的 bit8+
+  会增长；
+- 第 3 块仍静止且没有 `timer_call start` 后的 fire → 定时器中断路径也
+  不可用；
+- 停点后 `uptime_s`/`diag_cmds` 继续增长 → 系统没有死，只是显示/FDR
+  关口空闲；
+- `diag_cmds`/`uptime_s` 停在最后一条 msg → 更可能是真挂死或完全无 I/O。

@@ -65,12 +65,34 @@ static volatile int gH103SlotMode = 1;
 static volatile int gH103HbTimerOn;
 static volatile uint64_t gH103StartTicks;
 static volatile uint32_t gH103SlotWriteErrors;
+// H103fm: even when the message buffer is unchanged, rewrite the header every
+// two seconds from the next completed read.  uptime_s then proves whether the
+// read path was still alive after the last kernel log line.
+static volatile uint64_t gH103LastHeaderTicks;
+static volatile uint32_t gH103LastMsgBytes;
+// timer_call lives in osfmk and is a C symbol. Declare it with C linkage here
+// instead of including kern/timer_call.h, whose XNU declarations are C++ in
+// this translation unit and would produce mangled names.
+struct timer_call;
+typedef struct timer_call *timer_call_t;
+typedef void *timer_call_param_t;
+typedef void (*timer_call_func_t) (timer_call_param_t, timer_call_param_t);
+extern "C" {
+timer_call_t timer_call_alloc (timer_call_func_t func, timer_call_param_t param0);
+boolean_t timer_call_enter (timer_call_t call, uint64_t deadline, uint32_t flags);
+boolean_t timer_call_cancel (timer_call_t call);
+void timer_call_free (timer_call_t call);
+}
+static timer_call_t gH103TimerCall;
+static volatile uint32_t gH103TimerFires;
+static void h103TimerCallFunc (timer_call_param_t, timer_call_param_t);
 extern "C" {
 volatile uint32_t native_h103_slot_state = 0;
 }
 class NativeUfsProbe;
 static NativeUfsProbe *gH103Probe;
 static void h103SlotWriteThunk (void);
+static void h103HeaderWriteThunk (void);
 
 // H103cg's probe periodically redrew the GOP test pattern from its heartbeat.
 // The display archive is force-loaded into the kernel and exports this symbol;
@@ -114,6 +136,21 @@ heartbeatThread (void *, wait_result_t)
              (unsigned long long) gUfsLastBytes,
              (unsigned long long) gUfsInFlight);
     }
+  }
+}
+
+// H103fm: timer_call runs from the timer interrupt, unlike IOTimerEventSource
+// and IOSleep which depend on a kernel thread wakeup. It is only a diagnostic:
+// h103-hb-timer=2 arms it and the 3rd cell then blinks from interrupt context.
+static void
+h103TimerCallFunc (timer_call_param_t, timer_call_param_t)
+{
+  gH103TimerFires = gH103TimerFires + 1;
+  if (!gH103SkipPattern) {
+    native_legacy_test_pattern ();
+  }
+  if (gH103TimerCall) {
+    timer_call_enter (gH103TimerCall, mach_absolute_time () + 19200000ULL, 0);
   }
 }
 
@@ -369,6 +406,7 @@ public:
   void free () override;
   bool h103Snapshot (const char *tag, bool pause, bool verify);
   void h103SlotWrite (void);
+  void h103HeaderOnly (void);
   void h103SingleWrite (void);
   void h103WindowRead (void);
   bool readBlocks (uint8_t unit, uint64_t block, uint64_t count, uint32_t blockSize,
@@ -382,6 +420,14 @@ h103SlotWriteThunk (void)
 {
   if (gH103Probe) {
     gH103Probe->h103SlotWrite ();
+  }
+}
+
+static void
+h103HeaderWriteThunk (void)
+{
+  if (gH103Probe) {
+    gH103Probe->h103HeaderOnly ();
   }
 }
 
@@ -412,6 +458,16 @@ h103SlotTick (void)
     x = 0;
   }
   if (x == gH103LastSlotMsgX) {
+    // H103fm: refresh just the header so uptime_s advances even when the
+    // kernel has stopped logging. This runs on the read path (tick is called
+    // after fLock is released), so it shows whether UFS reads still complete.
+    if (now - gH103LastHeaderTicks >= 2 * 19200000ULL) {
+      gH103LastSlotTicks = now;
+      gH103LastHeaderTicks = now;
+      gH103SlotBusy = 1;
+      h103HeaderWriteThunk ();
+      gH103SlotBusy = 0;
+    }
     return;
   }
   gH103LastSlotTicks = now;
@@ -1380,6 +1436,12 @@ NativeUfsProbe::h103Snapshot (const char *tag, bool pause, bool verify)
   h.uptime_s = gH103StartTicks ?
       static_cast<uint32_t> ((mach_absolute_time () - gH103StartTicks) / 19200000ULL) : 0;
   h.write_errors = gH103SlotWriteErrors;
+  h.export_first = static_cast<uint32_t> (gUfsCommands);
+  h.export_blocks = static_cast<uint32_t> (gUfsLastLba);
+  h.export_bytes = static_cast<uint32_t> (gUfsLastBytes);
+  h.export_generation = ((gUfsInFlight ? 1U : 0U) | (gWindowInFlight ? 2U : 0U) |
+                         ((gH103TimerFires & 0xffffffU) << 8));
+  h.export_below = static_cast<uint32_t> (gUfsLastLoops);
   h.state = gH103SlotCursor ? 3 : 2;
   strlcpy (h.tag, "cheeseburger-H103", sizeof h.tag);
   memcpy (head, &h, sizeof h);
@@ -1434,9 +1496,9 @@ NativeUfsProbe::h103SlotWrite (void)
     gH103SlotWriteErrors = gH103SlotWriteErrors + 1;
   }
   if (attempts++ < 8) {
-    IOLog ("NATIVE_UFS_SLOT: attempt=%u slot=%u lba=%llx body=%u n=%u\n",
+    IOLog ("NATIVE_UFS_SLOT: attempt=%u slot=%u lba=%llx body=%u n=%u fires=%u\n",
            attempts, slot, (unsigned long long) (fLogFirst + 257U + slot * 32U),
-           ok ? 1 : 0, n);
+           ok ? 1 : 0, n, gH103TimerFires);
   }
   if (ok) {
     H103LogHeader h;
@@ -1458,6 +1520,12 @@ NativeUfsProbe::h103SlotWrite (void)
     h.uptime_s = gH103StartTicks ?
         static_cast<uint32_t> ((mach_absolute_time () - gH103StartTicks) / 19200000ULL) : 0;
     h.write_errors = gH103SlotWriteErrors;
+    h.export_first = static_cast<uint32_t> (gUfsCommands);
+    h.export_blocks = static_cast<uint32_t> (gUfsLastLba);
+    h.export_bytes = static_cast<uint32_t> (gUfsLastBytes);
+    h.export_generation = ((gUfsInFlight ? 1U : 0U) | (gWindowInFlight ? 2U : 0U) |
+                         ((gH103TimerFires & 0xffffffU) << 8));
+    h.export_below = static_cast<uint32_t> (gUfsLastLoops);
     h.state = 3;
     strlcpy (h.tag, "cheeseburger-H103", sizeof h.tag);
     uint8_t *head = static_cast<uint8_t *> (IOMallocAligned (4096, 4096));
@@ -1471,6 +1539,8 @@ NativeUfsProbe::h103SlotWrite (void)
       }
       if (headOk) {
         gH103SlotCursor++;
+        gH103LastMsgBytes = n;
+        gH103LastHeaderTicks = mach_absolute_time ();
         native_h103_slot_state = 2;
       } else {
         gH103SlotWriteErrors = gH103SlotWriteErrors + 1;
@@ -1482,8 +1552,63 @@ NativeUfsProbe::h103SlotWrite (void)
 }
 
 void
+NativeUfsProbe::h103HeaderOnly (void)
+{
+  const uint32_t slotCount = (fLogBlocks > 257) ? (fLogBlocks - 257) / 32 : 0;
+  if (!fLogFirst || !fLogBlocks || !fLogDma || !fLogData || !fLogDataPhys ||
+      !slotCount) {
+    return;
+  }
+  H103LogHeader h;
+  memset (&h, 0, sizeof h);
+  memcpy (h.magic, "SHLOG001", 8);
+  h.version = 3;
+  h.header_bytes = sizeof h;
+  h.boot_id = h103LogTicks ();
+  h.first_lba = fLogFirst;
+  h.window_blocks = fLogBlocks;
+  h.msg_first = 1;
+  h.msg_blocks = H103_LOG_MSG_BLOCKS;
+  h.msg_bytes = gH103LastMsgBytes;
+  h.slot_first = 257;
+  h.slot_blocks = 32;
+  h.slot_count = slotCount;
+  h.slots_written = gH103SlotCursor;
+  h.rounds = gH103SlotCursor ? gH103SlotCursor : 1;
+  h.uptime_s = gH103StartTicks ?
+      static_cast<uint32_t> ((mach_absolute_time () - gH103StartTicks) / 19200000ULL) : 0;
+  h.write_errors = gH103SlotWriteErrors;
+  h.export_first = static_cast<uint32_t> (gUfsCommands);
+  h.export_blocks = static_cast<uint32_t> (gUfsLastLba);
+  h.export_bytes = static_cast<uint32_t> (gUfsLastBytes);
+  h.export_generation = ((gUfsInFlight ? 1U : 0U) | (gWindowInFlight ? 2U : 0U) |
+                         ((gH103TimerFires & 0xffffffU) << 8));
+  h.export_below = static_cast<uint32_t> (gUfsLastLoops);
+  h.state = gH103SlotCursor ? 3 : 2;
+  strlcpy (h.tag, "cheeseburger-H103", sizeof h.tag);
+  uint8_t *head = static_cast<uint8_t *> (IOMallocAligned (4096, 4096));
+  if (!head) {
+    return;
+  }
+  memset (head, 0, 4096);
+  memcpy (head, &h, sizeof h);
+  bool ok = logWrite (0, 1, head);
+  if (!ok) {
+    gH103SlotWriteErrors = gH103SlotWriteErrors + 1;
+  } else {
+    gH103LastHeaderTicks = mach_absolute_time ();
+  }
+  IOFreeAligned (head, 4096);
+}
+
+void
 NativeUfsProbe::free (void)
 {
+  if (gH103TimerCall) {
+    timer_call_cancel (gH103TimerCall);
+    timer_call_free (gH103TimerCall);
+    gH103TimerCall = nullptr;
+  }
   if (fHbTimer) {
     fHbTimer->cancelTimeout ();
     if (fHbLoop) {
@@ -2353,7 +2478,7 @@ NativeUfsProbe::start (IOService *provider)
   gH103SlotMode = slotMode <= 2 ? static_cast<int> (slotMode) : 1;
   uint32_t hbTimer = 0;
   PE_parse_boot_argn ("h103-hb-timer", &hbTimer, sizeof hbTimer);
-  gH103HbTimerOn = hbTimer ? 1 : 0;
+  gH103HbTimerOn = hbTimer <= 2 ? static_cast<int> (hbTimer) : 1;
   gH103StartTicks = mach_absolute_time ();
   IOLog ("NATIVE_UFS_HB: slotMode=%d hbTimer=%d\n",
          gH103SlotMode, gH103HbTimerOn);
@@ -2375,7 +2500,7 @@ NativeUfsProbe::start (IOService *provider)
   } else {
     IOLog ("NATIVE_UFS_HB: slot disabled\n");
   }
-  if (gH103HbTimerOn) {
+  if (gH103HbTimerOn == 1) {
     fHbLoop = IOWorkLoop::workLoop ();
     if (fHbLoop) {
       fHbTimer = IOTimerEventSource::timerEventSource (this,
@@ -2394,6 +2519,14 @@ NativeUfsProbe::start (IOService *provider)
       }
     } else {
       IOLog ("NATIVE_UFS_HB_TIMER: no workloop\n");
+    }
+  } else if (gH103HbTimerOn == 2) {
+    gH103TimerCall = timer_call_alloc (h103TimerCallFunc, nullptr);
+    if (gH103TimerCall) {
+      timer_call_enter (gH103TimerCall, mach_absolute_time () + 19200000ULL, 0);
+      IOLog ("NATIVE_UFS_HB_TIMER: timer_call start %p\n", gH103TimerCall);
+    } else {
+      IOLog ("NATIVE_UFS_HB_TIMER: timer_call alloc failed\n");
     }
   }
 

@@ -2655,6 +2655,30 @@ H103fl-noslot payload: c5985776b6c248aa2fdf27e4f1b759f8237c1a240fe36aa2c0d6002f1
 H103fl-noslot boot:    e9fdecefef16fe6020da360b2f960e31ca38197f00380888014fa73415512d94
 ```
 
+H103fl 上机：`IOTimerEventSource` 的 `start` 成功，但日志里没有一条
+`fire=`；1 Hz 定时器从未触发，所以第 3 块静止不能说明内核死机。
+header `uptime_s=167` 与最后一条日志 `1667.5`（UFS 起点 1500.2）一致，
+slot 写入一直正常到停点，`write_errors=0`。
+
+H103fl-noslot 的串口最后停在 `logd_helper`，但 H103fl 的 msgbuf 继续到
+`driverkitd active`，两者不是同一停点；noslot 只是控制台输出先停。
+
+H103fm 做两个 UFS-only 诊断（不改 display archive）：
+
+- `h103-hb-timer=2`：用 `timer_call`（定时器中断上下文）而不是 workloop
+  线程，尝试真正的 1 Hz 心跳；
+- 消息不变时每 2 秒只重写 header，`uptime_s` 继续前进就证明停点之后
+  UFS 读路径还活着；
+- header 的 `export_*` 改名 `diag_*`：`diag_cmds`、`diag_last_lba`、
+  `diag_last_bytes`、`diag_flags`（bit0/1=in-flight，bit8+=timer fires）、
+  `diag_loops`。
+
+```text
+H103fm kernel:  8b6da448afb00e64868bcee1c0f7bd49026a72f860663e0dfaf0c77fd9b52698
+H103fm payload: 8bb388f503fe8ff97ca5a27db30eff6ff5bc2877ed009f02893b58f04c47fd58
+H103fm boot:    fd9c21497e22d95381ee661c7cc5a1067014d673f100de0e0839910cf46d2e92
+```
+
 ### 关键产物
 
 ```text

@@ -126,8 +126,8 @@ def decode_header(data: bytes) -> dict:
         "window_blocks", "msg_first", "msg_blocks", "msg_bytes",
         "slot_first", "slot_blocks", "slot_count", "slots_written",
         "uptime_s", "rounds", "write_errors", "gpt_open", "gpt_last",
-        "state", "tag", "export_first", "export_blocks", "export_bytes",
-        "export_generation", "export_below",
+        "state", "tag", "diag_cmds", "diag_last_lba",
+        "diag_last_bytes", "diag_flags", "diag_loops",
     )
     out = dict(zip(fields, values))
     if out["magic"] != MAGIC:
