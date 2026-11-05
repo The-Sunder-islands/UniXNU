@@ -3199,6 +3199,44 @@ H105 只改 `drivers/NativeUfsProbe/NativeUfsProbe.cpp`：
   open 记录（`NATIVE_IOKIT_MATCH`）判断 ；
 - 出现 `pid=… not found`：pid 与 H104i 不同，按 `comm` 重新登记。
 
+### H105 构建结果（2026-11-05）
+
+```text
+H105 kernel:  75546e700157a63be8eca9ac0b9ca4c3c9c3db559afe7d807deb23e488978e08
+H105 payload: f3d3a37c4eb1d879322519e074a1d97e2de345d02b36e1aca51a1430da067355
+H105 boot:    23f66e5e76024f75ba60949e0f256d83197f228bbc3cd90ea29985f7ca1d3bcc
+H104j kernel 备份（Mac）: ~/UniXNU/out/cheeseburger/kernel/kernel-H104j.macho 7e85bc44…
+```
+
+构建方式（Mac mini，`/Users/lss/UniXNU`）：
+
+- `.cache/xnu-work` 先 `git checkout -- . && git clean -fd` 回到 `d8b8029`
+  （原状态里 late patches 已部分回退，直接重跑会在 `bsd_init.c:987` 失败）；
+- `scripts/build-arm-driver.py NativeUfsProbe` 重建 NativeUfsProbe archive
+  （`SDKROOT=$(xcrun --sdk iphoneos --show-sdk-path)`，否则报
+  `using sysroot for 'MacOSX' but targeting 'iPhone'`）；
+- `bash ~/run-h103n-build.sh`（H104 的同一套 XNU_* 环境，含
+  `XNU_NATIVE_LEGACY_DISPLAY=1`）；
+- prelink 由 `kits/NativePrelink/emit_prelink.py` 直接执行（Mac 上
+  `./unixnu` 因 Python 3.9 无 `tomllib` 不可用），参数取自 `board.toml`
+  `[kernel.prelink]`，slide `0x5000000`。
+
+payload 与 boot image：
+
+- payload 直接复用 H103ea 的 `payload.img`（参数集含
+  `offline-mobile-graphics-load=1 offline-legacy-phase=4 … sheng-pmgr=2
+  native-cpufreq-early=2 sheng-disable-jobs=…`，与 H104j 日志一致），
+  只用 `mcopy` 替换 `EFI/UniXNU/Payloads/kernel.macho`；ADT、trust cache、
+  scratch-data、args 均未变；
+- boot image 用 `scripts/make-bootimg.py` 打包，firmware 字段取自
+  `boot-H103ea.img`（sha256 `163917aa…`），因此与已知可启动镜像的差异
+  只有 payload 内的 kernel。
+
+判读：左上白后约 2 s 应出现 `NATIVE_PROC_DUMP: trigger stage=1`，再过约
+10 s 出现 `stage=2`；随后是 `begin/find/pid=…/threads=…/NATIVE_PROC_THREAD`
+和 `end`。四个 pid 与 H104j 日志一致（launchd=1、backboardd=55、
+driverkitd=63、IOMFB_FDR_Loader=78）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
