@@ -3488,6 +3488,47 @@ firmware 相同。镜像在 Windows `D:\Users\ls\Documents\OnePlus5_ios\`、Mac
 - 两版都冻在同一位置 → 与 timer 无关，回到 gate 之前的启动路径继续查
   （FileSet KC / trustcache 一段）。
 
+## H111 arch timer 中断计数（2026-11-06）
+
+H110 两版（tick/notick）停在同一位置，且日志显示 dump 已完整跑完（67 行
+`NATIVE_PROC_SUM`，`PROC_NOWAITTRANS` 修复有效）、没有任何 UFS 锁错误，
+最后一行是 197.766 s 的 `ACCHWComponentAuthService` exec；之后控制台、
+日志、flush 全部停止，backboardd(2 线程)/SpringBoard(2 线程) 全部
+`runnable=0`。
+
+把四个现象串起来（`IOSleep` 不醒、`tsleep` 不醒、`timer_call` 不触发、
+单核锁等待 2 s→20 s、各 daemon 等超时永不到期）指向同一个怀疑：**arch
+timer 中断根本没投递**。
+
+H111 只加一条诊断，在 UFS 读路径每 30 秒打印：
+
+```text
+NATIVE_IRQ: timer=<armcpu_timer_interrupts> cntv_ctl=<..> tval=<..> flags=.. tick=<gH109Ticks>
+```
+
+`armcpu_timer_interrupts` 是 ArmCpu 在 INTID 27 分支里累加的计数（调
+`rtclock_intr` 之前），`CNTV_CTL` 的 bit0/1/2 分别是 ENABLE/IMASKED/
+ISTATUS。
+
+```text
+H111 kernel:  55f36abb7f9391c573c91b201ca78e4673a450cd108cfde25ca02c46ad3dc66a
+H111 payload: 30c1baf7be0ffd75a07cdfc17c0372ef6a21474893678c6d5337aa9a059361cc
+H111 boot:    8f90ac816c41a2937f4bc53f1b427b711545d55dcb9ea80ff149569014139259
+```
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H111.img`（已核对）、
+Mac `~/h103/boot-H111.img`、仓库 `out/cheeseburger/boot/boot-H111.img`。
+args 与 H110 主版相同（`cpus=2 h103-slot=1 h103-load-iogpu=0
+h103-log-secs=5 h109-tick=1`）。
+
+判读：
+
+- `timer=0` 且 `cntv_ctl` 的 ENABLE=0 或 IMASKED=1 → 内核没有真正打开虚拟
+  定时器，需在 ArmDTPlatform / `machine_routines` 补初始化（根因）；
+- `timer=0` 但 `cntv_ctl=1` 且 tval 在变化 → 定时器在跑但 PPI 27 没投递，
+  查 redistributor 使能/优先级/亲和；
+- `timer` 在增长 → 中断正常，问题在 `rtclock_intr`/`timer_call` 的接线。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
