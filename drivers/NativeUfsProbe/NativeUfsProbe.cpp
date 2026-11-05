@@ -139,6 +139,10 @@ extern "C" void native_legacy_heartbeat_cell(void);
 static int gH109Chan;
 static volatile uint32_t gH109Ticks;
 static timer_call_t gH109TimerCall;
+// H110: h109-tick=0 keeps the timer_call off so the same kernel can be booted
+// with and without the interrupt heartbeat.
+static volatile uint32_t gH110TickEnabled = 1;
+static volatile uint32_t gH110WorkerWakes;
 
 // H105: this thread never wakes from IOSleep on this kernel. No H103/H104
 // capture contains a single NATIVE_UFS_ALIVE line after NATIVE_UFS_HB: enter,
@@ -670,6 +674,10 @@ static void
 h109TimerFunc (timer_call_param_t, timer_call_param_t)
 {
   gH109Ticks = gH109Ticks + 1;
+  uint32_t n = gH109Ticks;
+  if (n <= 3 || (n % 10) == 0) {
+    IOLog ("NATIVE_TICK: fire=%u flags=%x\n", n, native_boot_flags);
+  }
   native_legacy_heartbeat_cell ();
   if (gH103SlotMode && gH105DumpStage < 3 && h107GateOpen ()) {
     thread_wakeup ((event_t) &gH109Chan);
@@ -689,6 +697,9 @@ h109WorkerThread (void *, wait_result_t)
   for (;;) {
     assert_wait (&gH109Chan, THREAD_INTERRUPTIBLE);
     thread_block (nullptr);
+    gH110WorkerWakes = gH110WorkerWakes + 1;
+    IOLog ("NATIVE_TICK: worker wake=%u flags=%x\n",
+           gH110WorkerWakes, native_boot_flags);
     if (!gH103SlotMode || !h107GateOpen ()) {
       continue;
     }
@@ -2764,12 +2775,19 @@ NativeUfsProbe::start (IOService *provider)
   if (dumpRet == KERN_SUCCESS) {
     thread_deallocate (dumpThread);
   }
-  gH109TimerCall = timer_call_alloc (h109TimerFunc, nullptr);
-  if (gH109TimerCall) {
-    timer_call_enter (gH109TimerCall, mach_absolute_time () + 19200000ULL, 0);
-    IOLog ("NATIVE_TICK: timer armed\n");
+  uint32_t tickEnabled = 1;
+  PE_parse_boot_argn ("h109-tick", &tickEnabled, sizeof tickEnabled);
+  gH110TickEnabled = tickEnabled ? 1 : 0;
+  if (!gH110TickEnabled) {
+    IOLog ("NATIVE_TICK: timer disabled\n");
   } else {
-    IOLog ("NATIVE_TICK: timer alloc failed\n");
+    gH109TimerCall = timer_call_alloc (h109TimerFunc, nullptr);
+    if (gH109TimerCall) {
+      timer_call_enter (gH109TimerCall, mach_absolute_time () + 19200000ULL, 0);
+      IOLog ("NATIVE_TICK: timer armed\n");
+    } else {
+      IOLog ("NATIVE_TICK: timer alloc failed\n");
+    }
   }
   if (gH103HbTimerOn == 1) {
     fHbLoop = IOWorkLoop::workLoop ();
