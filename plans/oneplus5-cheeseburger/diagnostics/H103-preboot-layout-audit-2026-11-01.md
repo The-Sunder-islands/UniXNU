@@ -4498,3 +4498,33 @@ SHA-256: 7928c93baab2727ebdba8db9454e573e7b889a4a42ccbaa62aca6af172a4cd5a
 - 白 + 仍灰/停 driverkitd active：post-white 卡点是 driverkitd/FileSet，
   与 slot/IOGPU 无关。
 - 左上绿：pre-backboardd race 仍在，重试。
+
+## 105. slot0+noiogpu 结果与 H104i 进程状态 dump（2026-11-05）
+
+`boot-H104b-slot0-noiogpu.img` 上机：左上白，右上/右下灰；白后等约 10 分钟
+不变，无显示 open。控制台继续到 `datamigrator` 等，loader/backboardd 没有
+`NATIVE_EXIT`。因此白之后的卡点与 slot 写入、IOGPUFamily load 都无关；
+loader/backboardd 是活着但被阻塞。
+
+H104i 在 `osfmk/kern/task.c` 加只读 helper：
+
+```c
+void native_proc_state_dump(void);
+```
+
+它按 PID 找 78/55/63/1，dump 每个线程的 tid/state/wait_event/
+continuation/parameter/options。UFS 心跳线程在 backboardd 实际 exec 后
+30–40 秒调用一次。镜像继续 `h103-slot=0 h103-load-iogpu=0`，无持久化日志，
+dump 打在控制台。
+
+```text
+kernel:  b68d99796e1496c3b9b45b183498a5e11892b77423fb23884a181f2778cddfc3
+payload: d99ad12648e7603b4f566ef68f5d258ec11a74f3016f7ca93bc9d4f12ad8d4a3
+boot:    4647216c5ddb03c43d5118b9db577402250a630d0382460b5b034600e20278e1
+```
+
+判读：
+
+- loader/backboardd 的 state/wait_event/continuation 若相同：定位共同等待点；
+- loader 在 IOKit/mach 等待：查对应 service；
+- 两者 running 但未 open：查用户态/launchd 依赖。

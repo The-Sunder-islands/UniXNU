@@ -2976,6 +2976,37 @@ SHA-256: 7928c93baab2727ebdba8db9454e573e7b889a4a42ccbaa62aca6af172a4cd5a
 无持久化日志，2×2/心跳仍运行；用于判断白之后的显示 open 是否受 slot
 写入或 IOGPUFamily load 影响。
 
+H104b-slot0-noiogpu 上机：左上白，右上/右下灰；白之后等了约 10 分钟
+仍无显示 open。`slot` 和 `IOGPUFamily load` 都关掉仍复现，所以白之后的
+卡点与两者无关。控制台还能继续到 `datamigrator` 等，loader/backboardd
+没有 `NATIVE_EXIT`，是活着但被阻塞。
+
+H104i 加一个只读的进程状态 dump：
+
+```text
+osfmk/kern/task.c: native_proc_state_dump()
+  IOMFB_FDR_Loader 78
+  backboardd 55
+  driverkitd 63
+  launchd 1
+  每个线程: tid/state/wait_event/continuation/parameter/options
+```
+
+由 UFS 心跳线程在 backboardd 实际 exec 后 30–40 秒调用一次；镜像仍用
+`h103-slot=0 h103-load-iogpu=0`，无持久化日志，dump 直接打印在控制台。
+
+```text
+H104i kernel:  b68d99796e1496c3b9b45b183498a5e11892b77423fb23884a181f2778cddfc3
+H104i payload: d99ad12648e7603b4f566ef68f5d258ec11a74f3016f7ca93bc9d4f12ad8d4a3
+H104i boot:    4647216c5ddb03c43d5118b9db577402250a630d0382460b5b034600e20278e1
+```
+
+判读：看 `NATIVE_PROC_DUMP` / `NATIVE_PROC_THREAD`。重点比较 loader 和
+backboardd 的 `state`/`wait_event`/`continuation`：
+- 都在等同一个地址/continuation：找到该等待点；
+- loader 在 mach/IOKit 等待：查对应 service；
+- 两者已运行但没 open：查用户态/launchd 依赖。
+
 判读：看 `NATIVE_IOGPU_ACCEL: name=... mc=... obj=... service=...`。
 - 某个 `obj/service` 非 0：真实 concrete 类可分配，attach/register 后看
   A540 绿和 CA 反应。
