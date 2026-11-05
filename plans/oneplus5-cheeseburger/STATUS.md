@@ -3529,6 +3529,37 @@ h103-log-secs=5 h109-tick=1`）。
   查 redistributor 使能/优先级/亲和；
 - `timer` 在增长 → 中断正常，问题在 `rtclock_intr`/`timer_call` 的接线。
 
+## H112 5 秒 IRQ 采样与 120 秒强制落盘（2026-11-06）
+
+H111 上机同样没有写出日志（导出的 `h103log.bin` 与 H110 的 `boot_id`
+相同 = 旧内容），最后一次 `NATIVE_IRQ` 在 ~190 s，正好滚出最后一屏；冻结
+点在 ~197 s，早于所有门槛（backboardd 未 exec，SpringBoard+60 s 兜底
+≈225 s）。H112 只加诊断：
+
+- `NATIVE_IRQ` 采样间隔 30 s → **5 s**，保证冻结时最后一屏必有一条；
+- 新增**绝对时间兜底**：UFS 启动后 120 s 强制做一次 `NATIVE_PROC_DUMP` +
+  flush，不依赖任何 exec flag，保证 197 s 冻结前一定有一份落盘记录
+  （120 s 时系统正常，cpu2 无锁风暴）；
+- SpringBoard 兜底仍保持 +60 s 不变（避免在 launchd 竞争窗口里提前写盘）。
+
+```text
+H112 kernel:  a3c901002d1a7019a39a0a12e1b0e2334356d241f99e8f7a2c4db66b1d6934fc
+H112 payload: 2836a566cb0f91a1d503e7fa974e7a1335ca7f34e207fa5eaccf1d32b42091e7
+H112 boot:    d1540e00f47d3550df6256a50eb132a7e338d2d4ccb5fc6ae7925e222f77cf75
+```
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H112.img`（已核对）、
+Mac `~/h103/boot-H112.img`、仓库 `out/cheeseburger/boot/boot-H112.img`。
+args 与 H111 相同（`cpus=2 h103-slot=1 h103-load-iogpu=0 h103-log-secs=5
+h109-tick=1`）。
+
+判读：
+
+- 最后一屏的 `NATIVE_IRQ: timer=…`：`timer=0` → arch timer 中断从未投递；
+  结合 `cntv_ctl`（ENABLE/IMASKED）区分"没开"和"没投递"；
+- 拉 `h103log.bin` 应有 `NATIVE_TICK: forced dump at uptime 120 s` 及之后
+  的进程/线程快照，`boot_id` 应与 H110/H111 不同。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
