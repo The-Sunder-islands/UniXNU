@@ -3833,3 +3833,36 @@ boot:    bc34cb8e49fe81ee82f4c8ba7aefe6e25d6626f4a14a65eebf27db079171cfff
 注意：Mac 设备仓库 `board.toml` 本来就有一批未提交改动（slide
 0x5000000、IOMobileGraphicsFamily、archives 等），P1 只在其工作树上追加
 IOGPUFamily 一行；没有把这些改动一起提交。
+
+### 90a. 设备仓库整理提交（2026-11-05）
+
+设备仓库 `UniXNU-cheeseburger` 的工作树已按区域整理提交：
+
+```text
+2400c54 config: enable the warm UFS runtime, PMGR and graphics prelink
+19d46d6 ufs: add the warm-link runtime and original storage bindings
+6fef5db power: add the guarded PMGR build and glue
+9ad41b0 adt: add A540 nodes and deterministic/root-auth inputs
+2bf3c61 build: add the panic and early-progress patch tool
+aa9bc99 chore: pin fetched sources and ignore external bring-up inputs
+```
+
+以下文件与 `~/DinnerABC` 逐字节相同，AGENTS 禁止导入，因此只留在
+构建机本地并加入 `.gitignore`，没有提交：
+
+```text
+scripts/CheeseburgerPlatformPower.cpp
+scripts/LogWindowConfig.h
+scripts/ReadPolicy.h
+scripts/ResponsePolicy.h
+scripts/RootDiagnostics.h
+scripts/RootLayout.h
+scripts/RootPublication.h
+scripts/RootTransportLayout.h
+scripts/RootWindowRead.h
+scripts/TransferPoll.h
+scripts/VerifiedBlockPolicy.h
+```
+
+`scripts/data/SystemVolume.im4p` 是 IPSW 里的 system-volume auth blob，也
+不提交，只保留在本地。`unixnu.lock` 记录解析后的源码 commit，已提交。

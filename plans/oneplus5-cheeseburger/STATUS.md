@@ -2720,6 +2720,11 @@ H103fo boot:    bc34cb8e49fe81ee82f4c8ba7aefe6e25d6626f4a14a65eebf27db079171cfff
 `IOGPUFamily` 应让 `NATIVE_IOGPU_LOAD: rc=0`；这验证 prelink 注册，不改
 display archive。若 rc 仍非 0，先查 prelink 注册，不要动 A540。
 
+设备仓库已整理提交：`2400c54`（config）、`19d46d6`（ufs）、
+`6fef5db`（power）、`9ad41b0`（adt）、`2bf3c61`（patch tool）、
+`aa9bc99`（lock/gitignore）。DinnerABC 逐字节副本和 SystemVolume.im4p
+只留在本地，未提交。
+
 ### 关键产物
 
 ```text
