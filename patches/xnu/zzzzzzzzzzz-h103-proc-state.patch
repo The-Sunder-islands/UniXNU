@@ -1,0 +1,67 @@
+diff --git a/osfmk/kern/task.c b/osfmk/kern/task.c
+index 5dcf00e..402504a 100644
+--- a/osfmk/kern/task.c
++++ b/osfmk/kern/task.c
+@@ -10285,3 +10285,62 @@ task_best_name(task_t task, char *buf, size_t size)
+ 	char *name = proc_best_name(task_get_proc_raw(task));
+ 	strlcpy(buf, name, size);
+ }
++
++
++/* H104i diagnostic only: dump display-side thread wait state. */
++void native_proc_state_dump(void);
++extern struct proc *proc_find(int);
++extern int proc_rele(struct proc *);
++extern struct task *proc_task(struct proc *);
++
++void
++native_proc_state_dump(void)
++{
++	const int pids[] = { 78, 55, 63, 1 };
++	for (unsigned i = 0; i < sizeof(pids) / sizeof(pids[0]); i++) {
++		struct proc *p = proc_find(pids[i]);
++		if (!p) {
++			printf("NATIVE_PROC_DUMP: pid=%d not found\n", pids[i]);
++			continue;
++		}
++		char name[32] = {};
++		proc_name(pids[i], name, sizeof(name));
++		task_t task = proc_task(p);
++		printf("NATIVE_PROC_DUMP: pid=%d comm=%s task=%p\n", pids[i], name, task);
++		if (task) {
++			struct {
++				uint64_t tid;
++				int state;
++				uint64_t wait;
++				void *cont;
++				void *param;
++				uint16_t opts;
++			} snap[32];
++			unsigned count = 0;
++			task_lock(task);
++			thread_t th;
++			queue_iterate(&task->threads, th, thread_t, task_threads) {
++				if (count >= sizeof(snap) / sizeof(snap[0])) {
++					break;
++				}
++				snap[count].tid = thread_tid(th);
++				snap[count].state = th->state;
++				snap[count].wait = (uint64_t)th->wait_event;
++				snap[count].cont = (void *)th->continuation;
++				snap[count].param = th->parameter;
++				snap[count].opts = th->options;
++				count++;
++			}
++			int total = task->thread_count;
++			task_unlock(task);
++			printf("NATIVE_PROC_DUMP: pid=%d threads=%u total=%d\n", pids[i], count, total);
++			for (unsigned j = 0; j < count; j++) {
++				printf("NATIVE_PROC_THREAD: pid=%d tid=%llu state=0x%x wait=%llx cont=%p param=%p opts=0x%x\n",
++				    pids[i], (unsigned long long)snap[j].tid, snap[j].state,
++				    (unsigned long long)snap[j].wait, snap[j].cont,
++				    snap[j].param, snap[j].opts);
++			}
++		}
++		proc_rele(p);
++	}
++}

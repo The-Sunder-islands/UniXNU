@@ -115,6 +115,20 @@ static void h103HeaderWriteThunk (void);
 // call it directly like the original code (a weak import can bind to null).
 extern "C" int native_legacy_test_pattern(void);
 
+// H104i: after backboardd is up, ask the XNU proc-diag helper to dump the
+// display-side thread states. The helper lives in the kernel because the
+// driver's public headers keep struct task/thread incomplete.
+extern "C" void native_proc_state_dump(void);
+
+static volatile uint64_t gH104BackboarddTicks;
+static volatile int gH104DumpDone;
+
+static void
+h104DumpProcs (void)
+{
+  native_proc_state_dump ();
+}
+
 // H103ea keeps H103bd's 10-second heartbeat byte-for-byte: the ALIVE console
 // line is written first, then the 2x2 panel. H103bd was built exactly this way
 // and is the only confirmed 2x2 image; changing the interval or dropping the
@@ -139,6 +153,15 @@ heartbeatThread (void *, wait_result_t)
            (unsigned long long) gWindowLastReqCount);
     if (!gH103SkipPattern && !gH103HbTimerOn) {
       native_legacy_test_pattern ();
+    }
+    if (!gH104DumpDone && (native_boot_flags & 4)) {
+      uint64_t now = mach_absolute_time ();
+      if (!gH104BackboarddTicks) {
+        gH104BackboarddTicks = now;
+      } else if (now - gH104BackboarddTicks >= 30 * 19200000ULL) {
+        gH104DumpDone = 1;
+        h104DumpProcs ();
+      }
     }
     uint64_t start = gWindowStartTicks;
     if (gWindowInFlight && start && mach_absolute_time () - start > 10 * 19200000ULL) {
