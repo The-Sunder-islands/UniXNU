@@ -65,14 +65,3 @@ local.toml
 /*.ico
 /*.txt
 /*.log
-/*.text
-/*.csv
-/*.tsv
-/*.rtf
-/*.md
-/*.markdown
-/*.rst
-!/README.md
-!/README.zh-CN.md
-!/AGENTS.md
-!/CONTRIBUTING.md
