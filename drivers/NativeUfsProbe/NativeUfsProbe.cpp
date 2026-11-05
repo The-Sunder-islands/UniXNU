@@ -23,6 +23,7 @@
 #include <kern/task.h>
 #include <kern/thread.h>
 #include <kern/clock.h>
+#include <kern/sched_prim.h>
 #include <libkern/libkern.h>
 #include <libkern/c++/OSData.h>
 #include <libkern/c++/OSDictionary.h>
@@ -130,12 +131,14 @@ extern "C" void native_proc_state_dump(void);
 // whether tsleep wakes here. When it does, it flips only the 16x16 heartbeat
 // cell (no full 2x2 redraw), runs any due dump and flushes that dump, so the
 // diagnostics no longer depend on UFS read traffic.
+// H109: tsleep does not wake either (only "NATIVE_TICK: thread rc=0" appears).
+// The heartbeat and the dump wakeup now come from a timer_call, which runs
+// from the timer interrupt and needs no thread timer at all.
 extern "C" void native_legacy_heartbeat_cell(void);
-extern "C" int tsleep(void *chan, int pri, const char *wmsg, int timo);
-extern "C" int hz;
 
-static int gH108TickChan;
-static volatile uint32_t gH108Ticks;
+static int gH109Chan;
+static volatile uint32_t gH109Ticks;
+static timer_call_t gH109TimerCall;
 
 // H105: this thread never wakes from IOSleep on this kernel. No H103/H104
 // capture contains a single NATIVE_UFS_ALIVE line after NATIVE_UFS_HB: enter,
@@ -596,6 +599,15 @@ h103FlushNow (void)
 static void
 h103SlotTick (void)
 {
+  // H109: prove the timer_call heartbeat from the log, independently of the
+  // display: one line every 30 s when the tick counter advanced.
+  static volatile uint32_t printedTicks;
+  uint32_t ticks = gH109Ticks;
+  if (ticks && ticks != printedTicks && (ticks % 30 == 0 || printedTicks == 0)) {
+    printedTicks = ticks;
+    IOLog ("NATIVE_TICK: sec=%u flags=%x gate=%d\n", ticks, native_boot_flags,
+           h107GateOpen () ? 1 : 0);
+  }
   if (!gH103SlotMode) {
     return;
   }
@@ -651,23 +663,32 @@ h103SlotTick (void)
   h103FlushNow ();
 }
 
-// H108: 1 Hz diagnostic thread. It flips the independent heartbeat cell every
-// second, and when the gate is open and a dump stage is due it prints the dump
-// and flushes it. With a working tsleep this no longer depends on UFS reads,
-// which is what hid stage 2/3 once the system stopped issuing them.
+// H109: the timer interrupt fires this every second. It flips the 16x16 cell
+// (a plain framebuffer fill, no locks), counts ticks and wakes the dump worker.
+// Printing, task locks and UFS writes stay in the worker's thread context.
 static void
-h108TickThread (void *, wait_result_t)
+h109TimerFunc (timer_call_param_t, timer_call_param_t)
 {
-  thread_set_thread_name (current_thread (), "h108_tick");
+  gH109Ticks = gH109Ticks + 1;
+  native_legacy_heartbeat_cell ();
+  if (gH103SlotMode && gH105DumpStage < 3 && h107GateOpen ()) {
+    thread_wakeup ((event_t) &gH109Chan);
+  }
+  if (gH109TimerCall) {
+    timer_call_enter (gH109TimerCall, mach_absolute_time () + 19200000ULL, 0);
+  }
+}
+
+// H109: the dump worker sleeps on an explicit wakeup, never on a thread timer,
+// so it does not depend on the timer wakeup path that IOSleep and tsleep both
+// missed. It runs any due dump stage and flushes that dump.
+static void
+h109WorkerThread (void *, wait_result_t)
+{
+  thread_set_thread_name (current_thread (), "h109_dump");
   for (;;) {
-    (void) tsleep (&gH108TickChan, PZERO, "h108tick", hz);
-    gH108Ticks = gH108Ticks + 1;
-    uint32_t n = gH108Ticks;
-    if (n <= 5 || (n % 30) == 0) {
-      IOLog ("NATIVE_TICK: sec=%u flags=%x slotMode=%d gate=%d\n",
-             n, native_boot_flags, gH103SlotMode, h107GateOpen () ? 1 : 0);
-    }
-    native_legacy_heartbeat_cell ();
+    assert_wait (&gH109Chan, THREAD_INTERRUPTIBLE);
+    thread_block (nullptr);
     if (!gH103SlotMode || !h107GateOpen ()) {
       continue;
     }
@@ -2734,13 +2755,21 @@ NativeUfsProbe::start (IOService *provider)
   } else {
     IOLog ("NATIVE_UFS_HB: slot disabled\n");
   }
-  // H108: the independent 1 Hz thread runs even when the slot writer is off,
-  // so the heartbeat cell and the dump gate never depend on UFS read traffic.
-  thread_t tickThread = nullptr;
-  kern_return_t tickRet = kernel_thread_start (h108TickThread, nullptr, &tickThread);
-  IOLog ("NATIVE_TICK: thread rc=%x\n", tickRet);
-  if (tickRet == KERN_SUCCESS) {
-    thread_deallocate (tickThread);
+  // H109: the 1 Hz heartbeat and the dump wakeup come from a timer_call (timer
+  // interrupt), because thread timers never fire on this port. The worker
+  // thread only sleeps on an explicit wakeup.
+  thread_t dumpThread = nullptr;
+  kern_return_t dumpRet = kernel_thread_start (h109WorkerThread, nullptr, &dumpThread);
+  IOLog ("NATIVE_TICK: worker rc=%x\n", dumpRet);
+  if (dumpRet == KERN_SUCCESS) {
+    thread_deallocate (dumpThread);
+  }
+  gH109TimerCall = timer_call_alloc (h109TimerFunc, nullptr);
+  if (gH109TimerCall) {
+    timer_call_enter (gH109TimerCall, mach_absolute_time () + 19200000ULL, 0);
+    IOLog ("NATIVE_TICK: timer armed\n");
+  } else {
+    IOLog ("NATIVE_TICK: timer alloc failed\n");
   }
   if (gH103HbTimerOn == 1) {
     fHbLoop = IOWorkLoop::workLoop ();
