@@ -58,8 +58,12 @@ static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
 static volatile int gH103SlotBusy;
 static volatile int gH103LastSlotMsgX = -1;
-// H103fl diagnostics: 0=no slot writer, 1=500 ms, 2=2 s (H103fi cadence).
+// H103fl diagnostics: 0=no slot writer, 1=default cadence, 2=2 s fast control.
 static volatile int gH103SlotMode = 1;
+// H106: ios-sweet 0069's batching. The flush runs at most once per interval,
+// writes only the message bytes produced since the previous flush, and writes
+// nothing while the kernel is quiet. h103-log-secs sets the interval (1..60).
+static volatile uint32_t gH103LogSecs = 10;
 // A 1 Hz work-loop timer drives the display heartbeat cell independently of
 // UFS I/O, so a frozen cell means a real kernel/work-loop hang.
 static volatile int gH103HbTimerOn;
@@ -541,7 +545,7 @@ h103SlotTick (void)
   if (!(native_boot_flags & 4)) {
     return;
   }
-  uint64_t interval = gH103SlotMode == 2 ? 2 * 19200000ULL : 19200000ULL / 2;
+  uint64_t interval = (gH103SlotMode == 2 ? 2u : gH103LogSecs) * 19200000ULL;
   uint64_t now = mach_absolute_time ();
   if (!gH103LastSlotTicks) {
     gH103LastSlotTicks = now;
@@ -559,10 +563,10 @@ h103SlotTick (void)
     x = 0;
   }
   if (x == gH103LastSlotMsgX) {
-    // H103fm: refresh just the header so uptime_s advances even when the
-    // kernel has stopped logging. This runs on the read path (tick is called
-    // after fLock is released), so it shows whether UFS reads still complete.
-    if (now - gH103LastHeaderTicks >= 2 * 19200000ULL) {
+    // H106: ios-sweet 0069's rule - nothing new to persist means no data
+    // write. Only the header is rewritten, at the same slow interval, so
+    // uptime_s still shows whether the read path is alive.
+    if (now - gH103LastHeaderTicks >= interval) {
       gH103LastSlotTicks = now;
       gH103LastHeaderTicks = now;
       gH103SlotBusy = 1;
@@ -572,10 +576,12 @@ h103SlotTick (void)
     return;
   }
   gH103LastSlotTicks = now;
-  gH103LastSlotMsgX = x;
   gH103SlotBusy = 1;
+  // H106: leave gH103LastSlotMsgX at the previous cursor while the writer
+  // computes how many bytes are new, then advance it after the write.
   h103SlotWriteThunk ();
   gH103SlotBusy = 0;
+  gH103LastSlotMsgX = x;
 }
 
 OSDefineMetaClassAndStructors (NativeUfsProbe, IOService)
@@ -1595,16 +1601,32 @@ NativeUfsProbe::h103SlotWrite (void)
     }
     return;
   }
-  uint32_t n = h103CopyMsgbufTail (body, 32U * 4096U);
+  // H106: ios-sweet 0069's delta write. Only the bytes produced since the
+  // previous flush are copied and written, capped at one 32-block slot. A
+  // quiet kernel therefore writes nothing but the header.
+  struct H103MsgBuf *m = msgbufp;
+  uint32_t size = (m && m->msg_size > 0) ? static_cast<uint32_t> (m->msg_size) : 0;
+  uint32_t cursor = (m && m->msg_bufx >= 0 && m->msg_bufx < m->msg_size) ?
+      static_cast<uint32_t> (m->msg_bufx) : 0;
+  uint32_t previous = gH103LastSlotMsgX < 0 ? 0 : static_cast<uint32_t> (gH103LastSlotMsgX);
+  uint32_t delta = size ? (cursor + size - previous) % size : 0;
+  uint32_t blocks = (delta + 4095U) / 4096U + 1U;
+  if (blocks > 32U) {
+    blocks = 32U;
+  }
+  if (blocks < 1U) {
+    blocks = 1U;
+  }
+  uint32_t n = h103CopyMsgbufTail (body, blocks * 4096U);
   uint32_t slot = gH103SlotCursor % slotCount;
-  bool ok = logWrite (257U + slot * 32U, 32, body);
+  bool ok = logWrite (257U + slot * 32U, blocks, body);
   if (!ok) {
     gH103SlotWriteErrors = gH103SlotWriteErrors + 1;
   }
   if (attempts++ < 8) {
-    IOLog ("NATIVE_UFS_SLOT: attempt=%u slot=%u lba=%llx body=%u n=%u fires=%u\n",
+    IOLog ("NATIVE_UFS_SLOT: attempt=%u slot=%u lba=%llx body=%u blocks=%u delta=%u n=%u fires=%u\n",
            attempts, slot, (unsigned long long) (fLogFirst + 257U + slot * 32U),
-           ok ? 1 : 0, n, gH103TimerFires);
+           ok ? 1 : 0, blocks, delta, n, gH103TimerFires);
   }
   if (ok) {
     H103LogHeader h;
@@ -2582,11 +2604,16 @@ NativeUfsProbe::start (IOService *provider)
   uint32_t slotMode = 1;
   PE_parse_boot_argn ("h103-slot", &slotMode, sizeof slotMode);
   gH103SlotMode = slotMode <= 2 ? static_cast<int> (slotMode) : 1;
+  // H106: ios-sweet 0069's flush interval (seconds), 1..60.
+  uint32_t logSecs = 10;
+  PE_parse_boot_argn ("h103-log-secs", &logSecs, sizeof logSecs);
+  gH103LogSecs = (logSecs >= 1 && logSecs <= 60) ? logSecs : 10;
   // H104f: do not touch userdata_ios until backboardd has actually exec'd.
-  // The 0.5-2s slot writes contend with driverkitd/backboardd's UFS reads and
+  // The early slot writes contend with driverkitd/backboardd's UFS reads and
   // make the launchd ordering race lose; slot0 boots are stable. The message
   // buffer keeps accumulating, so the first post-backboardd write still dumps
-  // the early boot log.
+  // the early boot log. H106 keeps that gate and adds the ios-sweet 0069
+  // cadence: one delta write per h103-log-secs, and none while quiet.
   uint32_t hbTimer = 0;
   PE_parse_boot_argn ("h103-hb-timer", &hbTimer, sizeof hbTimer);
   gH103HbTimerOn = hbTimer <= 2 ? static_cast<int> (hbTimer) : 1;
@@ -2594,8 +2621,8 @@ NativeUfsProbe::start (IOService *provider)
   PE_parse_boot_argn ("h103-load-iogpu", &loadIogpu, sizeof loadIogpu);
   gH103LoadIogpu = loadIogpu ? 1 : 0;
   gH103StartTicks = mach_absolute_time ();
-  IOLog ("NATIVE_UFS_HB: slotMode=%d hbTimer=%d loadIogpu=%d\n",
-         gH103SlotMode, gH103HbTimerOn, gH103LoadIogpu);
+  IOLog ("NATIVE_UFS_HB: slotMode=%d logSecs=%u hbTimer=%d loadIogpu=%d\n",
+         gH103SlotMode, gH103LogSecs, gH103HbTimerOn, gH103LoadIogpu);
   thread_t heartbeat = nullptr;
   kern_return_t heartbeatRet = kernel_thread_start (heartbeatThread, nullptr, &heartbeat);
   IOLog ("NATIVE_UFS_HB: start rc=%x skipPattern=%u\n",
