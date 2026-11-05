@@ -3602,3 +3602,56 @@ boot:    f3c461aeb8510db31bb6d5e9c22dedb99c84e7e550dad100bdc1008cfb749626
 
 判读：TWRP 最新 slot 应明显更新更快；`slots_written` 增长更快；2×2、左上
 4 块和静默 console 保持。
+
+## 87. H103fl：1 Hz 定时心跳 + slot A/B（2026-11-05）
+
+H103fk 日志（`/home/ls/UniXNU/h103-log-20261105-121155.txt`）的最后一行是：
+
+```text
+[  477.213103]: KextLog: driverkitd is active
+```
+
+同一份日志已经包含：
+
+```text
+442s launchd boot tasks
+450s SpringBoard/27
+454s backboardd/55
+462s IOMFB_FDR_Loader/78
+477s driverkitd active
+```
+
+没有 panic、没有 UFS OCS timeout、没有 `NATIVE_UFS_LOCK` 超时；
+`slots_written=121`、`write_errors=0`。H103fj（2 秒 slot）也在同一位置
+停下，因此 500 ms slot 不是根因。
+
+左上第 3 块是 UFS 活动指示：`drawTestPattern()` 只在每 64 条 UFS 命令和
+10 秒心跳线程里调用，而后者停在 `IOSleep`。I/O 空闲时该块停住是正常现象，
+不能据此判断内核挂死。
+
+H103fl 只改 UFS 驱动，不改 display archive：
+
+```text
+h103-hb-timer=1  在 UFS 驱动里建 IOWorkLoop + IOTimerEventSource，1 Hz
+                 调用 native_legacy_test_pattern()，给第 3 块一个独立时基
+h103-slot=0/1/2  0=关闭 slot tick，1=500 ms，2=2 秒
+logWrite()       锁改成 2 秒 lockWithTimeout，避免被卡死的读拖住
+header           uptime_s 填最后成功 slot 的时间，write_errors 计数
+```
+
+两个候选（同内核，只差 payload 参数）：
+
+```text
+H103fl        kernel 44cea2a0...
+              payload cfa7f7fb... boot 625be885...
+H103fl-noslot payload c5985776... boot e9fdecef...
+```
+
+判读：
+
+- 停住时第 3 块仍以约 1 Hz 闪 → workloop/内核活着，当前是显示/FDR 关口，
+  不是 UFS 死机；
+- 第 3 块完全静止，且日志没有 `NATIVE_UFS_HB_TIMER: fire=` → 定时器未运行
+  或内核已挂；
+- 若出现 `NATIVE_UFS_HB_TIMER: stall ...` → 有 UFS 命令在飞超过 5 秒；
+- 对比 `H103fl` 与 `H103fl-noslot` 可排除 slot 写入对停点的影响。

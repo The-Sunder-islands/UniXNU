@@ -2637,6 +2637,24 @@ H103fk payload: 17b7894192bfaffdd91e40b21eb02b1b160a0cb51c12daeeb83dc918a508a8ed
 H103fk boot:    f3c461aeb8510db31bb6d5e9c22dedb99c84e7e550dad100bdc1008cfb749626
 ```
 
+H103fk 上机日志停在 `KextLog: driverkitd is active`，左上第 3 块（UFS 活动
+心跳）同时停止。H103fj（2 秒 slot）在同一位置停下，说明 500 ms 不是根因。
+第 3 块由每 64 条 UFS 命令的 `drawTestPattern()` 驱动，10 秒心跳线程从不
+醒来，所以 I/O 空闲时它本来就会停，不能证明内核死机。
+
+H103fl 在 UFS 驱动里加 1 Hz `IOTimerEventSource`（不改 display archive），
+用 `h103-hb-timer=1` 开启；`h103-slot=0/1/2` 选择无 slot / 500 ms / 2 秒；
+`logWrite` 改为 2 秒锁超时；header 的 `uptime_s`/`write_errors` 现在有值。
+
+```text
+H103fl kernel:  44cea2a033539590f0e357cba95908471122d2f278f5d0f38011c0d35a83cf44
+H103fl payload: cfa7f7fb916e17f0882a5515b9cc019235282a386721727bfb0059de1565b6a7
+H103fl boot:    625be88506e2b4b8a06eeec2f4ac92a08a7852815b0bdc885171bc122c4d7b4e
+
+H103fl-noslot payload: c5985776b6c248aa2fdf27e4f1b759f8237c1a240fe36aa2c0d6002f14776465
+H103fl-noslot boot:    e9fdecefef16fe6020da360b2f960e31ca38197f00380888014fa73415512d94
+```
+
 ### 关键产物
 
 ```text

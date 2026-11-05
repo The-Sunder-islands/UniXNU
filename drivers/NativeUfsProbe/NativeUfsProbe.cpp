@@ -15,6 +15,8 @@
 #include <IOKit/IOMemoryDescriptor.h>
 #include <IOKit/IODeviceMemory.h>
 #include <IOKit/storage/IOBlockStorageDevice.h>
+#include <IOKit/IOTimerEventSource.h>
+#include <IOKit/IOWorkLoop.h>
 #include <sys/types.h>
 #include <sys/param.h>
 #include <kern/debug.h>
@@ -56,6 +58,13 @@ static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
 static volatile int gH103SlotBusy;
 static volatile int gH103LastSlotMsgX = -1;
+// H103fl diagnostics: 0=no slot writer, 1=500 ms, 2=2 s (H103fi cadence).
+static volatile int gH103SlotMode = 1;
+// A 1 Hz work-loop timer drives the display heartbeat cell independently of
+// UFS I/O, so a frozen cell means a real kernel/work-loop hang.
+static volatile int gH103HbTimerOn;
+static volatile uint64_t gH103StartTicks;
+static volatile uint32_t gH103SlotWriteErrors;
 extern "C" {
 volatile uint32_t native_h103_slot_state = 0;
 }
@@ -90,7 +99,7 @@ heartbeatThread (void *, wait_result_t)
            (unsigned long long) gUfsLastBytes,
            (unsigned long long) gWindowLastReqBlock,
            (unsigned long long) gWindowLastReqCount);
-    if (!gH103SkipPattern) {
+    if (!gH103SkipPattern && !gH103HbTimerOn) {
       native_legacy_test_pattern ();
     }
     uint64_t start = gWindowStartTicks;
@@ -114,6 +123,9 @@ heartbeatThread (void *, wait_result_t)
 static void
 h103SlotThread (void *, wait_result_t)
 {
+  if (!gH103SlotMode) {
+    return;
+  }
   native_h103_slot_state = 3;
   for (;;) {
     IOSleep (2000);
@@ -343,12 +355,18 @@ class NativeUfsProbe : public IOService {
   IOBufferMemoryDescriptor *fLogDma = nullptr;
   uint8_t *fLogData = nullptr;
   uint64_t fLogDataPhys = 0;
+  IOWorkLoop *fHbLoop = nullptr;
+  IOTimerEventSource *fHbTimer = nullptr;
+  uint64_t fHbNext = 0;
   static void logThread (void *, wait_result_t);
+  static void hbTimerFired (OSObject *owner, IOTimerEventSource *sender);
+  void hbTimerTick (IOTimerEventSource *sender);
   bool logWrite (uint64_t rel, uint32_t blocks, const void *src);
   bool logSync (void);
 
 public:
   bool start (IOService *provider) override;
+  void free () override;
   bool h103Snapshot (const char *tag, bool pause, bool verify);
   void h103SlotWrite (void);
   void h103SingleWrite (void);
@@ -373,12 +391,16 @@ h103SlotWriteThunk (void)
 static void
 h103SlotTick (void)
 {
+  if (!gH103SlotMode) {
+    return;
+  }
+  uint64_t interval = gH103SlotMode == 2 ? 2 * 19200000ULL : 19200000ULL / 2;
   uint64_t now = mach_absolute_time ();
   if (!gH103LastSlotTicks) {
     gH103LastSlotTicks = now;
     return;
   }
-  if (gH103SlotBusy || now - gH103LastSlotTicks < 19200000ULL / 2) {
+  if (gH103SlotBusy || now - gH103LastSlotTicks < interval) {
     return;
   }
   struct H103MsgBuf *m = msgbufp;
@@ -924,7 +946,9 @@ ufsSubmit (UfsQueue *q, unsigned direction, unsigned bytes,
     // That frequent redraw, not the 10-second heartbeat alone, is what kept
     // the panel alive while the console scrolled. Restore it verbatim. Keep
     // the redraw independent of gH103Quiet so a later quiet build cannot lose
-    // the panel again.
+    // the panel again. H103fl's 1 Hz timer adds extra redraws; at the stuck
+    // screen a 1 Hz blink proves the work loop is alive, a static cell means
+    // the timer did not fire or the kernel hung.
     native_legacy_test_pattern ();
     if (!gH103Quiet) {
       IOLog ("NATIVE_UFS_PROGRESS: cmds=%llu last=%llx/%llu loops=%llu ticks=%llu "
@@ -1182,7 +1206,9 @@ NativeUfsProbe::logWrite (uint64_t rel, uint32_t blocks, const void *src)
     return false;
   }
   const unsigned bytes = blocks * 4096U;
-  IOLockLock (fLock);
+  if (!lockWithTimeout (fLock, "logWrite", 38400000ULL)) {
+    return false;
+  }
   uint8_t cdb[16] = { 0x2a };
   cdb[1] = 0x08;  // FUA: commit this log write without a SYNCHRONIZE CACHE
   putBe32 (cdb + 2, static_cast<uint32_t> (fLogFirst + rel));
@@ -1219,7 +1245,9 @@ NativeUfsProbe::logSync (void)
   if (!fReady || !fLock) {
     return false;
   }
-  IOLockLock (fLock);
+  if (!lockWithTimeout (fLock, "logSync", 38400000ULL)) {
+    return false;
+  }
   bool ok = ufsSync (&fQueue);
   IOLockUnlock (fLock);
   return ok;
@@ -1349,6 +1377,9 @@ NativeUfsProbe::h103Snapshot (const char *tag, bool pause, bool verify)
   h.slot_count = (fLogBlocks > 257) ? (fLogBlocks - 257) / 32 : 0;
   h.slots_written = gH103SlotCursor;
   h.rounds = gH103SlotCursor ? gH103SlotCursor : 1;
+  h.uptime_s = gH103StartTicks ?
+      static_cast<uint32_t> ((mach_absolute_time () - gH103StartTicks) / 19200000ULL) : 0;
+  h.write_errors = gH103SlotWriteErrors;
   h.state = gH103SlotCursor ? 3 : 2;
   strlcpy (h.tag, "cheeseburger-H103", sizeof h.tag);
   memcpy (head, &h, sizeof h);
@@ -1399,6 +1430,9 @@ NativeUfsProbe::h103SlotWrite (void)
   uint32_t n = h103CopyMsgbufTail (body, 32U * 4096U);
   uint32_t slot = gH103SlotCursor % slotCount;
   bool ok = logWrite (257U + slot * 32U, 32, body);
+  if (!ok) {
+    gH103SlotWriteErrors = gH103SlotWriteErrors + 1;
+  }
   if (attempts++ < 8) {
     IOLog ("NATIVE_UFS_SLOT: attempt=%u slot=%u lba=%llx body=%u n=%u\n",
            attempts, slot, (unsigned long long) (fLogFirst + 257U + slot * 32U),
@@ -1421,6 +1455,9 @@ NativeUfsProbe::h103SlotWrite (void)
     h.slot_count = slotCount;
     h.slots_written = gH103SlotCursor + 1;
     h.rounds = gH103SlotCursor + 1;
+    h.uptime_s = gH103StartTicks ?
+        static_cast<uint32_t> ((mach_absolute_time () - gH103StartTicks) / 19200000ULL) : 0;
+    h.write_errors = gH103SlotWriteErrors;
     h.state = 3;
     strlcpy (h.tag, "cheeseburger-H103", sizeof h.tag);
     uint8_t *head = static_cast<uint8_t *> (IOMallocAligned (4096, 4096));
@@ -1435,11 +1472,81 @@ NativeUfsProbe::h103SlotWrite (void)
       if (headOk) {
         gH103SlotCursor++;
         native_h103_slot_state = 2;
+      } else {
+        gH103SlotWriteErrors = gH103SlotWriteErrors + 1;
       }
       IOFreeAligned (head, 4096);
     }
   }
   IOFreeAligned (body, 32U * 4096U);
+}
+
+void
+NativeUfsProbe::free (void)
+{
+  if (fHbTimer) {
+    fHbTimer->cancelTimeout ();
+    if (fHbLoop) {
+      fHbLoop->removeEventSource (fHbTimer);
+    }
+    fHbTimer->release ();
+    fHbTimer = nullptr;
+  }
+  if (fHbLoop) {
+    fHbLoop->release ();
+    fHbLoop = nullptr;
+  }
+  IOService::free ();
+}
+
+void
+NativeUfsProbe::hbTimerFired (OSObject *owner, IOTimerEventSource *sender)
+{
+  NativeUfsProbe *self = static_cast<NativeUfsProbe *> (owner);
+  if (self) {
+    self->hbTimerTick (sender);
+  }
+}
+
+void
+NativeUfsProbe::hbTimerTick (IOTimerEventSource *sender)
+{
+  static unsigned fires;
+  static int stallLogged;
+  fires++;
+  if (fires <= 4) {
+    IOLog ("NATIVE_UFS_HB_TIMER: fire=%u cmds=%llu\n", fires,
+           (unsigned long long) gUfsCommands);
+  }
+  if (!gH103SkipPattern) {
+    native_legacy_test_pattern ();
+  }
+  uint64_t now = mach_absolute_time ();
+  if (gUfsInFlight && gWindowStartTicks &&
+      now - gWindowStartTicks > 5 * 19200000ULL) {
+    if (!stallLogged) {
+      stallLogged = 1;
+      IOLog ("NATIVE_UFS_HB_TIMER: stall cmds=%llu last=%llx/%llu "
+             "req=%llx/%llu winFlight=%llu ufsFlight=%llu loops=%llu\n",
+             (unsigned long long) gUfsCommands,
+             (unsigned long long) gUfsLastLba,
+             (unsigned long long) gUfsLastBytes,
+             (unsigned long long) gWindowLastReqBlock,
+             (unsigned long long) gWindowLastReqCount,
+             (unsigned long long) gWindowInFlight,
+             (unsigned long long) gUfsInFlight,
+             (unsigned long long) gUfsLastLoops);
+    }
+  } else {
+    stallLogged = 0;
+  }
+  fHbNext += 19200000ULL;
+  if (fHbNext <= now) {
+    fHbNext = now + 19200000ULL;
+  }
+  if (sender) {
+    sender->wakeAtTime (fHbNext);
+  }
 }
 
 void
@@ -2241,6 +2348,15 @@ NativeUfsProbe::start (IOService *provider)
   uint32_t skipPattern = 0;
   PE_parse_boot_argn ("h103-skip-pattern", &skipPattern, sizeof skipPattern);
   gH103SkipPattern = skipPattern ? 1 : 0;
+  uint32_t slotMode = 1;
+  PE_parse_boot_argn ("h103-slot", &slotMode, sizeof slotMode);
+  gH103SlotMode = slotMode <= 2 ? static_cast<int> (slotMode) : 1;
+  uint32_t hbTimer = 0;
+  PE_parse_boot_argn ("h103-hb-timer", &hbTimer, sizeof hbTimer);
+  gH103HbTimerOn = hbTimer ? 1 : 0;
+  gH103StartTicks = mach_absolute_time ();
+  IOLog ("NATIVE_UFS_HB: slotMode=%d hbTimer=%d\n",
+         gH103SlotMode, gH103HbTimerOn);
   thread_t heartbeat = nullptr;
   kern_return_t heartbeatRet = kernel_thread_start (heartbeatThread, nullptr, &heartbeat);
   IOLog ("NATIVE_UFS_HB: start rc=%x skipPattern=%u\n",
@@ -2248,12 +2364,37 @@ NativeUfsProbe::start (IOService *provider)
   if (heartbeatRet == KERN_SUCCESS) {
     thread_deallocate (heartbeat);
   }
-  thread_t slotThread = nullptr;
-  IOLog ("NATIVE_UFS_HB: slot start\n");
-  kern_return_t slotRet = kernel_thread_start (h103SlotThread, nullptr, &slotThread);
-  IOLog ("NATIVE_UFS_HB: slot rc=%x\n", slotRet);
-  if (slotRet == KERN_SUCCESS) {
-    thread_deallocate (slotThread);
+  if (gH103SlotMode) {
+    thread_t slotThread = nullptr;
+    IOLog ("NATIVE_UFS_HB: slot start\n");
+    kern_return_t slotRet = kernel_thread_start (h103SlotThread, nullptr, &slotThread);
+    IOLog ("NATIVE_UFS_HB: slot rc=%x\n", slotRet);
+    if (slotRet == KERN_SUCCESS) {
+      thread_deallocate (slotThread);
+    }
+  } else {
+    IOLog ("NATIVE_UFS_HB: slot disabled\n");
+  }
+  if (gH103HbTimerOn) {
+    fHbLoop = IOWorkLoop::workLoop ();
+    if (fHbLoop) {
+      fHbTimer = IOTimerEventSource::timerEventSource (this,
+                                                       &NativeUfsProbe::hbTimerFired);
+      if (fHbTimer && fHbLoop->addEventSource (fHbTimer) == kIOReturnSuccess) {
+        fHbNext = mach_absolute_time () + 19200000ULL;
+        fHbTimer->wakeAtTime (fHbNext);
+        IOLog ("NATIVE_UFS_HB_TIMER: start loop=%p timer=%p\n", fHbLoop, fHbTimer);
+      } else {
+        IOLog ("NATIVE_UFS_HB_TIMER: add failed loop=%p timer=%p\n",
+               fHbLoop, fHbTimer);
+        if (fHbTimer) {
+          fHbTimer->release ();
+          fHbTimer = nullptr;
+        }
+      }
+    } else {
+      IOLog ("NATIVE_UFS_HB_TIMER: no workloop\n");
+    }
   }
 
   // Persistent log window: the last 32 MiB of userdata_ios. Write one
