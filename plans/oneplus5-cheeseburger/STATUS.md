@@ -2696,6 +2696,30 @@ H103fn payload: 3edc860a3a7008efce00d4601bcdc49738ac8d47a766e020c3fdc68701d023e1
 H103fn boot:    7ba4b9a64256f7ed7825d82ffedbcd0e229a16ae0218765ebd8abefd37d163ac
 ```
 
+H103fn 证明 post-root 也无法用 `OSKextLoadKextWithIdentifier` 加载
+`IOGPUFamily`：`rc=dc00800a`（`kOSKextReturnDisabled`），因为内核按
+`NO_KEXTD` 构建，`sKernelRequestsEnabled=false`。
+
+P1 只改 prelink roots（Mac 设备仓库 `board.toml` 加
+`com.apple.iokit.IOGPUFamily`），不改 display archive。prelink report：
+
+```text
+components 29 -> 30
+new component: com.apple.iokit.IOGPUFamily
+IOGPUFamily __TEXT/__TEXT_EXEC/__DATA_CONST/__DATA 合计增加 223,097 B
+现有组件 VA 不变
+```
+
+```text
+H103fo kernel:  69885c070e883b7b1f8a156afe649b71fc6230c250277a632bf28e3cfb1f03d1
+H103fo payload: 04f2fcee81bb27bdf05bd948050c83556764f5a05fec54aab51b4d8932e97077
+H103fo boot:    bc34cb8e49fe81ee82f4c8ba7aefe6e25d6626f4a14a65eebf27db079171cfff
+```
+
+判读：若 `IOMobileGraphicsFamily` 的先例成立，prelinked 的
+`IOGPUFamily` 应让 `NATIVE_IOGPU_LOAD: rc=0`；这验证 prelink 注册，不改
+display archive。若 rc 仍非 0，先查 prelink 注册，不要动 A540。
+
 ### 关键产物
 
 ```text

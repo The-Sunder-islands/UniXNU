@@ -3780,3 +3780,56 @@ boot:    7ba4b9a64256f7ed7825d82ffedbcd0e229a16ae0218765ebd8abefd37d163ac
 - `rc!=0`：post-root 也加载不了，需要把 IOGPUFamily 放进 prelink roots
   或改用户态加载时序；
 - `begin` 之后日志停住：加载请求阻塞在读线程，记录后回退 H103fm。
+
+## 90. P1：把 IOGPUFamily 放进 prelink roots（2026-11-05）
+
+H103fn 的 `NATIVE_IOGPU_LOAD` 在 post-root（SpringBoard 已 exec）仍返回：
+
+```text
+Can't load kext com.apple.iokit.IOGPUFamily - requests to user space are disabled.
+NATIVE_IOGPU_LOAD: rc=dc00800a
+```
+
+`dc00800a` 是 `kOSKextReturnDisabled`。根因是 `config/MASTER` 的
+`NO_KEXTD`：`OSKext.cpp` 中 `sKernelRequestsEnabled=false`，所以任何未
+内置的 kext 都不能通过用户态请求加载，与 pre/post-root 无关。
+
+P1 只加 prelink root，不改 UFS/display 源码：
+
+```text
+Mac: ~/UniXNU-cheeseburger/board.toml
+  roots += "com.apple.iokit.IOGPUFamily"
+```
+
+prelink 规划（原始 21H461 kernelcache）：
+
+```text
+当前 16 roots -> 29 components
+加 IOGPUFamily -> 30 components
+新增组件只有 com.apple.iokit.IOGPUFamily
+__TEXT +30,884; __TEXT_EXEC +156,964; __DATA_CONST +32,368; __DATA +2,881
+合计 +223,097 B（约 218 KiB）
+现有组件 VA 不变；payload 仍有 23.3 MB 空闲
+```
+
+候选（native kernel 仍是 H103fn，display archive 未动）：
+
+```text
+kernel:  69885c070e883b7b1f8a156afe649b71fc6230c250277a632bf28e3cfb1f03d1
+payload: 04f2fcee81bb27bdf05bd948050c83556764f5a05fec54aab51b4d8932e97077
+boot:    bc34cb8e49fe81ee82f4c8ba7aefe6e25d6626f4a14a65eebf27db079171cfff
+```
+
+判读：
+
+- `NATIVE_IOGPU_LOAD: rc=0`：prelinked `IOGPUFamily` 已被
+  `sKextsByID` 注册，`OSKextLoadKextWithIdentifier` 命中已加载路径；
+  下一步才改 A540（preModLoad/postModLoad 窗口 + 修 `if (ret)`）。
+- `rc` 仍非 0：prelink 注册没有生效，先查 `kmod_info`/`OSKext` 注册，
+  不动 display archive。
+- 启动停在 `Waiting on IOMedia UUID 04769D26`：prelink 大小变化触发了
+  Data/APFS 发布 race，回退 H103fn/H103fm。
+
+注意：Mac 设备仓库 `board.toml` 本来就有一批未提交改动（slide
+0x5000000、IOMobileGraphicsFamily、archives 等），P1 只在其工作树上追加
+IOGPUFamily 一行；没有把这些改动一起提交。
