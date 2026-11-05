@@ -2565,6 +2565,18 @@ display:        adf38de
 `ShengPlatformPowerGlue.cpp` 已被覆盖成短版本。重建该 archive 前必须先把
 早期 CPUFREQ 源码恢复，否则会丢失 `native-cpufreq-early=2` 的实际编程。
 
+H103ed 上机后 TWRP 读到的 `SHLOG001` 仍是 snapshot 写的
+（`state=2`、`rounds=1`、`slots_written=0`），slot 线程没有更新 header。
+H103ee 加诊断：slot 线程启动前后各打一条 `NATIVE_UFS_HB: slot ...`；
+`h103SlotWrite` 前 8 次尝试打印 ready/lock/dma、body 写结果和 header 写结果；
+`h103Snapshot` 不再把 `slots_written` 清零。
+
+```text
+H103ee kernel:  96321f31312d788dca3410eea773b9a4bad638351256061767df3f6d6124443f
+H103ee payload: efa7b4ff54af63d3c7392dbf68e02e5a929dd398078cb7442aee3094b5dbaedb
+H103ee boot:    b742d928fea5eb7dbc7e4f92245dcacbd0969584462fabf192957783c708e34a
+```
+
 ### 关键产物
 
 ```text

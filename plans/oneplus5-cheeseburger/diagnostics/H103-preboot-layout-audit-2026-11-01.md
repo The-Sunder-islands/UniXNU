@@ -3379,3 +3379,48 @@ display: adf38de
 - 左上三个块出现，最左边 CPU 块应为绿色；
 - 右上 2×2 仍在；
 - TWRP slot 继续更新。
+
+## 80. H103ee：slot 线程诊断（2026-11-05）
+
+H103ed 上机后右上 2×2 正常，但 TWRP 读到的 header 是 snapshot 写的：
+
+```text
+first_lba=29755387 window_blocks=8192 slot_count=247
+slots_written=0 rounds=1 state=2 msg_bytes=69343
+```
+
+日志里只有：
+
+```text
+NATIVE_UFS_HB: start rc=0 skipPattern=0
+NATIVE_UFS_LOG: setup mode=1 first=1c607fb blocks=8192 ... safe=1
+NATIVE_UFS_HB: enter
+NATIVE_UFS_LOG: snapshot tag=window ok=1 ...
+```
+
+没有 `NATIVE_UFS_HB: slot rc`，也没有 slot 写日志。H103ee 只加诊断：
+
+```text
+start():    "NATIVE_UFS_HB: slot start" -> kernel_thread_start -> "slot rc=%x"
+h103SlotWrite(): 前 8 次尝试打印 wait/ready/lock/dma、slot/lba/body 结果、
+                 header 结果和 cursor
+h103Snapshot(): slots_written = gH103SlotCursor，state 按 cursor 选 2/3，
+                不再清零
+```
+
+候选：
+
+```text
+kernel:  96321f31312d788dca3410eea773b9a4bad638351256061767df3f6d6124443f
+payload: efa7b4ff54af63d3c7392dbf68e02e5a929dd398078cb7442aee3094b5dbaedb
+boot:    b742d928fea5eb7dbc7e4f92245dcacbd0969584462fabf192957783c708e34a
+```
+
+判读：
+
+- 出现 `slot start` 但没有 `slot rc`：线程创建路径异常；
+- 出现 `slot rc`，随后 `wait` 一直 ready=0：日志窗口初始化顺序/字段问题；
+- 出现 `attempt ... body=0`：128 KiB UFS 写失败；
+- `body=1`、`header=0`：header 单块写失败；
+- `body=1`、`header=1`、cursor 增长：slot 正常，TWRP 应看到
+  `slots_written` 增长。

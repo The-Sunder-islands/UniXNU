@@ -1302,9 +1302,9 @@ NativeUfsProbe::h103Snapshot (const char *tag, bool pause, bool verify)
   h.slot_first = 257;
   h.slot_blocks = 32;
   h.slot_count = (fLogBlocks > 257) ? (fLogBlocks - 257) / 32 : 0;
-  h.slots_written = 0;
-  h.rounds = 1;
-  h.state = 2;
+  h.slots_written = gH103SlotCursor;
+  h.rounds = gH103SlotCursor ? gH103SlotCursor : 1;
+  h.state = gH103SlotCursor ? 3 : 2;
   strlcpy (h.tag, "cheeseburger-H103", sizeof h.tag);
   memcpy (head, &h, sizeof h);
   ok = ok && logWrite (0, 1, head);
@@ -1325,20 +1325,39 @@ NativeUfsProbe::h103Snapshot (const char *tag, bool pause, bool verify)
 void
 NativeUfsProbe::h103SlotWrite (void)
 {
-  if (!fLogFirst || !fLogBlocks || !fReady || !fLock || !fLogDma) {
+  static uint32_t attempts;
+  bool ready = fLogFirst && fLogBlocks && fReady && fLock && fLogDma;
+  if (!ready) {
+    if (attempts++ < 8) {
+      IOLog ("NATIVE_UFS_SLOT: wait=%u first=%llx blocks=%u ready=%u "
+             "lock=%u dma=%u\n", attempts,
+             (unsigned long long) fLogFirst, fLogBlocks,
+             fReady ? 1 : 0, fLock ? 1 : 0, fLogDma ? 1 : 0);
+    }
     return;
   }
   const uint32_t slotCount = (fLogBlocks > 257) ? (fLogBlocks - 257) / 32 : 0;
   if (!slotCount) {
+    if (attempts++ < 8) {
+      IOLog ("NATIVE_UFS_SLOT: no slots blocks=%u\n", fLogBlocks);
+    }
     return;
   }
   uint8_t *body = static_cast<uint8_t *> (IOMallocAligned (32U * 4096U, 4096));
   if (!body) {
+    if (attempts++ < 8) {
+      IOLog ("NATIVE_UFS_SLOT: body allocation failed\n");
+    }
     return;
   }
   uint32_t n = h103CopyMsgbufTail (body, 32U * 4096U);
   uint32_t slot = gH103SlotCursor % slotCount;
   bool ok = logWrite (257U + slot * 32U, 32, body);
+  if (attempts++ < 8) {
+    IOLog ("NATIVE_UFS_SLOT: attempt=%u slot=%u lba=%llx body=%u n=%u\n",
+           attempts, slot, (unsigned long long) (fLogFirst + 257U + slot * 32U),
+           ok ? 1 : 0, n);
+  }
   if (ok) {
     H103LogHeader h;
     memset (&h, 0, sizeof h);
@@ -1362,7 +1381,12 @@ NativeUfsProbe::h103SlotWrite (void)
     if (head) {
       memset (head, 0, 4096);
       memcpy (head, &h, sizeof h);
-      if (logWrite (0, 1, head)) {
+      bool headOk = logWrite (0, 1, head);
+      if (attempts < 8) {
+        IOLog ("NATIVE_UFS_SLOT: header=%u cursor=%u\n",
+               headOk ? 1 : 0, gH103SlotCursor);
+      }
+      if (headOk) {
         gH103SlotCursor++;
       }
       IOFreeAligned (head, 4096);
@@ -2178,6 +2202,7 @@ NativeUfsProbe::start (IOService *provider)
     thread_deallocate (heartbeat);
   }
   thread_t slotThread = nullptr;
+  IOLog ("NATIVE_UFS_HB: slot start\n");
   kern_return_t slotRet = kernel_thread_start (h103SlotThread, nullptr, &slotThread);
   IOLog ("NATIVE_UFS_HB: slot rc=%x\n", slotRet);
   if (slotRet == KERN_SUCCESS) {
