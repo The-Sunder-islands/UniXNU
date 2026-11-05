@@ -141,6 +141,7 @@ extern "C" void native_legacy_heartbeat_cell(void);
 // interrupt itself never reaches the kernel, which would explain IOSleep,
 // tsleep and timer_call all failing to wake anything.
 extern "C" volatile uint64_t armcpu_timer_interrupts;
+extern "C" volatile uint64_t armcpu_ipi_interrupts;
 
 static int gH109Chan;
 static volatile uint32_t gH109Ticks;
@@ -629,11 +630,22 @@ h103SlotTick (void)
       lastIrqPrint = nowIrq;
     } else if (nowIrq - lastIrqPrint >= 5 * 19200000ULL) {
       lastIrqPrint = nowIrq;
-      uint64_t ctl = 0, tval = 0;
-      __asm__ volatile ("isb; mrs %0, cntv_ctl_el0" : "=r" (ctl));
-      __asm__ volatile ("isb; mrs %0, cntv_tval_el0" : "=r" (tval));
-      IOLog ("NATIVE_IRQ: timer=%llu cntv_ctl=%llx tval=%llx flags=%x tick=%u\n",
+      // H113: the inline "mrs %0, cntv_ctl_el0" read returned a kernel
+      // address, so use the same builtins XNU's machine_routines.c uses.
+      // DAIF and the GIC group/Priority Mask registers tell whether ANY
+      // interrupt can reach this CPU.
+      uint64_t ctl = __builtin_arm_rsr64 ("CNTV_CTL_EL0");
+      uint64_t tval = __builtin_arm_rsr64 ("CNTV_TVAL_EL0");
+      uint64_t daif = 0, pmr = 0, grp1 = 0;
+      __asm__ volatile ("mrs %0, daif" : "=r" (daif));
+      __asm__ volatile ("mrs %0, icc_pmr_el1" : "=r" (pmr));
+      __asm__ volatile ("mrs %0, icc_igrpen1_el1" : "=r" (grp1));
+      IOLog ("NATIVE_IRQ: timer=%llu ipi=%llu daif=%llx pmr=%llx grp1=%llx ctl=%llx tval=%llx flags=%x tick=%u\n",
              (unsigned long long) armcpu_timer_interrupts,
+             (unsigned long long) armcpu_ipi_interrupts,
+             (unsigned long long) (daif & 0x3ffULL),
+             (unsigned long long) (pmr & 0xffULL),
+             (unsigned long long) (grp1 & 1ULL),
              (unsigned long long) ctl, (unsigned long long) tval,
              native_boot_flags, gH109Ticks);
     }
