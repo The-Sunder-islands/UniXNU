@@ -3424,3 +3424,40 @@ boot:    b742d928fea5eb7dbc7e4f92245dcacbd0969584462fabf192957783c708e34a
 - `body=1`、`header=0`：header 单块写失败；
 - `body=1`、`header=1`、cursor 增长：slot 正常，TWRP 应看到
   `slots_written` 增长。
+
+## 81. H103ff：左上 slot 状态块（2026-11-05）
+
+H103ee 拉到的日志 `boot_id=10124572351` 与 H103ed 完全相同，说明新内核
+没有被真正启动，不能据此判断 slot 线程。左上/右上块在 H103ed 已经存在，
+也无法区分 H103ed 和 H103ee。
+
+H103ff 增加一个屏幕上可见的 slot 状态块，放在左上角第 4 格（x=60）：
+
+```text
+黑    slot 窗口未就绪 / 线程没跑
+黄    fLogFirst/fLogBlocks/fReady/fLock/fLogDma 就绪，写盘未成功
+绿    至少一次 slot body + header 写成功（gH103SlotCursor++）
+```
+
+实现：
+
+```text
+NativeUfsProbe.cpp:  extern "C" volatile uint32_t native_h103_slot_state
+                     h103SlotWrite(): ready 后置 1，header 成功后置 2
+NativeLegacyDisplay.cpp: 读取该符号，fill(60,0,16,16,color)
+```
+
+候选：
+
+```text
+kernel:  4bd10ad1b1d3d205e4edb5661102e581bf4c8c551615104985bd3743e1b852f8
+payload: 4692224ecbe160d584fab0bcb8b3d18f6e6d1076c53c7b42df202610fc077057
+boot:    cccf4fad7c75a430ac15bf59538bcfc17432bebefeb5cb3388dcc24dc5902489
+```
+
+判读：
+
+- 看到第 4 个块：证明 H103ff 内核在跑；
+- 第 4 块黑：slot 线程/窗口未就绪；
+- 黄：窗口就绪但写失败，按 console 的 `NATIVE_UFS_SLOT: attempt` 定位；
+- 绿：slot 写成功，TWRP 应能看到 `slots_written` 增长。

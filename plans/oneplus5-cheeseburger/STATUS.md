@@ -2577,6 +2577,16 @@ H103ee payload: efa7b4ff54af63d3c7392dbf68e02e5a929dd398078cb7442aee3094b5dbaedb
 H103ee boot:    b742d928fea5eb7dbc7e4f92245dcacbd0969584462fabf192957783c708e34a
 ```
 
+H103ff 在左上角增加第 4 个 16×16 slot 状态块，不再依赖 TWRP 判断线程：
+黑=未就绪，黄=窗口就绪但写失败，绿=slot+header 写成功。UFS 侧导出
+`native_h103_slot_state`，display 侧读取。
+
+```text
+H103ff kernel:  4bd10ad1b1d3d205e4edb5661102e581bf4c8c551615104985bd3743e1b852f8
+H103ff payload: 4692224ecbe160d584fab0bcb8b3d18f6e6d1076c53c7b42df202610fc077057
+H103ff boot:    cccf4fad7c75a430ac15bf59538bcfc17432bebefeb5cb3388dcc24dc5902489
+```
+
 ### 关键产物
 
 ```text

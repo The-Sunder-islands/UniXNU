@@ -53,6 +53,9 @@ static uint64_t gH103HeartbeatStart;
 static volatile int gH103SkipPattern;
 static uint32_t gH103SlotCursor;
 static volatile int gH103Quiet;
+extern "C" {
+volatile uint32_t native_h103_slot_state = 0;
+}
 class NativeUfsProbe;
 static NativeUfsProbe *gH103Probe;
 static void h103SlotWriteThunk (void);
@@ -1343,6 +1346,7 @@ NativeUfsProbe::h103SlotWrite (void)
     }
     return;
   }
+  native_h103_slot_state = 1;
   uint8_t *body = static_cast<uint8_t *> (IOMallocAligned (32U * 4096U, 4096));
   if (!body) {
     if (attempts++ < 8) {
@@ -1388,6 +1392,7 @@ NativeUfsProbe::h103SlotWrite (void)
       }
       if (headOk) {
         gH103SlotCursor++;
+        native_h103_slot_state = 2;
       }
       IOFreeAligned (head, 4096);
     }
