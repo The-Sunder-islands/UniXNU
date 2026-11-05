@@ -113,6 +113,7 @@ class NativeUfsProbe;
 static NativeUfsProbe *gH103Probe;
 static void h103SlotWriteThunk (void);
 static void h103HeaderWriteThunk (void);
+static void h103FlushNow (void);
 
 // H103cg's probe periodically redrew the GOP test pattern from its heartbeat.
 // The display archive is force-loaded into the kernel and exports this symbol;
@@ -123,6 +124,18 @@ extern "C" int native_legacy_test_pattern(void);
 // display-side thread states. The helper lives in the kernel because the
 // driver's public headers keep struct task/thread incomplete.
 extern "C" void native_proc_state_dump(void);
+
+// H108: independent heartbeat. ios-sweet's log thread sleeps on tsleep, not
+// IOSleep; this port never woke from IOSleep, so this thread first proves
+// whether tsleep wakes here. When it does, it flips only the 16x16 heartbeat
+// cell (no full 2x2 redraw), runs any due dump and flushes that dump, so the
+// diagnostics no longer depend on UFS read traffic.
+extern "C" void native_legacy_heartbeat_cell(void);
+extern "C" int tsleep(void *chan, int pri, const char *wmsg, int timo);
+extern "C" int hz;
+
+static int gH108TickChan;
+static volatile uint32_t gH108Ticks;
 
 // H105: this thread never wakes from IOSleep on this kernel. No H103/H104
 // capture contains a single NATIVE_UFS_ALIVE line after NATIVE_UFS_HB: enter,
@@ -553,6 +566,30 @@ h103HeaderWriteThunk (void)
   }
 }
 
+// H108: one flush, shared by the read path and the 1 Hz diagnostic thread.
+// h103SlotWrite() computes its delta from gH103LastSlotMsgX, so this helper
+// owns the busy flag, the interval stamp and the cursor update.
+static void
+h103FlushNow (void)
+{
+  if (gH103SlotBusy) {
+    return;
+  }
+  struct H103MsgBuf *m = msgbufp;
+  if (!m || !m->msg_bufc || m->msg_size <= 0) {
+    return;
+  }
+  int x = m->msg_bufx;
+  if (x < 0 || x >= m->msg_size) {
+    x = 0;
+  }
+  gH103SlotBusy = 1;
+  gH103LastSlotTicks = mach_absolute_time ();
+  h103SlotWriteThunk ();
+  gH103SlotBusy = 0;
+  gH103LastSlotMsgX = x;
+}
+
 // The spawned threads never wake from IOSleep on this kernel. Run the slot
 // timer from the normal read paths only after fLock has been released; calling
 // it from ufsCommand's completion would deadlock on the non-recursive fLock.
@@ -609,12 +646,35 @@ h103SlotTick (void)
     return;
   }
   gH103LastSlotTicks = now;
-  gH103SlotBusy = 1;
-  // H106: leave gH103LastSlotMsgX at the previous cursor while the writer
-  // computes how many bytes are new, then advance it after the write.
-  h103SlotWriteThunk ();
-  gH103SlotBusy = 0;
-  gH103LastSlotMsgX = x;
+  // H108: h103FlushNow owns the busy flag and the cursor update; the writer
+  // leaves gH103LastSlotMsgX at the previous value until the delta is written.
+  h103FlushNow ();
+}
+
+// H108: 1 Hz diagnostic thread. It flips the independent heartbeat cell every
+// second, and when the gate is open and a dump stage is due it prints the dump
+// and flushes it. With a working tsleep this no longer depends on UFS reads,
+// which is what hid stage 2/3 once the system stopped issuing them.
+static void
+h108TickThread (void *, wait_result_t)
+{
+  thread_set_thread_name (current_thread (), "h108_tick");
+  for (;;) {
+    (void) tsleep (&gH108TickChan, PZERO, "h108tick", hz);
+    gH108Ticks = gH108Ticks + 1;
+    uint32_t n = gH108Ticks;
+    if (n <= 5 || (n % 30) == 0) {
+      IOLog ("NATIVE_TICK: sec=%u flags=%x slotMode=%d gate=%d\n",
+             n, native_boot_flags, gH103SlotMode, h107GateOpen () ? 1 : 0);
+    }
+    native_legacy_heartbeat_cell ();
+    if (!gH103SlotMode || !h107GateOpen ()) {
+      continue;
+    }
+    if (h105DumpTick ()) {
+      h103FlushNow ();
+    }
+  }
 }
 
 OSDefineMetaClassAndStructors (NativeUfsProbe, IOService)
@@ -2673,6 +2733,14 @@ NativeUfsProbe::start (IOService *provider)
     }
   } else {
     IOLog ("NATIVE_UFS_HB: slot disabled\n");
+  }
+  // H108: the independent 1 Hz thread runs even when the slot writer is off,
+  // so the heartbeat cell and the dump gate never depend on UFS read traffic.
+  thread_t tickThread = nullptr;
+  kern_return_t tickRet = kernel_thread_start (h108TickThread, nullptr, &tickThread);
+  IOLog ("NATIVE_TICK: thread rc=%x\n", tickRet);
+  if (tickRet == KERN_SUCCESS) {
+    thread_deallocate (tickThread);
   }
   if (gH103HbTimerOn == 1) {
     fHbLoop = IOWorkLoop::workLoop ();
