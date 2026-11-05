@@ -2223,7 +2223,7 @@ NativeUfsProbe::start (IOService *provider)
   dumpRootMedia ();
   IOLog ("NATIVE_UFS_GPT: start returning published=%u windows=%u\n",
          published ? 1 : 0, windowsPublished);
-  gH103Quiet = 0;
+  gH103Quiet = 1;
   gH103Probe = this;
   uint32_t skipPattern = 0;
   PE_parse_boot_argn ("h103-skip-pattern", &skipPattern, sizeof skipPattern);

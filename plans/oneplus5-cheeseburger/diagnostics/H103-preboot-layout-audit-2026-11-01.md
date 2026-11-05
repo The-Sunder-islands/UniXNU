@@ -3550,3 +3550,30 @@ boot:    cf87300170090acb019b5cdfc5f76157724824befef3e5dd1bf985f8eabbb393
 
 判读：能正常进系统；第 4 块应从蓝色变黄/绿；绿色后 TWRP 的
 `slots_written` 应增长。
+
+## 85. H103fj：静默 2×2 + 2 秒 slot（2026-11-05）
+
+H103fi 上机确认 slot 成功：`slots_written=109`、`rounds=109`、`state=3`、
+`write_errors=0`，slot body 是 65s–264s 的实时 msg，第 4 块绿色。
+
+H103fj 只做静默：
+
+```text
+gH103Quiet = 1
+payload 去掉 -v、debug=0x14e、boot-progress=2
+保留 sheng-log=1、native-cpufreq-early=2、offline-legacy-gop=1
+2x2 重绘已在 UFS 路径且不受 quiet 影响
+2 秒 slot tick 在 readBlocks/readWindowBulk 解锁后运行
+```
+
+候选：
+
+```text
+kernel:  d0b0089b5f53f8e720ce575a3f00aa3b637b959dac5468b8d636e10277a9516e
+payload: c1da6c3ffc7f9fb2b7db57f59ac927db4c0725c864fb2c240612520ac65de444
+boot:    85c34f005809eada4d6eb02284cc26bd9d540d232024e26388333120158fcf35
+```
+
+判读：屏幕不再持续滚动，右上 2×2 和左上 4 块保持，第 4 块绿色；
+TWRP 的 `slots_written` 继续增长。若静默后 2×2 消失，说明还有 console
+依赖，但当前重绘已与 quiet 解耦。

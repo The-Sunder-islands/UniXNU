@@ -2617,6 +2617,17 @@ H103fi payload: 90e6c1fc2b9926128dcc69bb6e292d3d31e05628e9ec8d0c76a2af9fd04b4f3c
 H103fi boot:    cf87300170090acb019b5cdfc5f76157724824befef3e5dd1bf985f8eabbb393
 ```
 
+H103fi 上机成功：`slots_written=109`、`state=3`、`write_errors=0`，slot body
+是最新的 65s–264s 日志。H103fj 做静默：`gH103Quiet=1`，payload 去掉
+`-v`、`debug=0x14e`、`boot-progress=2`，保留 2×2（已与 quiet 解耦）和
+UFS 读路径上的 2 秒 slot。
+
+```text
+H103fj kernel:  d0b0089b5f53f8e720ce575a3f00aa3b637b959dac5468b8d636e10277a9516e
+H103fj payload: c1da6c3ffc7f9fb2b7db57f59ac927db4c0725c864fb2c240612520ac65de444
+H103fj boot:    85c34f005809eada4d6eb02284cc26bd9d540d232024e26388333120158fcf35
+```
+
 ### 关键产物
 
 ```text
