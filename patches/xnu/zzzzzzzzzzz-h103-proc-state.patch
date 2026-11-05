@@ -2,7 +2,7 @@ diff --git a/osfmk/kern/task.c b/osfmk/kern/task.c
 index 5dcf00e..3586f03 100644
 --- a/osfmk/kern/task.c
 +++ b/osfmk/kern/task.c
-@@ -10285,3 +10285,127 @@ task_best_name(task_t task, char *buf, size_t size)
+@@ -10285,3 +10285,130 @@ task_best_name(task_t task, char *buf, size_t size)
  	char *name = proc_best_name(task_get_proc_raw(task));
  	strlcpy(buf, name, size);
  }
@@ -61,7 +61,10 @@ index 5dcf00e..3586f03 100644
 +native_proc_summary(void)
 +{
 +	native_proc_row_count = 0;
-+	proc_iterate(1U, native_proc_row_collect, NULL, NULL, NULL);
++	/* H109: PROC_NOWAITTRANS (1<<2). proc_iterate() otherwise calls
++	 * proc_transwait(p, 0), waiting forever for an exec transition; from the
++	 * UFS read path that deadlocks against the exec that needs the read. */
++	proc_iterate(1U | 4U, native_proc_row_collect, NULL, NULL, NULL);
 +	for (unsigned i = 0; i < native_proc_row_count; i++) {
 +		printf("NATIVE_PROC_SUM: pid=%d comm=%s threads=%u runnable=%u\n",
 +		    native_proc_rows[i].pid, native_proc_rows[i].comm,
