@@ -3129,6 +3129,36 @@ H103bg boot      ae9c39268b5cd4e49ee1dcf4cdbb0e933b673ea63c4016995ab23fd50677e0a
 H103ea boot      a07fe2567b43edcf7cbd58a86a8d4474cae49ac84e79b667e074205e1b4e2f5e
 ```
 
+## H104k 上游对照（2026-11-05）
+
+对照 `UniXNU/UniXNU` `main` `13e5973`、`UniXNU/GopFramebuffer` `main`
+`e47c1b8` 与上游设备记录（alioth / sirius / sm-t970），完整记录见
+`diagnostics/H104k-upstream-display-gate-2026-11-05.md`。要点：
+
+- 上游没有“让 backboardd 取 display provider”的补丁；同症状（`CLIENT
+  calls=4`、`SWAP calls=0`）在 alioth 上的结论是“先让 backboardd 起来，
+  再给一个可打开的 accelerator”，display 是链路末段。
+- sirius 与本板同 OS profile（21H461 / Legacy / 无 GPU）：display、client、
+  power 1、SWAP 全 accepted + 全 CPU copy 都成立时画面仍黑；上游同样未解。
+- A540 stub 的问题不是属性而是缺 `newUserClient`；`scripts/data/
+  ioaccelerator-base-abi.json` 的 `candidate_sha256` 是 `12d7513a…`，
+  与 H104j kernel `7e85bc44…` 不符，这解释了 H103fp/fq/fr 的
+  `OSMetaClass::addInstance` abort。
+- 本次只并入上游 `zzwb-native-sandbox-grant-set-properties.patch`：把
+  `NativeSandboxGrantProcess` 授权扩展到 `setProperties`（backboardd 的
+  `FadePeriod` 会被沙箱拒绝）。已在 `xnu-10063.141.1` 的原始
+  `iokit/Kernel/IOUserClient.cpp` 上按名字顺序验证可应用（`zzw` 之后
+  `offset -12`）。
+- 未并入：`native-work-interval-instance`、`native-union-lower-directory`、
+  `native-lookup-trace`、`zzyb-native-cryptex-os-view`、
+  `zzyc-owner-skip-launch-constraints`，以及 GopFramebuffer 的 13 个
+  GPU/direct-scanout 提交（CPU 路径修复基座已含）。
+- 影响：新增补丁会改变内核文本布局，下一次 kernel/prelink/boot 必须重新
+  记录哈希，不能沿用 H104f/H104j。
+- 远端：本仓库已加 `upstream` remote（`https://github.com/UniXNU/UniXNU`），
+  与上游 merge-base `e95b37d`（2026-10-22），落后 561 / 领先 431 个提交；
+  整体 merge 会把 GPU/Turnip/Metal/baseband/Wi-Fi 组件一并拉入，暂不做。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
