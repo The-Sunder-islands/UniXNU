@@ -3159,6 +3159,46 @@ H103ea boot      a07fe2567b43edcf7cbd58a86a8d4474cae49ac84e79b667e074205e1b4e2f5
   与上游 merge-base `e95b37d`（2026-10-22），落后 561 / 领先 431 个提交；
   整体 merge 会把 GPU/Turnip/Metal/baseband/Wi-Fi 组件一并拉入，暂不做。
 
+## H105 心跳线程不唤醒导致 dump 永不执行（2026-11-05）
+
+H104j 上机没有任何 `NATIVE_PROC_DUMP`。复查本机保存的 9 份
+`h103-log-*.txt`（`153658`/`155325`/`160954`/`162153`/`163306`/`165109`/
+`172713`/`190513`/`194941`），每份都只有一行 `NATIVE_UFS_HB: enter`，
+**没有任何一行 `NATIVE_UFS_ALIVE`**：`heartbeatThread()` 进入循环后停在
+`IOSleep(10000)` 上不再返回。H104i/H104j 把 dump 放在这个循环里，所以
+`gH104BackboarddTicks` 从未赋值，dump 永远不会执行；H104j 的"移到 draw
+之前"因此没有效果。2×2 一直能画，是因为它由 UFS 完成路径每 64 条命令
+重绘，与心跳线程无关。
+
+最后一份日志（`194941`）的时序也解释了"30–40 秒"这个窗口：
+
+```text
+227.664  NATIVE_EXEC: ... comm=backboardd        （flags |= 4）
+227.721  NATIVE_IOGPU_ACCEL: class=IOAcceleratorES object=0
+231.477  日志结束（backboardd 后约 3.8 s）
+```
+
+即使心跳线程正常，30 秒后的 dump 也落在这份采集窗口之外。
+
+H105 只改 `drivers/NativeUfsProbe/NativeUfsProbe.cpp`：
+
+- 把触发器移到 UFS 完成路径的 `(gUfsCommands & 63) == 0` 分支，并放在
+  2×2 重绘之前——显示 open 阻塞 draw 时也不会挡住 dump；
+- backboardd 实际 exec 后记录基准，`+2 s` 打第一次、`+12 s` 打第二次，
+  覆盖 loader 打开显示前后的两个状态；
+- 每次先打印 `NATIVE_PROC_DUMP: trigger stage=… flags=… cmds=…
+  elapsed_ms=…`，再接 `NATIVE_PROC_DUMP: begin/find/…/end`；
+- backboardd exec 后不再重绘 2×2（沿用 H104j 的意图）；
+- 心跳线程保留原样，但不再承担任何必须发生的动作。
+
+判读：左上白之后约 2 s 应出现 `trigger stage=1`，再过约 10 s 出现
+`trigger stage=2`。看 `NATIVE_PROC_THREAD` 的 `state`/`wait`/`cont`：
+
+- backboardd 的线程都停在 mach/IOKit 等待：按 `cont` 找等待点；
+- 只有 loader 有显示 client 且 backboardd 无 client：结合 accelerator
+  open 记录（`NATIVE_IOKIT_MATCH`）判断 ；
+- 出现 `pid=… not found`：pid 与 H104i 不同，按 `comm` 重新登记。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

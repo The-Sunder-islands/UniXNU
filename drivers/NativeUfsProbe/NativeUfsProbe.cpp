@@ -120,13 +120,41 @@ extern "C" int native_legacy_test_pattern(void);
 // driver's public headers keep struct task/thread incomplete.
 extern "C" void native_proc_state_dump(void);
 
-static volatile uint64_t gH104BackboarddTicks;
-static volatile int gH104DumpDone;
+// H105: this thread never wakes from IOSleep on this kernel. No H103/H104
+// capture contains a single NATIVE_UFS_ALIVE line after NATIVE_UFS_HB: enter,
+// so the H104i/H104j dump placed inside the heartbeat loop below could never
+// run. Drive the dump from the UFS completion path instead: it also draws the
+// 2x2 and is proven alive (NATIVE_UFS_PROGRESS). Two snapshots are taken, one
+// shortly after backboardd execs (before the FDR loader opens the display) and
+// one ~10 s later (after it), so a blocked loader/backboardd is visible.
+static volatile uint64_t gH105BackboarddTicks;
+static volatile int gH105DumpStage;
 
 static void
-h104DumpProcs (void)
+h105DumpTick (void)
 {
-  native_proc_state_dump ();
+  if (!(native_boot_flags & 4) || gH105DumpStage >= 2) {
+    return;
+  }
+  uint64_t now = mach_absolute_time ();
+  if (!gH105BackboarddTicks) {
+    gH105BackboarddTicks = now;
+    return;
+  }
+  uint64_t elapsed = now - gH105BackboarddTicks;
+  unsigned stage = 0;
+  if (gH105DumpStage == 0 && elapsed >= 2 * 19200000ULL) {
+    stage = 1;
+  } else if (gH105DumpStage == 1 && elapsed >= 12 * 19200000ULL) {
+    stage = 2;
+  }
+  if (stage) {
+    gH105DumpStage = stage;
+    IOLog ("NATIVE_PROC_DUMP: trigger stage=%u flags=%x cmds=%llu elapsed_ms=%llu\n",
+           stage, native_boot_flags, (unsigned long long) gUfsCommands,
+           (unsigned long long) (elapsed / 19200));
+    native_proc_state_dump ();
+  }
 }
 
 // H103ea keeps H103bd's 10-second heartbeat byte-for-byte: the ALIVE console
@@ -151,18 +179,8 @@ heartbeatThread (void *, wait_result_t)
            (unsigned long long) gUfsLastBytes,
            (unsigned long long) gWindowLastReqBlock,
            (unsigned long long) gWindowLastReqCount);
-    // H104j: dump before the 2x2 draw, and stop drawing once backboardd is
-    // up. The loader's display open can block the pattern draw, which would
-    // otherwise stop this thread before the dump.
-    if (!gH104DumpDone && (native_boot_flags & 4)) {
-      uint64_t now = mach_absolute_time ();
-      if (!gH104BackboarddTicks) {
-        gH104BackboarddTicks = now;
-      } else if (now - gH104BackboarddTicks >= 30 * 19200000ULL) {
-        gH104DumpDone = 1;
-        h104DumpProcs ();
-      }
-    }
+    // H105: the process-state dump lives in the UFS completion path below.
+    // Nothing may depend on this thread waking; IOSleep never returns here.
     if (!gH103SkipPattern && !gH103HbTimerOn && !(native_boot_flags & 4)) {
       native_legacy_test_pattern ();
     }
@@ -1088,7 +1106,12 @@ ufsSubmit (UfsQueue *q, unsigned direction, unsigned bytes,
     // the panel again. H103fl's 1 Hz timer adds extra redraws; at the stuck
     // screen a 1 Hz blink proves the work loop is alive, a static cell means
     // the timer did not fire or the kernel hung.
-    native_legacy_test_pattern ();
+    // H105: dump before the draw (a display open can block it), and stop
+    // drawing once backboardd has exec'd, as H104j intended for the heartbeat.
+    h105DumpTick ();
+    if (!(native_boot_flags & 4)) {
+      native_legacy_test_pattern ();
+    }
     if (!gH103Quiet) {
       IOLog ("NATIVE_UFS_PROGRESS: cmds=%llu last=%llx/%llu loops=%llu ticks=%llu "
              "winReq=%llu winBytes=%llu winFlight=%llu lastWin=%llx/%llu "
