@@ -4058,3 +4058,38 @@ UFS 对象构造时拿到的 metaclass 指针落在这个 IOGPUFamily 数据区�
 1. property-only `IOService` stub：只设 `IOClass=IOAcceleratorES`，
    完全不绑定 accelerator 基类；先验证 backboardd/CA 是否按属性发现。
 2. 或在运行时解析真实 `IOAcceleratorES` 基类/metaclass，再构造服务。
+
+## 95. H103fs：property-only accelerator stub（2026-11-05）
+
+H103fr 的 private 绝对绑定仍然在早期 `OSMetaClass::addInstance` 破坏
+IOGPUFamily 类元数据。H103fs 彻底去掉本地 `IOAcceleratorES` 基类：
+
+```text
+class NativeA540AcceleratorProbe : public IOService
+  start(): setProperty("IOClass","IOAcceleratorES")
+           setProperty("A540Probe","minimal-no-hardware")
+```
+
+`LegacyDisplayProbe.cpp` 仍在同一个 `preModLoad`/`postModLoad` 窗口调用
+`native_a540_accelerator_static_init()`，但现在是普通 IOService 子类；
+`native_a540_accelerator_probe()` 只负责 attach/start/register。
+
+由于 A540 对象不再引用 accelerator bindings，`original-accelerator-bindings.o`
+不会被静态链接器拉入；final kernel `nm` 中已无 `IOAcceleratorES` 绝对符号。
+
+候选：
+
+```text
+kernel:  ae7b40a74143a86712d45221a76d6609a70a22c1c0ef886edaf024fb5892144c
+payload: 90e6802e44c124b898f5dff3a4bdc65f700ca8da6ebf4d32bef67f8050842b6e
+boot:    09c31cc705e32a2c37a5c7a2bf29735d3a7e3d8edfdd11e4a3482bcdfb7fcb39
+```
+
+判读：
+
+- 过 UFS probe、`NATIVE_LEGACY: probe enter`、`NATIVE_A540_ACCEL:
+  published`：服务已发布；A540 块应变绿。
+- 2×2 client 不变：CA 可能只按真实类匹配，property stub 不够；下一步
+  才做运行时真实基类解析。
+- 仍在 UFS L5 后 panic：说明不是 accelerator bindings，需回看 2×2
+  改动本身的 archive 布局/早期类注册。

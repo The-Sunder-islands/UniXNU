@@ -2771,6 +2771,22 @@ H103fr payload: 455fd32c07acc61619824fb32e9b5a769bd99624ac1111cde3b1cb53cbd22d99
 H103fr boot:    ec0d60362c3cd17d5d776fbe2c5a05be60530f43dc3607f5f96eb03a81eddeb1
 ```
 
+H103fs 改为 property-only stub：`NativeA540AcceleratorProbe` 直接继承
+`IOService`，只设 `IOClass=IOAcceleratorES`。不再引用 `IOAcceleratorES`
+基类；final kernel 的 `nm` 里已经没有 `IOAcceleratorES` 绝对符号，
+accelerator bindings 对象不会被链接。
+
+```text
+H103fs kernel:  ae7b40a74143a86712d45221a76d6609a70a22c1c0ef886edaf024fb5892144c
+H103fs payload: 90e6802e44c124b898f5dff3a4bdc65f700ca8da6ebf4d32bef67f8050842b6e
+H103fs boot:    09c31cc705e32a2c37a5c7a2bf29735d3a7e3d8edfdd11e4a3482bcdfb7fcb39
+```
+
+判读：先确认不再在 UFS L5 后 panic；若出现
+`NATIVE_A540_ACCEL: published IOAcceleratorES (probe only)`，看 A540 块和
+2×2 client 是否变化。property stub 可能被 CA 忽略；若被忽略，下一步只能做
+运行时真实基类解析。
+
 H103fr 仍然在 UFS probe 的 L5 后 panic，`OSMetaClass::addInstance`，
 `x0=0xfffffff00caeb680`、`x21=0xfffffff00caeb600`。`.private_extern`
 没有解决问题，说明不是导出符号/prelink 绑定表的问题；A540 的绝对
