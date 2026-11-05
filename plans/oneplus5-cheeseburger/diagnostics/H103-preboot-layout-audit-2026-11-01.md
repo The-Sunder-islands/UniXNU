@@ -4471,3 +4471,30 @@ boot:    c2574fe9f71574839cd24a630eb725573b22067e12f093efab73f557f2ef459a
   看 A540 和 CoreAnimation 的反应。
 - 全为 0：当前 prelink 的 IOGPUFamily 没有可分配 concrete 类；下一步转向
   安全的本地 `IOAcceleratorES` 子类或提供 provider，而不是继续找类名。
+
+## 104. H104g 结果与 slot0+noiogpu 组合（2026-11-05）
+
+H104g 照片/日志仍停在 `driverkitd is active`，左上绿，backboardd 没有实际
+exec；多类 probe 没有运行。H104g 的多类代码/字符串再次改变了 archive/kernel
+布局，输掉了 pre-backboardd race。放弃 H104g。
+
+H104b-slot0 的照片显示：有时仍会停在左上绿，但也能到左上白；到白后
+右上/右下仍灰，控制台停在 `driverkitd is active`，没有显示 open。因此
+slot0 只解决 backboardd 之前的 race，白之后还有一个 driverkitd/FileSet
+与显示 open 的 race。
+
+新增组合对照：
+
+```text
+boot-H104b-slot0-noiogpu.img
+h103-slot=0 h103-load-iogpu=0
+SHA-256: 7928c93baab2727ebdba8db9454e573e7b889a4a42ccbaa62aca6af172a4cd5a
+```
+
+无持久化日志，2×2/心跳仍运行。判读：
+
+- 白 + 显示 open（右上黄/深蓝、屏幕变化）：slot 写入和 IOGPUFamily load
+  两条时序因素都相关，之后逐个加回。
+- 白 + 仍灰/停 driverkitd active：post-white 卡点是 driverkitd/FileSet，
+  与 slot/IOGPU 无关。
+- 左上绿：pre-backboardd race 仍在，重试。

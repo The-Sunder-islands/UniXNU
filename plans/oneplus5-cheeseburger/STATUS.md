@@ -2962,6 +2962,20 @@ H104g payload: 4946a49a82ba03ed53f554b09cd62004f3ecd89cc00e0356dc1bfcffcb4ebf6f
 H104g boot:    c2574fe9f71574839cd24a630eb725573b22067e12f093efab73f557f2ef459a
 ```
 
+H104g 上机仍停在 backboardd 之前（左上绿）；多类 probe 没有运行，说明
+archive/kernel 布局变化又输掉了 pre-backboardd race。放弃 H104g，H104f 仍
+是稳定白基线。
+
+新增组合对照：
+
+```text
+boot-H104b-slot0-noiogpu.img   h103-slot=0 + h103-load-iogpu=0
+SHA-256: 7928c93baab2727ebdba8db9454e573e7b889a4a42ccbaa62aca6af172a4cd5a
+```
+
+无持久化日志，2×2/心跳仍运行；用于判断白之后的显示 open 是否受 slot
+写入或 IOGPUFamily load 影响。
+
 判读：看 `NATIVE_IOGPU_ACCEL: name=... mc=... obj=... service=...`。
 - 某个 `obj/service` 非 0：真实 concrete 类可分配，attach/register 后看
   A540 绿和 CA 反应。
