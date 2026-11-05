@@ -4029,3 +4029,32 @@ boot:    ec0d60362c3cd17d5d776fbe2c5a05be60530f43dc3607f5f96eb03a81eddeb1
   再看 `NATIVE_A540_ACCEL: published`。
 - 仍在 UFS L5 后 panic：`x0` 若仍是 `0xcaeb600`，说明 prelink 绑定并非
   由导出符号触发，需要改用运行时 ABI 查找/属性 stub。
+
+## 94. H103fr 结果：private 绝对绑定仍破坏早期类登记（2026-11-05）
+
+H103fr 把 accelerator bindings 改成 `.private_extern` 后仍在上机同一位置
+panic：
+
+```text
+NATIVE_UFS_GPT: L5 st=00 last=5ffff bs=1000
+panic: Kernel data abort
+pc  = OSMetaClass::addInstance +0x30
+x0  = 0xfffffff00caeb680
+x21 = 0xfffffff00caeb600
+far = 0x0
+```
+
+`.private_extern` 只把 `IOAcceleratorES::gMetaClass` 从导出符号变成私有
+绝对符号，地址仍是 IOGPUFamily `__DATA` 的 `0xfffffff00caeb688`。早期
+UFS 对象构造时拿到的 metaclass 指针落在这个 IOGPUFamily 数据区，说明
+本地 `IOAcceleratorES` 子类的绝对基类绑定会破坏 prelinked IOGPUFamily
+的类元数据/实例登记，而不是单纯的符号表导出问题。
+
+因此 H103fp/H103fq/H103fr 都不能作为候选；H103fo（prelinked IOGPUFamily、
+`rc=0`、不发布 A540）仍是当前可用基线。
+
+下一步不再使用本地 `IOAcceleratorES` 子类 + 绝对地址，改为：
+
+1. property-only `IOService` stub：只设 `IOClass=IOAcceleratorES`，
+   完全不绑定 accelerator 基类；先验证 backboardd/CA 是否按属性发现。
+2. 或在运行时解析真实 `IOAcceleratorES` 基类/metaclass，再构造服务。

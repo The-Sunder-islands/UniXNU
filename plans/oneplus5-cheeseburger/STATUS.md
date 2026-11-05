@@ -2771,6 +2771,16 @@ H103fr payload: 455fd32c07acc61619824fb32e9b5a769bd99624ac1111cde3b1cb53cbd22d99
 H103fr boot:    ec0d60362c3cd17d5d776fbe2c5a05be60530f43dc3607f5f96eb03a81eddeb1
 ```
 
+H103fr 仍然在 UFS probe 的 L5 后 panic，`OSMetaClass::addInstance`，
+`x0=0xfffffff00caeb680`、`x21=0xfffffff00caeb600`。`.private_extern`
+没有解决问题，说明不是导出符号/prelink 绑定表的问题；A540 的绝对
+`IOAcceleratorES` 基类绑定本身在早期 IOGPUFamily 类元数据/实例登记里
+造成了破坏。
+
+结论：本地 `IOAcceleratorES` 子类 + 绝对基类地址的方案在当前 prelink
+下不可行。下一步只能改成不绑定基类的 property-only `IOService` stub，
+或在运行时解析真实基类；H103fo 仍是可用回退。
+
 判读：应出现 `NATIVE_A540_ACCEL: published IOAcceleratorES (probe only)`，
 A540 块变绿；若仍 data abort，核对 `far` 是否等于 `0xcaeb698`。
 

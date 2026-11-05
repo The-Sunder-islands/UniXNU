@@ -16,7 +16,7 @@
 - `plans/oneplus5-cheeseburger/STATUS.md` and
   `plans/oneplus5-cheeseburger/diagnostics/H103-preboot-layout-audit-2026-11-01.md`
   are the canonical bring-up record. Read the latest appended section (currently
-  §93) before display work; do not infer the current gate from old sections.
+  §94) before display work; do not infer the current gate from old sections.
 
 ## Build and verification
 
