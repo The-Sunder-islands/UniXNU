@@ -213,7 +213,9 @@ h103SlotThread (void *, wait_result_t)
   native_h103_slot_state = 3;
   for (;;) {
     IOSleep (2000);
-    h103SlotWriteThunk ();
+    if (native_boot_flags & 4) {
+      h103SlotWriteThunk ();
+    }
   }
 }
 
@@ -489,6 +491,12 @@ h103SlotTick (void)
   }
   h103MaybeLoadIogpu ();
   h103MaybePublishIogpu ();
+  // H104f: no slot/header writes before backboardd actual exec. The IOGPU
+  // load and the real-accelerator probe stay enabled; only the UFS log write
+  // waits, because slot0 proved the early writes lose the backboardd race.
+  if (!(native_boot_flags & 4)) {
+    return;
+  }
   uint64_t interval = gH103SlotMode == 2 ? 2 * 19200000ULL : 19200000ULL / 2;
   uint64_t now = mach_absolute_time ();
   if (!gH103LastSlotTicks) {
@@ -2525,6 +2533,11 @@ NativeUfsProbe::start (IOService *provider)
   uint32_t slotMode = 1;
   PE_parse_boot_argn ("h103-slot", &slotMode, sizeof slotMode);
   gH103SlotMode = slotMode <= 2 ? static_cast<int> (slotMode) : 1;
+  // H104f: do not touch userdata_ios until backboardd has actually exec'd.
+  // The 0.5-2s slot writes contend with driverkitd/backboardd's UFS reads and
+  // make the launchd ordering race lose; slot0 boots are stable. The message
+  // buffer keeps accumulating, so the first post-backboardd write still dumps
+  // the early boot log.
   uint32_t hbTimer = 0;
   PE_parse_boot_argn ("h103-hb-timer", &hbTimer, sizeof hbTimer);
   gH103HbTimerOn = hbTimer <= 2 ? static_cast<int> (hbTimer) : 1;

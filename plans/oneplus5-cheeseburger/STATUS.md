@@ -2929,6 +2929,24 @@ H104b-slot0 boot:   1aa9829522cf7f79713dc8ce577c084f83c564485c5f41aa35025ee2556e
 H104b-noiogpu boot: 90b8d14229944b5308d0995b5371472a4abaab2fc233b39e6685ab141f455aae
 ```
 
+H104b-slot0 上机：**能稳定左上白**。确认早期 slot/UFS 写入让 driverkitd
+输掉 launchd race；noiogpu 不必再测。
+
+H104f 把 slot/header 写入推迟到 `native_boot_flags & 4`（backboardd 实际
+exec）之后；IOGPUFamily load 和真实 accelerator 探针保持原样。消息缓冲区
+在等待期间继续累积，第一次 post-backboardd 写入仍会把早期启动日志落盘。
+心跳线程/2×2 不受影响。
+
+```text
+H104f kernel:  fbbc84592a7b099e27c68627917433d471da53a5c74acb86d04f451245209fde
+H104f payload: bf806aa279e88b3ed0dcc872826218515be8f71cae39caa5b0bc449da5accd48
+H104f boot:    7a76334f2ff0d43d7f6ee087d7132c88926716d87f1b151ce081a67c9f543232
+```
+
+判读：左上应稳定白；backboardd 之后持久化日志开始写入，应包含
+`NATIVE_IOGPU_ACCEL` 和 A540 状态。若第一次大块 dump 影响 loader 打开
+显示，下一步把 dump 拆成小块/限速。
+
 判读：如果 `slot0` 能稳定白，说明 slot 写入/UFS 争用让 driverkitd 输掉
 race；如果 `noiogpu` 能稳定白，说明 IOGPUFamily load 影响时序。两者都无效
 则做 H104f：在 `newUserClient` 里把 FDR loader 的 open 延迟到 backboardd

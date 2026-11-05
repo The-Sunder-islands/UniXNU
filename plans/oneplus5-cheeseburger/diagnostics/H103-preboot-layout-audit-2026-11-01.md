@@ -4387,3 +4387,41 @@ noiogpu: 90b8d14229944b5308d0995b5371472a4abaab2fc233b39e6685ab141f455aae
 - 两者都绿：做 H104f，在 `NativeLegacyDisplay::newUserClient` 里对
   `IOMFB_FDR_Loader` 返回 `kIOReturnNotReady`，直到 `native_boot_flags & 4`，
   让 loader 在 backboardd 之后重试 open。
+
+## 102. slot0 稳定白与 H104f：推迟 slot 写入（2026-11-05）
+
+上机结果：`boot-H104b-slot0.img`（`h103-slot=0`）**能稳定左上白**。这确认
+早期 slot/UFS 写入是 launchd race 的变量：写入让 driverkitd 输掉，
+`IOMFB_FDR_Loader` 抢跑并占住显示，backboardd 不 exec。
+
+H104f = H104e（真实 IOGPU/IOAcceleratorES 探针）+ slot 写入 gate：
+
+```text
+NativeUfsProbe.cpp:
+  h103SlotTick:
+    h103MaybeLoadIogpu();
+    h103MaybePublishIogpu();
+    if (!(native_boot_flags & 4)) return;   // no slot/header write yet
+    ... original write path ...
+
+  h103SlotThread:
+    IOSleep(2000);
+    if (native_boot_flags & 4) h103SlotWriteThunk();
+```
+
+心跳线程/2×2 不依赖 slot mode，继续运行。消息缓冲区在等待期间累积，第一次
+post-backboardd 写入会把早期日志一起落盘。
+
+```text
+kernel:  fbbc84592a7b099e27c68627917433d471da53a5c74acb86d04f451245209fde
+payload: bf806aa279e88b3ed0dcc872826218515be8f71cae39caa5b0bc449da5accd48
+boot:    7a76334f2ff0d43d7f6ee087d7132c88926716d87f1b151ce081a67c9f543232
+```
+
+判读：
+
+- 左上稳定白：race 解决，持久化日志恢复。
+- 日志出现 `NATIVE_IOGPU_ACCEL`：看真实类是 alloc 成功还是失败、A540
+  块绿/红。
+- 如果 post-backboardd 的大块日志 dump 拖慢 loader open：把首次 dump 拆成
+  多块或限制单次写入量。
