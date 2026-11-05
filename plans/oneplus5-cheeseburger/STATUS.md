@@ -3251,6 +3251,49 @@ payload 与 boot image：
 和 `end`。四个 pid 与该基线日志一致（launchd=1、backboardd=55、
 driverkitd=63、IOMFB_FDR_Loader=78）。
 
+## H106 日志写入改成 ios-sweet 的批量模型（2026-11-05）
+
+H105 的镜像用 `h103-slot=0`，等于没有持久化日志；而恢复原来的 slot 写入
+（0.5 s 一次、固定 32 块）又会在 launchd 竞争窗口里抢 UFS，容易停在左上绿。
+参照 `ios-sweet` 的 `0047`/`0069`（`sweet-log` 环 + `SWEET_LOG_SECS=10` 的
+批量 flush），改 `drivers/NativeUfsProbe/NativeUfsProbe.cpp`：
+
+- 间隔从 0.5 s 改为默认 10 s（`h103-log-secs=1..60`；`h103-slot=2` 保留 2 s
+  对照）；
+- 只写自上次以来新增的字节：`delta = msg_bufx − 上次游标`，写
+  `ceil(delta/4096)+1` 块（上限 32），不再固定 128 KiB；
+- 内核安静时不写数据，只按同一间隔刷新一次 header（`uptime_s` 仍可判断读
+  路径是否还活着）；
+- 仍然只在 `native_boot_flags & 4`（backboardd 实际 exec）之后写，H105 的
+  +2 s/+12 s dump 触发不变。
+
+与 ios-sweet 的差异：它的 flush 线程用 `tsleep(hz * 10)` 唤醒；本移植的内核
+线程不醒（见 H105），所以仍由 UFS 完成路径驱动，但保留同样的"增量 + 10 秒
++ 空闲不写"三条约束。
+
+```text
+H106 kernel:  1d9b58b11c23f60e3953352970c0b458b810aa59da642f35c4ecbb75c42cee33
+H106 payload: 616bcd2686f921c407014cd5b5797ccf0398ce7dfa41b96495056945719e2af6
+H106 boot:    4ffdb641f0b9f75e74c5699c3148130c1bd291f115f75ce5c452d82de38936fb
+```
+
+payload 仍以 `boot-H104b-slot0-noiogpu.img` 为基线，与它只有两处不同：
+`Payloads/kernel.macho` 与 `unixnu.toml` 的 args（`h103-slot=0` 改为
+`h103-slot=1`，并加入 `h103-log-secs=10`）。ADT（`e78e9857…`）、trust cache、
+scratch-data、firmware（`163917aa…`）逐字节相同。
+
+镜像位置：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H106.img`（已核对
+SHA-256 与 81,147,904 B）、Mac `~/h103/boot-H106.img`、仓库
+`out/cheeseburger/boot/boot-H106.img`。
+
+判读：
+
+- 左上白后应出现 `NATIVE_UFS_HB: slotMode=1 logSecs=10 …`；
+- `NATIVE_UFS_SLOT` 约每 10 秒一条，`blocks=` 通常 1–3，`delta=` 是新增
+  字节数；内核安静时不再出现；
+- 拉 `h103log.bin` 后应能搜到 `NATIVE_PROC_DUMP: trigger stage=1/2` 与
+  `NATIVE_PROC_THREAD`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
