@@ -4425,3 +4425,49 @@ boot:    7a76334f2ff0d43d7f6ee087d7132c88926716d87f1b151ce081a67c9f543232
   块绿/红。
 - 如果 post-backboardd 的大块日志 dump 拖慢 loader open：把首次 dump 拆成
   多块或限制单次写入量。
+
+## 103. H104f 结果与 H104g：真实类探测（2026-11-05）
+
+H104f 上机：左上稳定白，slot 写入 gate 生效，持久化日志在 backboardd 之后
+恢复。19:05 日志：
+
+```text
+181.469 SpringBoard actual
+192.322 driverkitd actual
+193.359 IOMFB_FDR_Loader exec
+204.481 backboardd actual
+204.521 NATIVE_IOGPU_ACCEL: class=IOAcceleratorES object=0 service=0
+204.543 NATIVE_IOGPU_PUBLISH: rc=0 flags=f
+207.863 NATIVE_UFS_SLOT: attempt=6 ...
+```
+
+`OSMetaClass::allocClassWithName("IOGPU")` 和 fallback
+`"IOAcceleratorES"` 都返回 0。二者要么是抽象类，要么未注册为可分配类。
+A540 块应为红。
+
+H104g 逐个探测：
+
+```text
+IOGPU
+IOGPUDevice
+AGXAccelerator
+IOAcceleratorES
+IOGPUFamily
+```
+
+每次打印 `name/mc/obj/service`；找到第一个非空 `IOService` 后
+attach(getResourceService()) + registerService()，`start()` 仍只在
+`h103-iogpu-start=1` 时调用。
+
+```text
+kernel:  26956e603bb39ad001738b3b79a373409737bb00367d90ef8f30ba8c2306bb90
+payload: 4946a49a82ba03ed53f554b09cd62004f3ecd89cc00e0356dc1bfcffcb4ebf6f
+boot:    c2574fe9f71574839cd24a630eb725573b22067e12f093efab73f557f2ef459a
+```
+
+判读：
+
+- 某个类 `obj/service` 非 0：真实 concrete 类可分配；attach/register 后
+  看 A540 和 CoreAnimation 的反应。
+- 全为 0：当前 prelink 的 IOGPUFamily 没有可分配 concrete 类；下一步转向
+  安全的本地 `IOAcceleratorES` 子类或提供 provider，而不是继续找类名。

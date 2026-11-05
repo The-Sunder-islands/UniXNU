@@ -2943,6 +2943,31 @@ H104f payload: bf806aa279e88b3ed0dcc872826218515be8f71cae39caa5b0bc449da5accd48
 H104f boot:    7a76334f2ff0d43d7f6ee087d7132c88926716d87f1b151ce081a67c9f543232
 ```
 
+H104f 上机：左上稳定白，slot gate 成功；backboardd 之后日志恢复。关键行：
+
+```text
+204.481 backboardd 实际 exec
+204.521 NATIVE_IOGPU_ACCEL: class=IOAcceleratorES object=0 service=0
+204.543 NATIVE_IOGPU_PUBLISH: rc=0 flags=f
+```
+
+`IOGPU` 和 fallback `IOAcceleratorES` 的 `alloc` 都返回 0，说明它们是抽象
+类或不可分配。H104g 逐个探测 `IOGPU`、`IOGPUDevice`、`AGXAccelerator`、
+`IOAcceleratorES`、`IOGPUFamily`，分别打印 metaclass/obj/service，寻找
+真正可分配的 concrete 类。
+
+```text
+H104g kernel:  26956e603bb39ad001738b3b79a373409737bb00367d90ef8f30ba8c2306bb90
+H104g payload: 4946a49a82ba03ed53f554b09cd62004f3ecd89cc00e0356dc1bfcffcb4ebf6f
+H104g boot:    c2574fe9f71574839cd24a630eb725573b22067e12f093efab73f557f2ef459a
+```
+
+判读：看 `NATIVE_IOGPU_ACCEL: name=... mc=... obj=... service=...`。
+- 某个 `obj/service` 非 0：真实 concrete 类可分配，attach/register 后看
+  A540 绿和 CA 反应。
+- 全部为 0：IOGPUFamily 在当前 prelink/设备上没有可分配 concrete 类，
+  下一步要么做安全的本地 `IOAcceleratorES` 子类，要么提供 provider。
+
 判读：左上应稳定白；backboardd 之后持久化日志开始写入，应包含
 `NATIVE_IOGPU_ACCEL` 和 A540 状态。若第一次大块 dump 影响 loader 打开
 显示，下一步把 dump 拆成小块/限速。
