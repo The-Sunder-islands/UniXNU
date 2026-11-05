@@ -3461,3 +3461,27 @@ boot:    cccf4fad7c75a430ac15bf59538bcfc17432bebefeb5cb3388dcc24dc5902489
 - 第 4 块黑：slot 线程/窗口未就绪；
 - 黄：窗口就绪但写失败，按 console 的 `NATIVE_UFS_SLOT: attempt` 定位；
 - 绿：slot 写成功，TWRP 应能看到 `slots_written` 增长。
+
+## 82. H103fg：slot 块改成始终可见的状态色（2026-11-05）
+
+H103ff 的第 4 块在 state=0 时是黑色，和第 3 块心跳的暗色一起看不见。
+H103fg 改成：
+
+```text
+第 3 块心跳：白 / 橙交替（不再用黑）
+第 4 块 slot：红 = 线程未进入（state 0）
+              蓝 = 线程已进入但窗口未就绪（state 3）
+              黄 = 窗口就绪但写失败（state 1）
+              绿 = slot body + header 写成功（state 2）
+```
+
+`h103SlotThread()` 进入时先置 `native_h103_slot_state = 3`，这样即使窗口
+永远不就绪，也能从红色变成蓝色，直接证明线程是否启动。
+
+候选：
+
+```text
+kernel:  79a653767ab035a9c69068a810d96e0e4bdf781e3a7200734168262ace4556df
+payload: 61b46a19fe95f018b6214f16c6d19f076a7c73c23e4b8ba5b1a973d3429771f3
+boot:    e456efd8a12681b40131affe0d026c09bc8506cabc76fd13745b9c1c91c33b2a
+```

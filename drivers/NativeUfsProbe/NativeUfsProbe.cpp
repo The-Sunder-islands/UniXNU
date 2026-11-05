@@ -111,6 +111,7 @@ heartbeatThread (void *, wait_result_t)
 static void
 h103SlotThread (void *, wait_result_t)
 {
+  native_h103_slot_state = 3;
   for (;;) {
     IOSleep (2000);
     h103SlotWriteThunk ();

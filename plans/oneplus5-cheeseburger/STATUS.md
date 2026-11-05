@@ -2587,6 +2587,15 @@ H103ff payload: 4692224ecbe160d584fab0bcb8b3d18f6e6d1076c53c7b42df202610fc077057
 H103ff boot:    cccf4fad7c75a430ac15bf59538bcfc17432bebefeb5cb3388dcc24dc5902489
 ```
 
+H103fg 把第 4 块改成始终可见：红=线程未进入，蓝=线程已进入但窗口未就绪，
+黄=窗口就绪但写失败，绿=写成功；第 3 块心跳改为白/橙交替，避免黑块看不见。
+
+```text
+H103fg kernel:  79a653767ab035a9c69068a810d96e0e4bdf781e3a7200734168262ace4556df
+H103fg payload: 61b46a19fe95f018b6214f16c6d19f076a7c73c23e4b8ba5b1a973d3429771f3
+H103fg boot:    e456efd8a12681b40131affe0d026c09bc8506cabc76fd13745b9c1c91c33b2a
+```
+
 ### 关键产物
 
 ```text
