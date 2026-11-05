@@ -2716,6 +2716,26 @@ H103fo payload: 04f2fcee81bb27bdf05bd948050c83556764f5a05fec54aab51b4d8932e97077
 H103fo boot:    bc34cb8e49fe81ee82f4c8ba7aefe6e25d6626f4a14a65eebf27db079171cfff
 ```
 
+H103fo 上机：`NATIVE_IOGPU_LOAD: rc=0 flags=8`。prelinked `IOGPUFamily`
+已注册，`OSKextLoadKextWithIdentifier` 命中已加载路径，`NO_KEXTD` 不再
+阻挡。
+
+H103fp 开始 P2：A540 类在 display probe 的同一个
+`preModLoad`/`postModLoad` 窗口里注册，随后发布裸
+`IOAcceleratorES`；移除了旧的 `OSKextLoadKextWithIdentifier` 调用和
+`MetalPluginName`/`MetalPluginClassName`。
+
+```text
+H103fp kernel:  12d7513a347bb4315ba46f6c1f663bc6db35e4fd61c83989c567df704d2375c4
+H103fp payload: 8d6bf887c1af74c9f36dddc57d377d866c8c32ce720e4bc8b4eb4dde239b94e8
+H103fp boot:    24bc548352aa0dfc991cfbcad14643c87aa382bcfb1dd4647c4522007cc1b8e6
+```
+
+判读：日志应出现 `NATIVE_A540_ACCEL: published IOAcceleratorES (probe only)`，
+A540 块变绿；然后看 backboardd/2×2 client 是否变化。若停在
+`Waiting on IOMedia UUID 04769D26`，是 display archive 改动触发 race，回退
+H103fo。
+
 判读：若 `IOMobileGraphicsFamily` 的先例成立，prelinked 的
 `IOGPUFamily` 应让 `NATIVE_IOGPU_LOAD: rc=0`；这验证 prelink 注册，不改
 display archive。若 rc 仍非 0，先查 prelink 注册，不要动 A540。

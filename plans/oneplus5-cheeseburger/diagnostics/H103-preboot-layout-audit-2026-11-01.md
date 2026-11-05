@@ -3868,3 +3868,54 @@ aa9bc99 chore: pin fetched sources and ignore external bring-up inputs
 credential helper、无 SSH key）。本地 bundle：
 `/tmp/opencode/uniXNU-cheeseburger-main.bundle`（Mac 上为
 `/tmp/uniXNU-cheeseburger-main.bundle`）。
+
+## 91. P2：A540 在 preModLoad 窗口注册并发布（2026-11-05）
+
+H103fo（只加 prelink root）结果：
+
+```text
+1176.405 NATIVE_IOGPU_LOAD: begin flags=8
+1176.436 NATIVE_IOGPU_LOAD: rc=0 flags=8
+```
+
+prelinked `IOGPUFamily` 已进入 `sKextsByID`，`OSKextLoadKextWithIdentifier`
+返回 0。P1 成立。
+
+H103fp 的 display archive 改动：
+
+```text
+LegacyDisplayProbe.cpp:
+  preModLoad(handle)
+  native_legacy_display_static_init()
+  native_gop_presenter_static_init()
+  native_a540_accelerator_static_init()   <-- 新增，同一个窗口
+  postModLoad(handle)
+  native_a540_accelerator_probe()         <-- 发布服务
+
+NativeA540AcceleratorProbe.cpp:
+  删除 OSKextLoadKextWithIdentifier 和反向判断
+  删除 probe 里单独的 static_init
+  删除 MetalPluginName/MetalPluginClassName（裸 stub）
+```
+
+A1 的 `OSMetaClass::preModLoad() wasn't called for class
+NativeA540AcceleratorProbe` 由此解释：A540 的构造函数没有和 display 类放在
+同一个 pre/post 窗口里，而不是 IOGPUFamily 缺失本身。
+
+候选：
+
+```text
+kernel:  12d7513a347bb4315ba46f6c1f663bc6db35e4fd61c83989c567df704d2375c4
+payload: 8d6bf887c1af74c9f36dddc57d377d866c8c32ce720e4bc8b4eb4dde239b94e8
+boot:    24bc548352aa0dfc991cfbcad14643c87aa382bcfb1dd4647c4522007cc1b8e6
+```
+
+判读：
+
+- `NATIVE_A540_ACCEL: published IOAcceleratorES (probe only)` 且 A540 块
+  绿色：服务已发布，下一步看 backboardd/CA 的 client。
+- `NATIVE_A540_ACCEL: init/platform failed`：`getResourceService()` 或
+  `init()` 失败，记录 state=3。
+- `attach/start failed`：state=4/5，看 provider 生命周期。
+- 停在 `Waiting on IOMedia UUID 04769D26`：display archive 改动触发
+  Data/APFS 发布 race，回退 H103fo（prelink 版）。
