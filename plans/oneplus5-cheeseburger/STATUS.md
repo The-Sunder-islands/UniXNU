@@ -3203,10 +3203,15 @@ H105 只改 `drivers/NativeUfsProbe/NativeUfsProbe.cpp`：
 
 ```text
 H105 kernel:  75546e700157a63be8eca9ac0b9ca4c3c9c3db559afe7d807deb23e488978e08
-H105 payload: f3d3a37c4eb1d879322519e074a1d97e2de345d02b36e1aca51a1430da067355
-H105 boot:    23f66e5e76024f75ba60949e0f256d83197f228bbc3cd90ea29985f7ca1d3bcc
-H104j kernel 备份（Mac）: ~/UniXNU/out/cheeseburger/kernel/kernel-H104j.macho 7e85bc44…
+H105 payload: e42bca5b8fe9650df04dbe3daaaad767969a3633900d7e8f172538c493153ddb
+H105 boot:    15d5377c4b2a00b54bbe4749db9e1fe229409d483a191d77fe76a16ec5d9d238
 ```
+
+镜像位置：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H105.img`（已在
+Windows 上核对 SHA-256 与长度 81,147,904 B）；Mac `~/h103/boot-H105.img`；
+本仓库 `out/cheeseburger/boot/boot-H105.img`。
+H104j kernel 备份（Mac）：`~/UniXNU/out/cheeseburger/kernel/kernel-H104j.macho`
+（`7e85bc44…`）。
 
 构建方式（Mac mini，`/Users/lss/UniXNU`）：
 
@@ -3223,14 +3228,16 @@ H104j kernel 备份（Mac）: ~/UniXNU/out/cheeseburger/kernel/kernel-H104j.mach
 
 payload 与 boot image：
 
-- payload 直接复用 H103ea 的 `payload.img`（参数集含
-  `offline-mobile-graphics-load=1 offline-legacy-phase=4 … sheng-pmgr=2
-  native-cpufreq-early=2 sheng-disable-jobs=…`，与 H104j 日志一致），
-  只用 `mcopy` 替换 `EFI/UniXNU/Payloads/kernel.macho`；ADT、trust cache、
-  scratch-data、args 均未变；
-- boot image 用 `scripts/make-bootimg.py` 打包，firmware 字段取自
-  `boot-H103ea.img`（sha256 `163917aa…`），因此与已知可启动镜像的差异
-  只有 payload 内的 kernel。
+- payload 以 **H104j 的 `boot-H104j.img` 内的 payload 为基线**，只替换
+  `EFI/UniXNU/Payloads/kernel.macho`。核对结果：`unixnu.toml`（args）、
+  `kernel.macho.adt`（`e78e9857…`）、trust cache、scratch-data 与 H104j
+  完全一致，仅 kernel 不同；
+- 先用 H103ea 的 payload 打过一版（boot `23f66e5e…`），随后发现两者
+  并不相同：H104j 的 args 没有 `-v debug=0x14e boot-progress=2`，并在末尾
+  多了 `h103-slot=0 h103-load-iogpu=0`，ADT 也已更新（`e78e9857…` 对
+  H103ea 的 `d98d9522…`）。那一版作废，不要上机；
+- boot image 用 `scripts/make-bootimg.py` 打包，firmware 字段与 H104j
+  相同（`163917aa…`），因此与 H104j 的差异只有 payload 内的 kernel。
 
 判读：左上白后约 2 s 应出现 `NATIVE_PROC_DUMP: trigger stage=1`，再过约
 10 s 出现 `stage=2`；随后是 `begin/find/pid=…/threads=…/NATIVE_PROC_THREAD`
