@@ -3387,6 +3387,28 @@ ADT/trust cache/scratch-data/firmware 不变。
 - `NATIVE_PROC_SUM` 里找 `runnable=0` 且线程都停在非 `send-block` 的进程，
   那就是队列满的接收者。
 
+### H108-cpu2 对照（2026-11-06）
+
+只改 payload 的 args：`cpus=1` → `cpus=2`。内核、ADT、trust cache、
+scratch-data、firmware 与 H108 逐字节相同（kernel 仍为 `fb2a302a…`）。
+
+```text
+H108-cpu2 payload: a5b1d999c90d2de73383cd137f083b4f320f14d842bbea7abc6edc6eb153c466
+H108-cpu2 boot:    a60a4eb1ec16c438188286db5aa4e30910ed41216385189f9a67e9e351550423
+```
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H108-cpu2.img`（已核
+对）、Mac `~/h103/boot-H108-cpu2.img`、仓库
+`out/cheeseburger/boot/boot-H108-cpu2.img`。
+
+判读：
+
+- `send-block` 消失、stage 2/3 落盘、日志越过 backboardd → 之前是单核把
+  接收者饿死（driverkitd 的 TH_RUN 线程）；
+- 同一位置仍 `send-block` → 真正的端口死锁，与核数无关，下一步查满队列的
+  owner；
+- 在 `KextLog` 之前就挂 → 只能当作辅核启动观察，不能作为对照结论。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
