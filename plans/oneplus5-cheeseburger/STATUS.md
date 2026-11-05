@@ -3454,6 +3454,40 @@ h103-load-iogpu=0 h103-log-secs=5`）。
 - 若心跳仍随日志闪、也没有 `sec=` 行 → `timer_call` 也不触发，下一步只剩
   arch timer 中断直挂。
 
+## H110 timer 观测与 notick 对照（2026-11-06）
+
+H109（cpu1）在 FileSet KC / `driverkitd is active` 之后硬停，没有写盘；心跳
+停止无法区分"内核死了"还是"timer_call 从未触发"。H110 只加观测，不改行为：
+
+- `timer_call` 回调里直接打印 `NATIVE_TICK: fire=N flags=…`（前 3 次、之后
+  每 10 秒），控制台可见，不依赖落盘；
+- worker 每次被唤醒打印 `NATIVE_TICK: worker wake=N`；
+- 新增 boot arg `h109-tick=0/1`（默认 1）关掉 timer_call，同一颗内核可以
+  A/B；
+- 两张镜像都用 `cpus=2`（H108-cpu1 的锁风暴已证明是单核忙等放大，主诊断
+  移到双核）。
+
+```text
+H110 kernel:        a7744d145b000d49cfa2a5cd400e2dfd5ce80d0bc681dd9ca5d763746a342005
+H110 payload:       217e169f7e6f8f3e8845386fe0e2fd62be6a791b6039879282512526e763ead3
+H110 boot:          9ff8dacfe3504841dbbd82c3a5e8b2dfd99d1c92af283b6fc8922ab0ac7b30c0
+H110-notick payload: ad068fc4d9c23aef0e19eddce53f3c8b9dca5dd60643eb5f78cd3328b441919e
+H110-notick boot:    9139d03eb63bd40c805250da62dc55b567353cdcb26c4b8e254128fb6fc7ab99
+```
+
+两张镜像的 args 只差 `h109-tick=1/0`，kernel/ADT/trust cache/scratch-data/
+firmware 相同。镜像在 Windows `D:\Users\ls\Documents\OnePlus5_ios\`、Mac
+`~/h103/`、仓库 `out/cheeseburger/boot/`。
+
+判读：
+
+- 主版出现 `fire=1/2/3` → `timer_call` 可用；冻在 `fire=N` 就知道停在第几秒；
+- 主版没有 `fire=` → 回调根本不触发，独立心跳要改挂 arch timer；
+- 主版冻、`notick` 不冻 → 冻结由 timer 回调引入（中断里跨 archive 调
+  `drawHeartbeatCell`，或 `thread_wakeup`/重装 timer 的用法）；
+- 两版都冻在同一位置 → 与 timer 无关，回到 gate 之前的启动路径继续查
+  （FileSet KC / trustcache 一段）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
