@@ -3920,3 +3920,69 @@ boot:    24bc548352aa0dfc991cfbcad14643c87aa382bcfb1dd4647c4522007cc1b8e6
 - `attach/start failed`：state=4/5，看 provider 生命周期。
 - 停在 `Waiting on IOMedia UUID 04769D26`：display archive 改动触发
   Data/APFS 发布 race，回退 H103fo（prelink 版）。
+
+## 92. H103fq：按当前 prelink 重新生成 accelerator ABI（2026-11-05）
+
+H103fp panic：
+
+```text
+NATIVE_LEGACY: preModLoad handle=0xfffffff38d40f0a0
+panic: Kernel data abort
+pc  = 0xfffffff0074f04d4
+far = 0xfffffff006aeb698
+```
+
+`far` 是旧 `scripts/data/ioaccelerator-base-abi.json` 的
+`metaclass 0xfffffff006aeb688 + 0x10`。旧 JSON 的 `candidate_sha256` 是
+`da673101...`，当前 H103fp prelink 是 `12d7513a...`。旧 metaclass 不在
+当前 IOGPUFamily 区间；`+slide=0x5000000` 落在 `__PLK_TEXT_EXEC` 的未映射
+空洞，不能靠简单 rebase 修复。
+
+新增 `scripts/audit-target-accelerator-base-current.py`：读取当前
+`kernel.macho` + `kernel.json`，在 IOGPUFamily data 里找到 168-entry
+vtable（相对 IOService 只改 [0,1,7]），解码 `getMetaClass` 得到真实
+metaclass，再扫描构造函数/析构函数。当前 H103fp 结果：
+
+```text
+candidate    12d7513a...  (H103fp)
+metaclass    0xfffffff00caeb688
+vptr         0xfffffff00bd439a0
+C2 aliases   0xfffffff00abd3b20 / 0xfffffff00abd3b40
+D2           0xfffffff00abd3b64
+getMetaClass 0xfffffff00abd3bac
+```
+
+把这些地址写回 `scripts/data/ioaccelerator-base-abi.json`，重建 display
+archive。新的 `original-accelerator-bindings.S`：
+
+```text
+gMetaClass = 0xfffffff00caeb688
+C2         = 0xfffffff00abd3b20
+D2         = 0xfffffff00abd3b64
+```
+
+重建 kernel + prelink 后 IOGPUFamily extents 不变：
+
+```text
+__TEXT       0xfffffff00a312a40
+__TEXT_EXEC  0xfffffff00abb9000
+__DATA_CONST 0xfffffff00bd3f040
+__DATA       0xfffffff00caead40
+```
+
+候选：
+
+```text
+kernel:  0cc2ec0454595b44bbc2f6541a345f8e9de8d567f749c1a7dab94e99c7a902fc
+payload: 75ff3251ca43b457a2c7e8fde36ae7f273b6def2dbf75474dbf0057430158a4e
+boot:    a7a240200c7fdc96a9ca3e369e3f1be073d61f40ff72c53bccf6e91bc41b484a
+```
+
+判读：
+
+- `NATIVE_A540_ACCEL: published IOAcceleratorES (probe only)`：A540 stub
+  发布成功，下一步看 backboardd/CA client。
+- 仍 data abort：确认 `far` 是否 `0xfffffff00caeb698`；若不同，重新跑
+  `audit-target-accelerator-base-current.py`（prelink 布局又变了）。
+- `Waiting on IOMedia UUID 04769D26`：display archive 改动触发 race，回退
+  H103fo。

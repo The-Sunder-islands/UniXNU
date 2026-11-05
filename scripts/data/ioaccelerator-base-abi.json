@@ -1,10 +1,9 @@
 {
-  "candidate_sha256": "da6731011a791523b183f37593e40a70d2fab7a97f607ecfd788b3b925392e16",
+  "candidate_sha256": "12d7513a347bb4315ba46f6c1f663bc6db35e4fd61c83989c567df704d2375c4",
   "original_iogpu_text_sha256": "d372b021ff816aaf6f2e3ca991d0f88d2322af0e06e6bb739740f5d6d5f23b35",
-  "runtime_parent_evidence_sha256": "ad312c8d487a31062c5a704f461afc6d58048c194465c522c414843de0fd5ed3",
-  "metaclass": "0xfffffff006aeb688",
+  "metaclass": "0xfffffff00caeb688",
   "instance_bytes": 136,
-  "vptr": "0xfffffff005d439a0",
+  "vptr": "0xfffffff00bd439a0",
   "virtual_entries": 168,
   "operational_overrides": [],
   "metadata_overrides": [
@@ -13,16 +12,16 @@
     7
   ],
   "protected_compatible_constructor_aliases": [
-    "0xfffffff004bd3b20",
-    "0xfffffff004bd3b40"
+    "0xfffffff00abd3b20",
+    "0xfffffff00abd3b40"
   ],
-  "nondeleting_destructor": "0xfffffff004bd3b64",
-  "get_meta_class": "0xfffffff004bd3bac",
+  "nondeleting_destructor": "0xfffffff00abd3b64",
+  "get_meta_class": "0xfffffff00abd3bac",
   "original_entry_sha256": {
-    "0xfffffff004bd3b20": "9ed90924d429e607b964fdc110c4b6f7bedf6ade17ec2b021ed60279b42987ec",
-    "0xfffffff004bd3b40": "6c4f63d7df7483e04b14eb8ad158a18d4e3b450ea43fb407d3d43fae80a21662",
-    "0xfffffff004bd3b64": "456b2a9a418a432e7f58612f92318c20a88f5292ccbfe294a1f5f0404a300617",
-    "0xfffffff004bd3bac": "9daad2c67183fcc551bd461dac5b03fd1fc140c96995a09ec2a54d59532c0ce9"
+    "0xfffffff00abd3b20": "9ed90924d429e607b964fdc110c4b6f7bedf6ade17ec2b021ed60279b42987ec",
+    "0xfffffff00abd3b40": "6c4f63d7df7483e04b14eb8ad158a18d4e3b450ea43fb407d3d43fae80a21662",
+    "0xfffffff00abd3b64": "456b2a9a418a432e7f58612f92318c20a88f5292ccbfe294a1f5f0404a300617",
+    "0xfffffff00abd3bac": "9daad2c67183fcc551bd461dac5b03fd1fc140c96995a09ec2a54d59532c0ce9"
   },
   "native_iogpu_instance_created": false,
   "system_device_published": false,

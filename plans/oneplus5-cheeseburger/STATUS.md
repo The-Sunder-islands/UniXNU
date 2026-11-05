@@ -2731,6 +2731,33 @@ H103fp payload: 8d6bf887c1af74c9f36dddc57d377d866c8c32ce720e4bc8b4eb4dde239b94e8
 H103fp boot:    24bc548352aa0dfc991cfbcad14643c87aa382bcfb1dd4647c4522007cc1b8e6
 ```
 
+H103fp 上机 panic：`far=0xfffffff006aeb698`，正好是旧
+`ioaccelerator-base-abi.json` 的 `metaclass+0x10`。旧 JSON 来自 candidate
+`da673101...`，当前 prelink 是 `12d7513a...`；旧地址不在当前 IOGPUFamily
+区间，简单加 slide 落在 `__PLK_TEXT_EXEC` 的未映射空洞，仍然 abort。
+
+H103fq 用新脚本 `scripts/audit-target-accelerator-base-current.py` 从**当前**
+prelinked kernel 静态推导 ABI：
+
+```text
+metaclass    0xfffffff00caeb688
+vptr         0xfffffff00bd439a0
+C2 aliases   0xfffffff00abd3b20 / 0xfffffff00abd3b40
+D2           0xfffffff00abd3b64
+getMetaClass 0xfffffff00abd3bac
+```
+
+重建 display archive 后 accelerator bindings 指向这些地址，再重建 kernel/prelink。
+
+```text
+H103fq kernel:  0cc2ec0454595b44bbc2f6541a345f8e9de8d567f749c1a7dab94e99c7a902fc
+H103fq payload: 75ff3251ca43b457a2c7e8fde36ae7f273b6def2dbf75474dbf0057430158a4e
+H103fq boot:    a7a240200c7fdc96a9ca3e369e3f1be073d61f40ff72c53bccf6e91bc41b484a
+```
+
+判读：应出现 `NATIVE_A540_ACCEL: published IOAcceleratorES (probe only)`，
+A540 块变绿；若仍 data abort，核对 `far` 是否等于 `0xcaeb698`。
+
 判读：日志应出现 `NATIVE_A540_ACCEL: published IOAcceleratorES (probe only)`，
 A540 块变绿；然后看 backboardd/2×2 client 是否变化。若停在
 `Waiting on IOMedia UUID 04769D26`，是 display archive 改动触发 race，回退
