@@ -1,8 +1,7 @@
 diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
-index ad633d5..0e0c72e 100644
 --- a/iokit/Kernel/IOUserClient.cpp
 +++ b/iokit/Kernel/IOUserClient.cpp
-@@ -2694,6 +2694,48 @@ is_io_service_match_property_table_bin(
+@@ -2694,6 +2694,37 @@ is_io_service_match_property_table_bin(
  	return internal_io_service_match_property_table(service, matching, matchingCnt, matches);
  }
  
@@ -28,20 +27,9 @@ index ad633d5..0e0c72e 100644
 +	native_boot_flags |= 128;
 +	bool mobile = false;
 +	const char *keys[] = { "IOClass", "IOProviderClass", "IONameMatch" };
-+	const char *values[] = { "-", "-", "-" };
 +	for (unsigned k = 0; k < sizeof(keys) / sizeof(keys[0]); ++k) {
 +		OSString *s = OSDynamicCast(OSString, dict->getObject(keys[k]));
-+		if (s) {
-+			values[k] = s->getCStringNoCopy();
-+			if (native_match_name(values[k], "IOMobile")) mobile = true;
-+		}
-+	}
-+	static unsigned logged;
-+	if (logged < 32) {
-+		++logged;
-+		IOLog("NATIVE_IOKIT_MATCH: class=%s provider=%s name=%s found=%d count=%u\n",
-+		    values[0], values[1], values[2], success ? 1 : 0,
-+		    (unsigned)dict->getCount());
++		if (s && native_match_name(s->getCStringNoCopy(), "IOMobile")) mobile = true;
 +	}
 +	if (mobile) {
 +		native_boot_flags &= ~(512U | 1024U);
@@ -51,7 +39,7 @@ index ad633d5..0e0c72e 100644
  static kern_return_t
  internal_io_service_get_matching_services(
  	mach_port_t main_port,
-@@ -2715,6 +2757,7 @@ internal_io_service_get_matching_services(
+@@ -2715,6 +2746,7 @@ internal_io_service_get_matching_services(
  	if ((dict = OSDynamicCast( OSDictionary, obj))) {
  		IOTaskRegistryCompatibilityMatching(current_task(), dict);
  		*existing = IOUserIterator::withIterator(IOService::getMatchingServices( dict ));
@@ -59,7 +47,7 @@ index ad633d5..0e0c72e 100644
  		kr = kIOReturnSuccess;
  	} else {
  		kr = kIOReturnBadArgument;
-@@ -2798,6 +2841,7 @@ internal_io_service_get_matching_service(
+@@ -2798,6 +2830,7 @@ internal_io_service_get_matching_service(
  	if ((dict = OSDynamicCast( OSDictionary, obj))) {
  		IOTaskRegistryCompatibilityMatching(current_task(), dict);
  		*service = IOService::copyMatchingService( dict );

@@ -96,6 +96,12 @@ static volatile int gH103LoadIogpu;
 static volatile int gH103IogpuTried;
 static volatile uint32_t gH103IogpuRc = 0xffffffffU;
 static void h103MaybeLoadIogpu (void);
+// H104e: publish the real prelinked IOAcceleratorES/IOGPU class after
+// backboardd has exec'd. This does not register a local OSMetaClass.
+extern "C" int native_iogpu_accel_probe (void);
+static volatile int gH103IogpuProbeTried;
+static volatile int gH103IogpuProbeRc = -1;
+static void h103MaybePublishIogpu (void);
 extern "C" {
 volatile uint32_t native_h103_slot_state = 0;
 }
@@ -180,6 +186,18 @@ h103MaybeLoadIogpu (void)
   kern_return_t kr = OSKextLoadKextWithIdentifier ("com.apple.iokit.IOGPUFamily");
   gH103IogpuRc = static_cast<uint32_t> (kr);
   IOLog ("NATIVE_IOGPU_LOAD: rc=%x flags=%x\n", gH103IogpuRc,
+         native_boot_flags);
+}
+
+static void
+h103MaybePublishIogpu (void)
+{
+  if (gH103IogpuProbeTried || !(native_boot_flags & 4)) {
+    return;
+  }
+  gH103IogpuProbeTried = 1;
+  gH103IogpuProbeRc = native_iogpu_accel_probe ();
+  IOLog ("NATIVE_IOGPU_PUBLISH: rc=%d flags=%x\n", gH103IogpuProbeRc,
          native_boot_flags);
 }
 
@@ -470,6 +488,7 @@ h103SlotTick (void)
     return;
   }
   h103MaybeLoadIogpu ();
+  h103MaybePublishIogpu ();
   uint64_t interval = gH103SlotMode == 2 ? 2 * 19200000ULL : 19200000ULL / 2;
   uint64_t now = mach_absolute_time ();
   if (!gH103LastSlotTicks) {

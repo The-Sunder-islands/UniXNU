@@ -2864,6 +2864,50 @@ H104d payload: 88de84fdf0b90bde8e6440d5568a9e6cdae673f1d173fe1fa79ff8f94861ce14
 H104d boot:    9a7afb45b214a1db31e3099aba6615219a9504bf55c593a383b7e859d7a5cbbb
 ```
 
+H104d 多次上机都到不了左上白：左上变绿（只有 SpringBoard）后停住，
+`NATIVE_IOKIT_MATCH` 从未打印。H104d 的 kernel text/layout 改动把
+backboardd 之前的停点带回来了，停止使用 H104d；恢复 H104c 的旧 IOKit
+trace（只置 bit 128）。
+
+离线检查 21H461 的 OS cryptex 字符串：
+
+```text
+Metal:    MTLRegisterDevices ... IOAcceleratorES
+QuartzCore: CAEnableMetalWhippet ... IOAcceleratorES
+```
+
+确认 backboardd/CoreAnimation 匹配的是 **IOAcceleratorES**，不是
+IOMobile*。之前只设 `IOClass=IOAcceleratorES` 属性的 stub 被忽略，因为它
+不是真正的 `IOAcceleratorES` 实例。
+
+H104e 不再注册本地子类，也不在 kernel matching 路径打印日志；它用
+prelinked 的真实类：
+
+```text
+native_iogpu_accel_probe()
+  OSMetaClass::allocClassWithName("IOGPU")
+    fallback "IOAcceleratorES"
+  attach(IOService::getResourceService())
+  registerService()
+  h103-iogpu-start=1 时才调用 start()
+```
+
+只在 backboardd 实际 exec（bit 4）后调用一次。A540 状态块：
+绿=已注册，红=alloc/attach/start 失败，黑=未运行。
+
+```text
+H104e kernel:  bdb070e20c8cd55b6e4d7577d14c625464354fd06325c79316103bf96ddce50a
+H104e payload: e15f7962d99069be89f35a73cf99554c8d62fc8b5025765272d90de429d4a67c
+H104e boot:    108a5181ec655665fc9bead733c6674fe328ee538c7feb84db2674c215c21130
+```
+
+判读：先看 H104e 是否恢复到左上白（backboardd 实际 exec）。然后看
+`NATIVE_IOGPU_ACCEL: class=... object=... service=...` 和 A540 块：
+- alloc 返回 0：真实类不可用/抽象；
+- attach/register 成功：真实服务已发布，观察 CA 是否接受；
+- 如果仍然只有橙/灰、显示器不打开，下一步补真实 accelerator 属性/ABI，
+  或尝试其它真实类。
+
 判读：看 `NATIVE_IOKIT_MATCH: class=... provider=... name=...`。如果
 class 是 `IOGPU`/`IOAcceleratorES`，下一步提供对应服务；如果是
 `IOMobileFramebuffer`/`IOFramebuffer`，调整匹配/属性；如果全是 `-`，

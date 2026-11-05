@@ -4286,3 +4286,54 @@ boot:    9a7afb45b214a1db31e3099aba6615219a9504bf55c593a383b7e859d7a5cbbb
 - 出现 `class=IOMobileFramebuffer*`/`IOFramebuffer` 但 `found=0`：显示
   服务匹配/属性问题。
 - 三个字段全是 `-`：matching dictionary 使用其他键，下一版打印完整 XML。
+
+## 100. H104d 结果与 H104e：真实 IOAcceleratorES/IOGPU 服务（2026-11-05）
+
+H104d 多次上机都停在同一处：左上绿色（SpringBoard 已 exec），始终不到
+左上白（backboardd 实际 exec），`NATIVE_IOKIT_MATCH` 从未打印。H104d 的
+kernel text/layout 改动把 backboardd 之前的停点带回来了；停止使用 H104d，
+恢复 H104c 的 flag-only IOKit trace。
+
+离线检查 21H461 OS cryptex 的字符串，确认目标类：
+
+```text
+Metal strings:      MTLRegisterDevices ... IOAcceleratorES
+QuartzCore strings: CAEnableMetalWhippet ... IOAcceleratorES
+```
+
+所以 backboardd/CoreAnimation 找的是 `IOAcceleratorES`，不是 IOMobile*。
+H104a 的 property-only stub 只把 `IOClass` 设成 `IOAcceleratorES`，不是
+真正的类实例，被 CA 忽略是合理的。
+
+H104e 用 prelinked 的真实类，不注册本地子类：
+
+```text
+NativeA540AcceleratorProbe.cpp:
+  native_iogpu_accel_probe()
+    OSMetaClass::allocClassWithName("IOGPU")
+      fallback OSMetaClass::allocClassWithName("IOAcceleratorES")
+    attach(IOService::getResourceService())
+    registerService()
+    h103-iogpu-start=1 才调用 start()
+
+NativeUfsProbe.cpp:
+  h103MaybePublishIogpu()，只在 native_boot_flags & 4 后调用一次
+```
+
+A540 状态块：绿=register 成功，红=alloc/attach/start 失败，黑=未运行。
+
+```text
+kernel:  bdb070e20c8cd55b6e4d7577d14c625464354fd06325c79316103bf96ddce50a
+payload: e15f7962d99069be89f35a73cf99554c8d62fc8b5025765272d90de429d4a67c
+boot:    108a5181ec655665fc9bead733c6674fe328ee538c7feb84db2674c215c21130
+```
+
+判读：
+
+- 左上白恢复：H104d 的停点是 layout 回归，H104e 已回到 H104c 基线路。
+- `NATIVE_IOGPU_ACCEL: class=IOGPU object=0`：真实 IOGPU 类不可分配
+  （抽象/未注册），需要换类或补 provider。
+- attach/register 成功但 CA 仍不打开：真实类已发布，但 CA 还需要
+  accelerator 属性/ABI 或 user client；下一步补属性或检查 CA 的 open。
+- 如果 H104e 又停在左上绿：说明新增 archive 代码也触发同一 layout
+  停点，需要把探针拆到更晚的独立 kext/窗口。
