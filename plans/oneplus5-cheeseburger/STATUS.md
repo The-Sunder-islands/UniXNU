@@ -3560,6 +3560,60 @@ h109-tick=1`）。
 - 拉 `h103log.bin` 应有 `NATIVE_TICK: forced dump at uptime 120 s` 及之后
   的进程/线程快照，`boot_id` 应与 H110/H111 不同。
 
+## H113 中断/DAIF/GIC 状态采样（2026-11-06）
+
+H112 的日志终于落盘（`boot_id 7422465753`、`slots_written=5`），关键行：
+
+```text
+[376.953] NATIVE_IRQ: timer=0 cntv_ctl=fffffff007bb7000 tval=5b8d800 flags=f tick=0
+[381.958] NATIVE_IRQ: timer=0 cntv_ctl=fffffff007bb7000 tval=5b8d800 flags=f tick=0
+[384.526] NATIVE_PROC_DUMP: trigger stage=2 flags=f cmds=31992 elapsed_ms=12030
+```
+
+- **`timer=0` 持续到 381 s**：ArmCpu 的 INTID 27 计数从未增加 →
+  虚拟定时器中断从未投递；
+- `tick=0`：`timer_call` 同样从未触发；
+- `flags=f`：这次到了白（backboardd ~372 s exec），stage 2 正常触发；
+- 之前的"197 s 冻结"要修正为"控制台安静 + 没有 flush"，内核仍在跑（本日志
+  写到 386 s）；
+- 进程摘要显示"全员等待"：backboardd 1 线程 `runnable=0`、SpringBoard
+  4 线程 `runnable=0`，几乎全部 `runnable=0`。
+
+H112 里 `cntv_ctl` 读出来是内核地址（`fffffff007bb7000`），内联汇编不可信。
+H113 改用 XNU `machine_routines.c` 同款 builtin，并补上三项状态：
+
+```c
+uint64_t ctl = __builtin_arm_rsr64("CNTV_CTL_EL0");
+uint64_t tval = __builtin_arm_rsr64("CNTV_TVAL_EL0");
+mrs daif / icc_pmr_el1 / icc_igrpen1_el1
+```
+
+输出：
+
+```text
+NATIVE_IRQ: timer=.. ipi=.. daif=.. pmr=.. grp1=.. ctl=.. tval=.. flags=.. tick=..
+```
+
+```text
+H113 kernel:  f76fe585d2c6ff17589bbefe87772bc0a818c312b7b5f71d7fcb79ed79fef7b6
+H113 payload: 6633f759310cea787448e0466e0504414328794c74dda38e47f107d968ab518e
+H113 boot:    85e8640359e51c7c4764e69d5a8078c0ea1afefed9bbb37fcb111b354ff450ec
+```
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H113.img`（已核对）、
+Mac `~/h103/boot-H113.img`、仓库 `out/cheeseburger/boot/boot-H113.img`。
+args 与 H112 相同（`cpus=2 h103-slot=1 h103-load-iogpu=0 h103-log-secs=5
+h109-tick=1`）。
+
+判读：
+
+| 观察 | 结论 |
+| --- | --- |
+| `daif` 的 I 位=1 | 中断全局未开，系统一直在轮询；找平台里该开中断的位置 |
+| I=0、`ipi>0`、`timer=0` | GIC 能送 IPI，PPI 27 没使能/分组/优先级不对 |
+| I=0、`ipi=0`、`timer=0` | 所有中断都没送，查 vector/ICC_SRE/DAIF |
+| `timer` 在涨 | 定时器正常，问题在 `rtclock_intr`/`timer_call` 接线 |
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
