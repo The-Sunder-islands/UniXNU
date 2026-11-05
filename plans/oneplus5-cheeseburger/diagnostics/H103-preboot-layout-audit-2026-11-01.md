@@ -4093,3 +4093,53 @@ boot:    09c31cc705e32a2c37a5c7a2bf29735d3a7e3d8edfdd11e4a3482bcdfb7fcb39
   才做运行时真实基类解析。
 - 仍在 UFS L5 后 panic：说明不是 accelerator bindings，需回看 2×2
   改动本身的 archive 布局/早期类注册。
+
+## 96. H103fs 结果与 H104a：延迟 A540 发布（2026-11-05）
+
+H103fs 日志：
+
+```text
+16.893 NATIVE_LEGACY: probe enter
+16.903 NATIVE_A540_ACCEL: published IOAcceleratorES (probe only)
+163.540 SpringBoard/27 actual exec
+167.782 NATIVE_EXEC pid=55 ... xpcproxy ... com.apple.backboardd
+175.327 IOMFB_FDR_Loader
+191.806 KextLog: driverkitd is not active
+```
+
+没有 `comm=backboardd` 的实际 exec；2×2 左上角是绿色（SpringBoard only），
+其余三块灰色。说明 property-only A540 服务在 pre-root 阶段发布后，
+driverkitd/backboardd 的交接停在 `driverkitd is not active`。
+
+H104a 只改发布时机：
+
+```text
+LegacyDisplayProbe.cpp:
+  preModLoad -> display/presenter/A540 static init -> postModLoad
+  删除 native_a540_accelerator_probe() 的早期调用
+
+NativeUfsProbe.cpp:
+  h103SlotTick() 在 native_boot_flags & 4（backboardd exec）后
+  调用一次 native_a540_accelerator_probe()
+  IOLog("NATIVE_A540_PUBLISH: rc=%d flags=%x")
+```
+
+A540 类仍在 display probe 的 pre/post 窗口注册；服务在 backboardd 真正
+exec 后才出现，不再干扰 driverkitd 的早期匹配。
+
+候选：
+
+```text
+kernel:  c5023e1e481488852a1f83ed9bd632976c146a45cbdf47a34adede6b95f082cb
+payload: 58d7463c2dcc0bbebc5e37a3e3aa89a4059b5da115df31adc6cfef4c5364c3a2
+boot:    72a06e3965a012139e50f61546f1729afbd9e49c605ae5f07764b0af34fed78b
+```
+
+判读：
+
+- `NATIVE_EXEC ... comm=backboardd` 出现、2×2 左上白：提前发布确实是
+  阻塞点，H104a 修复了交接。
+- 随后 `NATIVE_A540_PUBLISH: rc=6 flags=4` 且 client 块变化：property stub
+  被发现。
+- 仍停在 `driverkitd is not active`：不是提前发布导致，回到 display
+  archive/IOKit 匹配排查。

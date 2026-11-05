@@ -96,6 +96,13 @@ static volatile int gH103LoadIogpu;
 static volatile int gH103IogpuTried;
 static volatile uint32_t gH103IogpuRc = 0xffffffffU;
 static void h103MaybeLoadIogpu (void);
+// H104a: publish the A540 property-only service only after backboardd has
+// actually exec'd. Publishing a fake IOAcceleratorES before user space caused
+// the driverkitd/backboardd handoff to stall at "driverkitd is not active".
+extern "C" int native_a540_accelerator_probe (void);
+static volatile int gH103A540Tried;
+static volatile int gH103A540Rc = -1;
+static void h103MaybePublishA540 (void);
 extern "C" {
 volatile uint32_t native_h103_slot_state = 0;
 }
@@ -180,6 +187,18 @@ h103MaybeLoadIogpu (void)
   kern_return_t kr = OSKextLoadKextWithIdentifier ("com.apple.iokit.IOGPUFamily");
   gH103IogpuRc = static_cast<uint32_t> (kr);
   IOLog ("NATIVE_IOGPU_LOAD: rc=%x flags=%x\n", gH103IogpuRc,
+         native_boot_flags);
+}
+
+static void
+h103MaybePublishA540 (void)
+{
+  if (gH103A540Tried || !(native_boot_flags & 4)) {
+    return;
+  }
+  gH103A540Tried = 1;
+  gH103A540Rc = native_a540_accelerator_probe ();
+  IOLog ("NATIVE_A540_PUBLISH: rc=%d flags=%x\n", gH103A540Rc,
          native_boot_flags);
 }
 
@@ -470,6 +489,7 @@ h103SlotTick (void)
     return;
   }
   h103MaybeLoadIogpu ();
+  h103MaybePublishA540 ();
   uint64_t interval = gH103SlotMode == 2 ? 2 * 19200000ULL : 19200000ULL / 2;
   uint64_t now = mach_absolute_time ();
   if (!gH103LastSlotTicks) {

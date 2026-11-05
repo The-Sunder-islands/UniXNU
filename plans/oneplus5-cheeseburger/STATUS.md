@@ -2782,6 +2782,27 @@ H103fs payload: 90e6802e44c124b898f5dff3a4bdc65f700ca8da6ebf4d32bef67f8050842b6e
 H103fs boot:    09c31cc705e32a2c37a5c7a2bf29735d3a7e3d8edfdd11e4a3482bcdfb7fcb39
 ```
 
+H103fs 上机：A540 服务在 16.9s 发布，A540 块变绿；右上 2×2 左上角绿、
+其余三块灰。日志里 SpringBoard/27 已 exec，但只有
+`xpcproxy ... backboardd`，没有 `comm=backboardd` 的实际 exec；最后一行是
+`KextLog: driverkitd is not active`。说明提前发布假
+`IOClass=IOAcceleratorES` 服务把 driverkitd/backboardd 的交接拖住了。
+
+H104a 保留 A540 类注册在 display probe 的 pre/post 窗口，但把服务发布移到
+UFS 读路径，只在 `native_boot_flags & 4`（backboardd 实际 exec）之后调用
+`native_a540_accelerator_probe()`。
+
+```text
+H104a kernel:  c5023e1e481488852a1f83ed9bd632976c146a45cbdf47a34adede6b95f082cb
+H104a payload: 58d7463c2dcc0bbebc5e37a3e3aa89a4059b5da115df31adc6cfef4c5364c3a2
+H104a boot:    72a06e3965a012139e50f61546f1729afbd9e49c605ae5f07764b0af34fed78b
+```
+
+判读：应看到 `NATIVE_EXEC ... comm=backboardd`、2×2 左上角变白，然后
+`NATIVE_A540_PUBLISH: rc=... flags=4`；再看 client 块是否变化。若仍停在
+`driverkitd is not active`，说明提前发布不是唯一原因，需要查 display
+archive/IOKit 匹配。
+
 判读：先确认不再在 UFS L5 后 panic；若出现
 `NATIVE_A540_ACCEL: published IOAcceleratorES (probe only)`，看 A540 块和
 2×2 client 是否变化。property stub 可能被 CA 忽略；若被忽略，下一步只能做
