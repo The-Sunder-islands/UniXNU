@@ -136,6 +136,12 @@ extern "C" void native_proc_state_dump(void);
 // from the timer interrupt and needs no thread timer at all.
 extern "C" void native_legacy_heartbeat_cell(void);
 
+// H111: ArmCpu counts every INTID 27 (virtual timer) it takes before calling
+// rtclock_intr(). A zero count after minutes of uptime means the timer
+// interrupt itself never reaches the kernel, which would explain IOSleep,
+// tsleep and timer_call all failing to wake anything.
+extern "C" volatile uint64_t armcpu_timer_interrupts;
+
 static int gH109Chan;
 static volatile uint32_t gH109Ticks;
 static timer_call_t gH109TimerCall;
@@ -611,6 +617,25 @@ h103SlotTick (void)
     printedTicks = ticks;
     IOLog ("NATIVE_TICK: sec=%u flags=%x gate=%d\n", ticks, native_boot_flags,
            h107GateOpen () ? 1 : 0);
+  }
+  // H111: sample the arch timer state every 30 s from the read path. The
+  // ArmCpu counter only moves when INTID 27 actually arrives; CNTV_CTL shows
+  // whether the kernel enabled/unmasked the virtual timer at all.
+  {
+    static volatile uint64_t lastIrqPrint;
+    uint64_t nowIrq = mach_absolute_time ();
+    if (!lastIrqPrint) {
+      lastIrqPrint = nowIrq;
+    } else if (nowIrq - lastIrqPrint >= 30 * 19200000ULL) {
+      lastIrqPrint = nowIrq;
+      uint64_t ctl = 0, tval = 0;
+      __asm__ volatile ("isb; mrs %0, cntv_ctl_el0" : "=r" (ctl));
+      __asm__ volatile ("isb; mrs %0, cntv_tval_el0" : "=r" (tval));
+      IOLog ("NATIVE_IRQ: timer=%llu cntv_ctl=%llx tval=%llx flags=%x tick=%u\n",
+             (unsigned long long) armcpu_timer_interrupts,
+             (unsigned long long) ctl, (unsigned long long) tval,
+             native_boot_flags, gH109Ticks);
+    }
   }
   if (!gH103SlotMode) {
     return;
