@@ -3986,3 +3986,46 @@ boot:    a7a240200c7fdc96a9ca3e369e3f1be073d61f40ff72c53bccf6e91bc41b484a
   `audit-target-accelerator-base-current.py`（prelink 布局又变了）。
 - `Waiting on IOMedia UUID 04769D26`：display archive 改动触发 race，回退
   H103fo。
+
+## 93. H103fq 早期 OSMetaClass panic 与 H103fr（2026-11-05）
+
+H103fq 在 UFS probe 的 L5 之后 panic：
+
+```text
+panic: Kernel data abort
+pc  = 0xfffffff00784f3d0   OSMetaClass::addInstance +0x30
+x0  = 0xfffffff00caeb600
+far = 0x0
+```
+
+`x0` 不是 A540 的 static init 路径，而是早期 UFS 对象构造时拿到的
+metaclass 指针，落在新 IOGPUFamily `__DATA` 附近。H103fq 把
+`IOAcceleratorES::gMetaClass` 用 `.globl` 绝对符号定义在
+`0xfffffff00caeb688`（真实 prelinked IOGPUFamily 数据内），prelink/符号表
+把这个 kernel 绝对符号当成了可绑定 target，早期对象的 metaclass 指针被
+错误绑定。
+
+H103fr 只改 `scripts/build-op5-legacy-display.py`：accelerator bindings
+用 `.private_extern` 而不是 `.globl`。符号仍能解析 A540 的未定义引用，
+但不再作为 kernel 导出/prelink 绑定候选。`nm`：
+
+```text
+fffffff00caeb688 a __ZN15IOAcceleratorES10gMetaClassE
+```
+
+（小写 `a` = private/local absolute，而不是之前的大写 `A`。）
+
+候选：
+
+```text
+kernel:  0922e9d182674e9bc014c79611efd170667910a3b5c32518bfe82b4873b79268
+payload: 455fd32c07acc61619824fb32e9b5a769bd99624ac1111cde3b1cb53cbd22d99
+boot:    ec0d60362c3cd17d5d776fbe2c5a05be60530f43dc3607f5f96eb03a81eddeb1
+```
+
+判读：
+
+- 能过 UFS probe 并出现 `NATIVE_LEGACY: probe enter`：符号污染假设成立，
+  再看 `NATIVE_A540_ACCEL: published`。
+- 仍在 UFS L5 后 panic：`x0` 若仍是 `0xcaeb600`，说明 prelink 绑定并非
+  由导出符号触发，需要改用运行时 ABI 查找/属性 stub。

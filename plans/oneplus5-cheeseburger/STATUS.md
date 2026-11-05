@@ -2755,6 +2755,22 @@ H103fq payload: 75ff3251ca43b457a2c7e8fde36ae7f273b6def2dbf75474dbf0057430158a4e
 H103fq boot:    a7a240200c7fdc96a9ca3e369e3f1be073d61f40ff72c53bccf6e91bc41b484a
 ```
 
+H103fq 在 UFS probe 阶段就 panic：`OSMetaClass::addInstance`，
+`x0=0xfffffff00caeb600`，`far=0`。原因是新的 accelerator 绝对符号
+`IOAcceleratorES::gMetaClass=0xfffffff00caeb688` 落在 prelinked
+IOGPUFamily 数据里，作为 `.globl` 绝对符号被 prelink/符号表当成 kernel
+target，早期 UFS 对象的 metaclass 指针被错误绑定。
+
+H103fr 把 accelerator bindings 改成 `.private_extern`，让它们只参与本
+次链接、不进入 kernel 导出/prelink 绑定表（`nm` 中已从 `A` 变成 `a`），
+地址仍是新 ABI 的 `0xfffffff00caeb688` 等。
+
+```text
+H103fr kernel:  0922e9d182674e9bc014c79611efd170667910a3b5c32518bfe82b4873b79268
+H103fr payload: 455fd32c07acc61619824fb32e9b5a769bd99624ac1111cde3b1cb53cbd22d99
+H103fr boot:    ec0d60362c3cd17d5d776fbe2c5a05be60530f43dc3607f5f96eb03a81eddeb1
+```
+
 判读：应出现 `NATIVE_A540_ACCEL: published IOAcceleratorES (probe only)`，
 A540 块变绿；若仍 data abort，核对 `far` 是否等于 `0xcaeb698`。
 

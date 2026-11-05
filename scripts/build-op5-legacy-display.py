@@ -231,7 +231,11 @@ def main():
         '__ZN15IOAcceleratorES10gMetaClassE': int(accel_plan['metaclass'], 16),
     }
     accel_asm = OUT / 'original-accelerator-bindings.S'
-    accel_asm.write_text(''.join(f'.globl {name}\n.set {name}, {value:#x}\n' for name, value in sorted(accel_bindings.items())))
+    # H103fr: keep these addresses out of the kernel's exported symbol table.
+    # A .globl absolute symbol at the real IOGPUFamily metaclass address made
+    # the early OSMetaClass instance bookkeeping see a duplicate class symbol
+    # and abort in OSMetaClass::addInstance before the display probe runs.
+    accel_asm.write_text(''.join(f'.private_extern {name}\n.set {name}, {value:#x}\n' for name, value in sorted(accel_bindings.items())))
     run(['xcrun', 'clang', '-target', 'arm64-apple-ios17.0.0', '-c', accel_asm, '-o', OUT / 'original-accelerator-bindings.o'])
 
     objcopy = shutil.which('llvm-objcopy') or '/opt/local/libexec/llvm-20/bin/llvm-objcopy'
