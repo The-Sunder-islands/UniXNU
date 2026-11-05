@@ -3345,6 +3345,48 @@ cache、scratch-data、firmware 全部沿用。镜像在 Windows
 - 绿阶段：SpringBoard 后 60 秒出现 `trigger stage=1 … fallback`，同样
   带完整 `NATIVE_PROC_THREAD`，用于查 backboardd 为什么没起来。
 
+## H108 独立心跳、1 Hz 诊断线程与进程摘要（2026-11-06）
+
+H107 的 +2 s dump 给出了阻塞点：`wait=0xfffffff007ae0320` 符号化后是
+`ipc_mqueue_full`（`IPC_MQUEUE_FULL`，端口的 send turnstile）。backboardd
+唯一的线程和 FDR loader 的一条线程都堵在"向已满端口发送"上，此后没有
+UFS 读，所以 stage 2/3 和之后的日志都写不下来。
+
+H108 的改动：
+
+- 新增 1 Hz 诊断线程 `h108TickThread`，用 `tsleep(…, hz)` 睡眠（`IOSleep`
+  已证明不醒）。每秒（1）翻转独立的 16×16 心跳格，（2）门槛打开且 dump
+  阶段到期时打印并强制 flush。启动打印 `NATIVE_TICK: thread rc=…`，前
+  5 秒和每 30 秒打印 `NATIVE_TICK: sec=…`；第一次上机就能验证 `tsleep`
+  在这个移植上是否会醒。
+- display archive 新增 `native_legacy_heartbeat_cell()`：只重画 (40,0) 的
+  16×16 格，不重画整块 2×2、不取锁，由 1 Hz 线程驱动，白之后仍持续闪烁。
+- dump 增强：线程行在 `wait_event == &ipc_mqueue_full` 时追加
+  `send-block`；新增 `NATIVE_PROC_SUM: pid=… comm=… threads=… runnable=…`
+  每进程一行（`proc_iterate`，上限 160），用来找"队列满却不读"的接收者。
+- flush 统一由 `h103FlushNow()` 完成（读路径与 1 Hz 线程共用，busy 标志和
+  游标只在这一处更新）。
+- payload 的 `h103-log-secs` 从 10 改为 5。
+
+```text
+H108 kernel:  fb2a302a09610f157d3a1559c8adfb78a1367d3044cd9c8316e5665402daa95e
+H108 payload: ca53e0c29a67cf2056d8e9a32a1d2d8d9f4d0bc5c81a103f475e8c474d0676bf
+H108 boot:    03c23f719636ae56173867eb10fcd9ed48325d0c3cc4f4efd387881300fab818
+```
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H108.img`（已核对）、
+Mac `~/h103/boot-H108.img`、仓库 `out/cheeseburger/boot/boot-H108.img`。
+payload 以 H107 的为基线，只换 `kernel.macho` 与 `unixnu.toml`（log-secs=5），
+ADT/trust cache/scratch-data/firmware 不变。
+
+判读：
+
+- `NATIVE_TICK: sec=1..5` 出现 → `tsleep` 可用，之后 stage 2/3 不再依赖
+  UFS 读；只有 `NATIVE_TICK: thread rc=0` 而没有 sec 行 → 退回 timer_call；
+- 左上第 3 格在白之后应继续每秒白/橙翻转（独立心跳）；
+- `NATIVE_PROC_SUM` 里找 `runnable=0` 且线程都停在非 `send-block` 的进程，
+  那就是队列满的接收者。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
