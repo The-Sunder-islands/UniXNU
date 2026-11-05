@@ -65,6 +65,7 @@ Patches apply in name order from `patches/xnu/*.patch` and `kits/NativePrelink/p
 | `offline-native-gpu-broker` | Starts the offline GPU broker |
 | `zzy-native-gpu-addon-mount` | Mounts read-only union views for GPU addon content and launch jobs |
 | `zzw-native-adreno-sandbox-grant` | Lets NativeAdreno name the render server in `NativeSandboxGrantProcess` and open its user client past the sandbox |
+| `zzwb-native-sandbox-grant-set-properties` | Extends that grant to `setProperties`, which the render server's profile refuses (`FadePeriod` on a panel backlight) |
 | `native-aes-personality` | Registers the storage and console personalities |
 
 ## Diagnostics

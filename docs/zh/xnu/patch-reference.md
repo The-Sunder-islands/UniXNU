@@ -65,6 +65,7 @@
 | `offline-native-gpu-broker` | 启动离线 GPU broker |
 | `zzy-native-gpu-addon-mount` | 为 GPU addon 内容和启动任务挂载只读 union 视图 |
 | `zzw-native-adreno-sandbox-grant` | 让 NativeAdreno 在 `NativeSandboxGrantProcess` 中指定 render server，并使其 user client 通过沙箱打开 |
+| `zzwb-native-sandbox-grant-set-properties` | 把同一授权扩展到 `setProperties`，使 render server 的配置（如面板背光的 `FadePeriod`）不再被沙箱拒绝 |
 | `native-aes-personality` | 注册存储和控制台 personality |
 
 ## 诊断
