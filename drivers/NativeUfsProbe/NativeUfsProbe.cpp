@@ -618,15 +618,16 @@ h103SlotTick (void)
     IOLog ("NATIVE_TICK: sec=%u flags=%x gate=%d\n", ticks, native_boot_flags,
            h107GateOpen () ? 1 : 0);
   }
-  // H111: sample the arch timer state every 30 s from the read path. The
-  // ArmCpu counter only moves when INTID 27 actually arrives; CNTV_CTL shows
-  // whether the kernel enabled/unmasked the virtual timer at all.
+  // H111/H112: sample the arch timer state every 5 s from the read path, so a
+  // freeze leaves one in the last screen. The ArmCpu counter only moves when
+  // INTID 27 actually arrives; CNTV_CTL shows whether the kernel enabled and
+  // unmasked the virtual timer at all.
   {
     static volatile uint64_t lastIrqPrint;
     uint64_t nowIrq = mach_absolute_time ();
     if (!lastIrqPrint) {
       lastIrqPrint = nowIrq;
-    } else if (nowIrq - lastIrqPrint >= 30 * 19200000ULL) {
+    } else if (nowIrq - lastIrqPrint >= 5 * 19200000ULL) {
       lastIrqPrint = nowIrq;
       uint64_t ctl = 0, tval = 0;
       __asm__ volatile ("isb; mrs %0, cntv_ctl_el0" : "=r" (ctl));
@@ -635,6 +636,21 @@ h103SlotTick (void)
              (unsigned long long) armcpu_timer_interrupts,
              (unsigned long long) ctl, (unsigned long long) tval,
              native_boot_flags, gH109Ticks);
+    }
+  }
+  // H112: one forced dump + flush 120 s after the UFS start, independent of
+  // any exec flag. The last three boots froze near 197 s before any gated
+  // flush, so this guarantees one written record before that point.
+  {
+    static volatile int forcedDone;
+    if (!forcedDone && gH103StartTicks &&
+        mach_absolute_time () - gH103StartTicks >= 120 * 19200000ULL) {
+      forcedDone = 1;
+      IOLog ("NATIVE_TICK: forced dump at uptime 120 s flags=%x\n", native_boot_flags);
+      native_proc_state_dump ();
+      if (gH103SlotMode) {
+        h103FlushNow ();
+      }
     }
   }
   if (!gH103SlotMode) {
