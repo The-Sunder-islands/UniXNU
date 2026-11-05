@@ -18,7 +18,7 @@ index 5dcf00e..3586f03 100644
 +native_proc_state_dump(void)
 +{
 +	printf("NATIVE_PROC_DUMP: begin\n");
-+	const int pids[] = { 78, 55, 63, 1 };
++	const int pids[] = { 78, 55, 63, 27, 1 };
 +	for (unsigned i = 0; i < sizeof(pids) / sizeof(pids[0]); i++) {
 +		printf("NATIVE_PROC_DUMP: find pid=%d\n", pids[i]);
 +		struct proc *p = proc_find(pids[i]);

@@ -127,38 +127,63 @@ extern "C" void native_proc_state_dump(void);
 // H105: this thread never wakes from IOSleep on this kernel. No H103/H104
 // capture contains a single NATIVE_UFS_ALIVE line after NATIVE_UFS_HB: enter,
 // so the H104i/H104j dump placed inside the heartbeat loop below could never
-// run. Drive the dump from the UFS completion path instead: it also draws the
-// 2x2 and is proven alive (NATIVE_UFS_PROGRESS). Two snapshots are taken, one
-// shortly after backboardd execs (before the FDR loader opens the display) and
-// one ~10 s later (after it), so a blocked loader/backboardd is visible.
-static volatile uint64_t gH105BackboarddTicks;
+// run. Drive the dump from the UFS completion and read paths instead: they are
+// proven alive (NATIVE_UFS_PROGRESS). Three snapshots follow the gate, so the
+// state just after exec and the later stall are both recorded.
+// H107: the gate also opens 60 s after SpringBoard exec when backboardd never
+// runs, so a green boot leaves evidence too.
+static volatile uint64_t gH105GateTicks;
+static volatile uint64_t gH107SpringBoardTicks;
 static volatile int gH105DumpStage;
 
-static void
-h105DumpTick (void)
+static bool
+h107GateOpen (void)
 {
-  if (!(native_boot_flags & 4) || gH105DumpStage >= 2) {
-    return;
+  if (native_boot_flags & 4) {
+    return true;
+  }
+  if (!(native_boot_flags & 8)) {
+    return false;
   }
   uint64_t now = mach_absolute_time ();
-  if (!gH105BackboarddTicks) {
-    gH105BackboarddTicks = now;
-    return;
+  if (!gH107SpringBoardTicks) {
+    gH107SpringBoardTicks = now;
+    return false;
   }
-  uint64_t elapsed = now - gH105BackboarddTicks;
+  // The launchd ordering race (~200-230 s) is decided long before this.
+  return now - gH107SpringBoardTicks >= 60 * 19200000ULL;
+}
+
+static bool
+h105DumpTick (void)
+{
+  if (gH105DumpStage >= 3 || !h107GateOpen ()) {
+    return false;
+  }
+  uint64_t now = mach_absolute_time ();
+  if (!gH105GateTicks) {
+    gH105GateTicks = now;
+    return false;
+  }
+  uint64_t elapsed = now - gH105GateTicks;
   unsigned stage = 0;
   if (gH105DumpStage == 0 && elapsed >= 2 * 19200000ULL) {
     stage = 1;
   } else if (gH105DumpStage == 1 && elapsed >= 12 * 19200000ULL) {
     stage = 2;
+  } else if (gH105DumpStage == 2 && elapsed >= 60 * 19200000ULL) {
+    stage = 3;
   }
-  if (stage) {
-    gH105DumpStage = stage;
-    IOLog ("NATIVE_PROC_DUMP: trigger stage=%u flags=%x cmds=%llu elapsed_ms=%llu\n",
-           stage, native_boot_flags, (unsigned long long) gUfsCommands,
-           (unsigned long long) (elapsed / 19200));
-    native_proc_state_dump ();
+  if (!stage) {
+    return false;
   }
+  gH105DumpStage = stage;
+  IOLog ("NATIVE_PROC_DUMP: trigger stage=%u flags=%x cmds=%llu elapsed_ms=%llu%s\n",
+         stage, native_boot_flags, (unsigned long long) gUfsCommands,
+         (unsigned long long) (elapsed / 19200),
+         (native_boot_flags & 4) ? "" : " fallback");
+  native_proc_state_dump ();
+  return true;
 }
 
 // H103ea keeps H103bd's 10-second heartbeat byte-for-byte: the ALIVE console
@@ -539,19 +564,27 @@ h103SlotTick (void)
   }
   h103MaybeLoadIogpu ();
   h103MaybePublishIogpu ();
-  // H104f: no slot/header writes before backboardd actual exec. The IOGPU
-  // load and the real-accelerator probe stay enabled; only the UFS log write
-  // waits, because slot0 proved the early writes lose the backboardd race.
-  if (!(native_boot_flags & 4)) {
+  // H104f/H107: no slot/header writes before backboardd actual exec. When
+  // backboardd never runs, SpringBoard + 60 s opens the same gate so the dump
+  // and one flush still record why it stopped.
+  if (!h107GateOpen ()) {
     return;
   }
   uint64_t interval = (gH103SlotMode == 2 ? 2u : gH103LogSecs) * 19200000ULL;
   uint64_t now = mach_absolute_time ();
+  // H107: run any due dump before reading the message cursor, and force the
+  // flush on the same pass so the stage lines reach the disk.
+  bool dumped = h105DumpTick ();
   if (!gH103LastSlotTicks) {
     gH103LastSlotTicks = now;
+    if (!dumped) {
+      return;
+    }
+  }
+  if (gH103SlotBusy) {
     return;
   }
-  if (gH103SlotBusy || now - gH103LastSlotTicks < interval) {
+  if (!dumped && now - gH103LastSlotTicks < interval) {
     return;
   }
   struct H103MsgBuf *m = msgbufp;
