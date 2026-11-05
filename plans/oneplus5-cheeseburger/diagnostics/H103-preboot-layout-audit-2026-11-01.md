@@ -4240,3 +4240,49 @@ boot:    e3ba65d79b7c8f62c24e8d0ef2a62c983517df979e478a550b0b5bb3e3fd80ef
 - selector 全 0 但不再增加：loader 在等外部 kext/数据，转查 FDR 依赖。
 - selector 正常但 backboardd 仍不开显示：转 backboardd/CoreAnimation
   provider 等待，而不是继续 FDR selector。
+
+## 99. H104c 第二次结果与 H104d：backboardd matching 跟踪（2026-11-05）
+
+H104c 第二次上机（16:33 日志）已经越过上次的抓取点：
+
+```text
+189.199 NATIVE_DISPLAY_OPEN service=NativeLegacyDisplay
+        process=IOMFB_FDR_Loader grant=backboardd match=0
+189.226 NATIVE_LEGACY: client enter pid=78 comm=IOMFB_FDR_Loader type=0
+189.251 NATIVE_LEGACY: client observed status=0
+189.276 / 189.303 再次 IOServiceOpen
+199.026 KextLog: driverkitd is not active
+199.466 KextLog: driverkitd is active
+```
+
+关键结论：
+
+- FDR loader 确实打开了 Legacy display，并创建了一个 user client；
+- 但没有任何 `NATIVE_LEGACY: client sel`，即 loader **没有调用任何
+externalMethod selector**；selector 日志不是当前阻塞点。
+- 2×2 右下下半由灰变**橙**：`native_boot_flags & 128`，说明 backboardd
+  已经开始做 IOKit matching，只是匹配的类不含 `IOMobile`。
+
+H104c 之前 IOKit trace 只设置 bit 128，不打印匹配内容。H104d 在
+`patches/xnu/zzzzzzzzzz-h103-iokit-trace.patch` 里增加前 32 次日志：
+
+```text
+NATIVE_IOKIT_MATCH: class=<IOClass> provider=<IOProviderClass>
+    name=<IONameMatch> found=<0/1> count=<n>
+```
+
+候选：
+
+```text
+kernel:  009631ae5ed1e6c72ce7d4855374a2a1f74b960c2f42d1e72921ea807559af12
+payload: 88de84fdf0b90bde8e6440d5568a9e6cdae673f1d173fe1fa79ff8f94861ce14
+boot:    9a7afb45b214a1db31e3099aba6615219a9504bf55c593a383b7e859d7a5cbbb
+```
+
+判读：
+
+- 出现 `class=IOGPU`/`IOAcceleratorES`/`IOAccelerator`：backboardd 在等
+  加速器/GPU 服务，下一步提供该服务或让 CA 接受现有 provider。
+- 出现 `class=IOMobileFramebuffer*`/`IOFramebuffer` 但 `found=0`：显示
+  服务匹配/属性问题。
+- 三个字段全是 `-`：matching dictionary 使用其他键，下一版打印完整 XML。

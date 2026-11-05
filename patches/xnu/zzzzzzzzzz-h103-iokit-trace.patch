@@ -1,0 +1,69 @@
+diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
+index ad633d5..0e0c72e 100644
+--- a/iokit/Kernel/IOUserClient.cpp
++++ b/iokit/Kernel/IOUserClient.cpp
+@@ -2694,6 +2694,48 @@ is_io_service_match_property_table_bin(
+ 	return internal_io_service_match_property_table(service, matching, matchingCnt, matches);
+ }
+ 
++extern "C" void proc_selfname(char *, int);
++extern "C" volatile uint32_t native_boot_flags;
++static bool
++native_match_name(const char *s, const char *needle)
++{
++	if (!s || !needle) return false;
++	for (unsigned i = 0; s[i]; ++i) {
++		unsigned j = 0;
++		while (needle[j] && s[i + j] == needle[j]) ++j;
++		if (!needle[j]) return true;
++	}
++	return false;
++}
++static void
++native_match_trace(OSDictionary *dict, bool success)
++{
++	char name[17] = {};
++	proc_selfname(name, sizeof(name));
++	if (strcmp(name, "backboardd") != 0) return;
++	native_boot_flags |= 128;
++	bool mobile = false;
++	const char *keys[] = { "IOClass", "IOProviderClass", "IONameMatch" };
++	const char *values[] = { "-", "-", "-" };
++	for (unsigned k = 0; k < sizeof(keys) / sizeof(keys[0]); ++k) {
++		OSString *s = OSDynamicCast(OSString, dict->getObject(keys[k]));
++		if (s) {
++			values[k] = s->getCStringNoCopy();
++			if (native_match_name(values[k], "IOMobile")) mobile = true;
++		}
++	}
++	static unsigned logged;
++	if (logged < 32) {
++		++logged;
++		IOLog("NATIVE_IOKIT_MATCH: class=%s provider=%s name=%s found=%d count=%u\n",
++		    values[0], values[1], values[2], success ? 1 : 0,
++		    (unsigned)dict->getCount());
++	}
++	if (mobile) {
++		native_boot_flags &= ~(512U | 1024U);
++		native_boot_flags |= success ? 512U : 1024U;
++	}
++}
+ static kern_return_t
+ internal_io_service_get_matching_services(
+ 	mach_port_t main_port,
+@@ -2715,6 +2757,7 @@ internal_io_service_get_matching_services(
+ 	if ((dict = OSDynamicCast( OSDictionary, obj))) {
+ 		IOTaskRegistryCompatibilityMatching(current_task(), dict);
+ 		*existing = IOUserIterator::withIterator(IOService::getMatchingServices( dict ));
++		native_match_trace(dict, *existing != 0);
+ 		kr = kIOReturnSuccess;
+ 	} else {
+ 		kr = kIOReturnBadArgument;
+@@ -2798,6 +2841,7 @@ internal_io_service_get_matching_service(
+ 	if ((dict = OSDynamicCast( OSDictionary, obj))) {
+ 		IOTaskRegistryCompatibilityMatching(current_task(), dict);
+ 		*service = IOService::copyMatchingService( dict );
++		native_match_trace(dict, *service != nullptr);
+ 		kr = *service ? kIOReturnSuccess : kIOReturnNotFound;
+ 	} else {
+ 		kr = kIOReturnBadArgument;

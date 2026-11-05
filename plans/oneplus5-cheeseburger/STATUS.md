@@ -2836,6 +2836,39 @@ H104c payload: fc455727471d8c5be0e006029741fed79b6e59a1d792ffac91a14b7dca7f6d22
 H104c boot:    e3ba65d79b7c8f62c24e8d0ef2a62c983517df979e478a550b0b5bb3e3fd80ef
 ```
 
+H104c 第二次上机（16:33 日志）：
+
+```text
+189.199 NATIVE_DISPLAY_OPEN service=NativeLegacyDisplay
+        process=IOMFB_FDR_Loader grant=backboardd match=0
+189.226 NATIVE_LEGACY: client enter pid=78 comm=IOMFB_FDR_Loader type=0
+189.251 NATIVE_LEGACY: client observed status=0
+189.276 / 189.303 另外两次 IOServiceOpen
+199.026 KextLog: driverkitd is not active
+199.466 KextLog: driverkitd is active
+```
+
+没有 `NATIVE_LEGACY: client sel`：FDR loader 只 open 了显示服务，**没有
+调用任何 externalMethod selector**。所以 selector 日志不是当前阻塞点。
+
+2×2：左上白、右上黄、左下蓝；右下上半灰（无 transfer/swap），下半**橙**
+（`native_boot_flags & 128`）：backboardd 已经开始做 IOKit matching，但
+匹配的不是 IOMobile* 类。
+
+H104d 增强 IOKit trace，打印 backboardd 前 32 个 matching dictionary 的
+`IOClass` / `IOProviderClass` / `IONameMatch`。
+
+```text
+H104d kernel:  009631ae5ed1e6c72ce7d4855374a2a1f74b960c2f42d1e72921ea807559af12
+H104d payload: 88de84fdf0b90bde8e6440d5568a9e6cdae673f1d173fe1fa79ff8f94861ce14
+H104d boot:    9a7afb45b214a1db31e3099aba6615219a9504bf55c593a383b7e859d7a5cbbb
+```
+
+判读：看 `NATIVE_IOKIT_MATCH: class=... provider=... name=...`。如果
+class 是 `IOGPU`/`IOAcceleratorES`，下一步提供对应服务；如果是
+`IOMobileFramebuffer`/`IOFramebuffer`，调整匹配/属性；如果全是 `-`，
+下一版打印完整 matching dictionary XML。
+
 判读：看 `NATIVE_LEGACY: client sel pid=78 selector=... status=...`。
 若某个 selector 返回非 0 或之后没有新 selector，下一步实现/补该 selector
 或检查 FDR loader 等待的 kext/数据。若 selector 正常但 backboardd 仍不
