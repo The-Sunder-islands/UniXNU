@@ -3522,3 +3522,31 @@ boot:    36f6938ee1de01756706c7adbdb312e8fcb5de8702994b712c56bcd2a3410dfa
 
 判读：第 4 块应从蓝色变成黄/绿；绿色表示 slot+header 写成功，TWRP 的
 `slots_written` 应开始增长。
+
+## 84. H103fi：slot tick 移到 fLock 之外（2026-11-05）
+
+H103fh 停在 UEFI。原因是 slot tick 放在 `ufsCommand` 的完成路径，而
+`readBlocks` 在调用 `ufsCommand` 时仍持有 `fLock`；`h103SlotWrite()` ->
+`logWrite()` 再次 `IOLockLock(fLock)`，非递归锁自死锁，第一次 UFS 读就
+不返回。
+
+H103fi 把 `h103SlotTick()` 从 `ufsCommand` 移除，改放在：
+
+```text
+readBlocks():     IOLockUnlock(fLock); h103SlotTick();
+readWindowBulk(): IOLockUnlock(fLock); h103SlotTick();
+```
+
+slot 写内部的 UFS 命令完成路径不再调用 tick，`gH103SlotBusy` 仍防止
+并发重入。
+
+候选：
+
+```text
+kernel:  b868e9007b5b93e7a3e287c00a828bbe5640bda2ae33153a931b1b13757146a5
+payload: 90e6c1fc2b9926128dcc69bb6e292d3d31e05628e9ec8d0c76a2af9fd04b4f3c
+boot:    cf87300170090acb019b5cdfc5f76157724824befef3e5dd1bf985f8eabbb393
+```
+
+判读：能正常进系统；第 4 块应从蓝色变黄/绿；绿色后 TWRP 的
+`slots_written` 应增长。

@@ -366,6 +366,26 @@ h103SlotWriteThunk (void)
   }
 }
 
+// The spawned threads never wake from IOSleep on this kernel. Run the slot
+// timer from the normal read paths only after fLock has been released; calling
+// it from ufsCommand's completion would deadlock on the non-recursive fLock.
+static void
+h103SlotTick (void)
+{
+  uint64_t now = mach_absolute_time ();
+  if (!gH103LastSlotTicks) {
+    gH103LastSlotTicks = now;
+    return;
+  }
+  if (gH103SlotBusy || now - gH103LastSlotTicks < 2 * 19200000ULL) {
+    return;
+  }
+  gH103LastSlotTicks = now;
+  gH103SlotBusy = 1;
+  h103SlotWriteThunk ();
+  gH103SlotBusy = 0;
+}
+
 OSDefineMetaClassAndStructors (NativeUfsProbe, IOService)
 OSDefineMetaClassAndStructors (NativeUfsLun, IOBlockStorageDevice)
 
@@ -911,21 +931,6 @@ ufsSubmit (UfsQueue *q, unsigned direction, unsigned bytes,
              (unsigned long long) gWindowLastReqCount);
     }
   }
-  // The spawned heartbeat/log/slot threads never wake from IOSleep on this
-  // kernel (no periodic ALIVE and no 20-second logThread snapshot). Drive the
-  // 2-second slot from the UFS completion path instead, which is already
-  // proven by the 2x2 redraw.
-  {
-    uint64_t now = mach_absolute_time ();
-    if (!gH103LastSlotTicks) {
-      gH103LastSlotTicks = now;
-    } else if (!gH103SlotBusy && now - gH103LastSlotTicks >= 2 * 19200000ULL) {
-      gH103LastSlotTicks = now;
-      gH103SlotBusy = 1;
-      h103SlotWriteThunk ();
-      gH103SlotBusy = 0;
-    }
-  }
   return true;
 }
 
@@ -1100,6 +1105,7 @@ NativeUfsProbe::readBlocks (uint8_t unit, uint64_t block, uint64_t count,
     count -= chunk;
   }
   IOLockUnlock (fLock);
+  h103SlotTick ();
   if (done) {
     *done = total;
   }
@@ -1133,6 +1139,7 @@ NativeUfsProbe::readWindowBulk (uint64_t lba, uint32_t blocks, void *out)
   uint64_t commandTicks = mach_absolute_time () - commandStart;
   uint64_t unlockStart = mach_absolute_time ();
   IOLockUnlock (fLock);
+  h103SlotTick ();
   uint64_t unlockTicks = mach_absolute_time () - unlockStart;
   static unsigned gBulkPhases;
   unsigned call = gBulkPhases++;
