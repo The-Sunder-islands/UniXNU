@@ -53,6 +53,8 @@ static uint64_t gH103HeartbeatStart;
 static volatile int gH103SkipPattern;
 static uint32_t gH103SlotCursor;
 static volatile int gH103Quiet;
+static volatile uint64_t gH103LastSlotTicks;
+static volatile int gH103SlotBusy;
 extern "C" {
 volatile uint32_t native_h103_slot_state = 0;
 }
@@ -884,26 +886,45 @@ ufsSubmit (UfsQueue *q, unsigned direction, unsigned bytes,
   gUfsInFlight = 0;
   gUfsLastLoops = loops;
   gUfsLastTicks = mach_absolute_time () - commandStart;
-  if (!gH103Quiet && (gUfsCommands & 63) == 0) {
+  if ((gUfsCommands & 63) == 0) {
     // H103bd's UFS completion path redrew the 2x2 before printing PROGRESS.
     // That frequent redraw, not the 10-second heartbeat alone, is what kept
-    // the panel alive while the console scrolled. Restore it verbatim.
+    // the panel alive while the console scrolled. Restore it verbatim. Keep
+    // the redraw independent of gH103Quiet so a later quiet build cannot lose
+    // the panel again.
     native_legacy_test_pattern ();
-    IOLog ("NATIVE_UFS_PROGRESS: cmds=%llu last=%llx/%llu loops=%llu ticks=%llu "
-           "winReq=%llu winBytes=%llu winFlight=%llu lastWin=%llx/%llu "
-           "req=%llx/%llu\n",
-           (unsigned long long) gUfsCommands,
-           (unsigned long long) gUfsLastLba,
-           (unsigned long long) gUfsLastBytes,
-           (unsigned long long) gUfsLastLoops,
-           (unsigned long long) gUfsLastTicks,
-           (unsigned long long) gWindowRequests,
-           (unsigned long long) gWindowBytes,
-           (unsigned long long) gWindowInFlight,
-           (unsigned long long) gWindowLastBlock,
-           (unsigned long long) gWindowLastCount,
-           (unsigned long long) gWindowLastReqBlock,
-           (unsigned long long) gWindowLastReqCount);
+    if (!gH103Quiet) {
+      IOLog ("NATIVE_UFS_PROGRESS: cmds=%llu last=%llx/%llu loops=%llu ticks=%llu "
+             "winReq=%llu winBytes=%llu winFlight=%llu lastWin=%llx/%llu "
+             "req=%llx/%llu\n",
+             (unsigned long long) gUfsCommands,
+             (unsigned long long) gUfsLastLba,
+             (unsigned long long) gUfsLastBytes,
+             (unsigned long long) gUfsLastLoops,
+             (unsigned long long) gUfsLastTicks,
+             (unsigned long long) gWindowRequests,
+             (unsigned long long) gWindowBytes,
+             (unsigned long long) gWindowInFlight,
+             (unsigned long long) gWindowLastBlock,
+             (unsigned long long) gWindowLastCount,
+             (unsigned long long) gWindowLastReqBlock,
+             (unsigned long long) gWindowLastReqCount);
+    }
+  }
+  // The spawned heartbeat/log/slot threads never wake from IOSleep on this
+  // kernel (no periodic ALIVE and no 20-second logThread snapshot). Drive the
+  // 2-second slot from the UFS completion path instead, which is already
+  // proven by the 2x2 redraw.
+  {
+    uint64_t now = mach_absolute_time ();
+    if (!gH103LastSlotTicks) {
+      gH103LastSlotTicks = now;
+    } else if (!gH103SlotBusy && now - gH103LastSlotTicks >= 2 * 19200000ULL) {
+      gH103LastSlotTicks = now;
+      gH103SlotBusy = 1;
+      h103SlotWriteThunk ();
+      gH103SlotBusy = 0;
+    }
   }
   return true;
 }

@@ -2596,6 +2596,17 @@ H103fg payload: 61b46a19fe95f018b6214f16c6d19f076a7c73c23e4b8ba5b1a973d3429771f3
 H103fg boot:    e456efd8a12681b40131affe0d026c09bc8506cabc76fd13745b9c1c91c33b2a
 ```
 
+H103fg 第 4 块为蓝色，证明 slot 线程已进入但一直停在 `IOSleep`；日志里也
+没有心跳的周期性 `NATIVE_UFS_ALIVE` 和 20 秒 `logThread` snapshot。H103fh
+把 2 秒 slot 计时移到 UFS 完成路径（2×2 重绘本来就是这条路径），不再依赖
+线程唤醒。
+
+```text
+H103fh kernel:  f21ee606da951562994a75c0c243990ba096c14894ec3af33ac66838b5579feb
+H103fh payload: 9953381de226ca1b1ceb5fb61c2a8aa12895d63f1557b89d062c96110a8629e3
+H103fh boot:    36f6938ee1de01756706c7adbdb312e8fcb5de8702994b712c56bcd2a3410dfa
+```
+
 ### 关键产物
 
 ```text

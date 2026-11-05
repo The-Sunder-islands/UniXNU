@@ -3485,3 +3485,40 @@ kernel:  79a653767ab035a9c69068a810d96e0e4bdf781e3a7200734168262ace4556df
 payload: 61b46a19fe95f018b6214f16c6d19f076a7c73c23e4b8ba5b1a973d3429771f3
 boot:    e456efd8a12681b40131affe0d026c09bc8506cabc76fd13745b9c1c91c33b2a
 ```
+
+## 83. H103fh：2 秒 slot 改由 UFS 完成路径驱动（2026-11-05）
+
+H103fg 上机第 4 块为**蓝色**：`native_h103_slot_state=3`，slot 线程已经
+进入，但 `fLogFirst/fLogBlocks/fReady/fLock/fLogDma` 一直没有全部就绪，
+所以没到 state=1。结合日志：
+
+- 只有 `NATIVE_UFS_HB: enter`，没有每 10 秒的 `NATIVE_UFS_ALIVE`；
+- 20 秒的 `logThread` snapshot 也没有出现；
+- 但 UFS 路径的 `late-window` snapshot 和 2×2 重绘正常。
+
+结论：`kernel_thread_start` 创建的线程能打印入口，但 `IOSleep` 在此内核
+不会醒来；心跳、logThread、slot 三个线程都卡住。H103fh 不再依赖线程：
+
+```text
+ufsCommand completion:
+  (gUfsCommands & 63) == 0:
+    native_legacy_test_pattern()       // 2x2，和 quiet 解耦
+    if (!quiet) PROGRESS
+  every completion:
+    if 2 s elapsed && !gH103SlotBusy:
+      h103SlotWriteThunk()
+```
+
+`h103SlotWrite` 内部会再发 UFS 写，完成路径会重入；`gH103SlotBusy`
+阻止递归 slot。slot 线程保留但只做 state=3 的入口标记，随后睡眠不再影响。
+
+候选：
+
+```text
+kernel:  f21ee606da951562994a75c0c243990ba096c14894ec3af33ac66838b5579feb
+payload: 9953381de226ca1b1ceb5fb61c2a8aa12895d63f1557b89d062c96110a8629e3
+boot:    36f6938ee1de01756706c7adbdb312e8fcb5de8702994b712c56bcd2a3410dfa
+```
+
+判读：第 4 块应从蓝色变成黄/绿；绿色表示 slot+header 写成功，TWRP 的
+`slots_written` 应开始增长。
