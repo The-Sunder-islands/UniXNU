@@ -2628,6 +2628,15 @@ H103fj payload: c1da6c3ffc7f9fb2b7db57f59ac927db4c0725c864fb2c240612520ac65de444
 H103fj boot:    85c34f005809eada4d6eb02284cc26bd9d540d232024e26388333120158fcf35
 ```
 
+H103fk 把 slot 节流从 2 秒降到 500 ms，并只在 `msgbufp->msg_bufx` 变化时
+写；slot 历史约 2 分钟（247 × 0.5 s）。
+
+```text
+H103fk kernel:  90ed23031b45f195fca40f631cd7e9e7bfd45985e322fe7c88def7e8fce1d6cc
+H103fk payload: 17b7894192bfaffdd91e40b21eb02b1b160a0cb51c12daeeb83dc918a508a8ed
+H103fk boot:    f3c461aeb8510db31bb6d5e9c22dedb99c84e7e550dad100bdc1008cfb749626
+```
+
 ### 关键产物
 
 ```text

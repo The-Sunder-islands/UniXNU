@@ -55,6 +55,7 @@ static uint32_t gH103SlotCursor;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
 static volatile int gH103SlotBusy;
+static volatile int gH103LastSlotMsgX = -1;
 extern "C" {
 volatile uint32_t native_h103_slot_state = 0;
 }
@@ -377,10 +378,22 @@ h103SlotTick (void)
     gH103LastSlotTicks = now;
     return;
   }
-  if (gH103SlotBusy || now - gH103LastSlotTicks < 2 * 19200000ULL) {
+  if (gH103SlotBusy || now - gH103LastSlotTicks < 19200000ULL / 2) {
+    return;
+  }
+  struct H103MsgBuf *m = msgbufp;
+  if (!m || !m->msg_bufc || m->msg_size <= 0) {
+    return;
+  }
+  int x = m->msg_bufx;
+  if (x < 0 || x >= m->msg_size) {
+    x = 0;
+  }
+  if (x == gH103LastSlotMsgX) {
     return;
   }
   gH103LastSlotTicks = now;
+  gH103LastSlotMsgX = x;
   gH103SlotBusy = 1;
   h103SlotWriteThunk ();
   gH103SlotBusy = 0;

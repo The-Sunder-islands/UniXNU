@@ -3577,3 +3577,28 @@ boot:    85c34f005809eada4d6eb02284cc26bd9d540d232024e26388333120158fcf35
 判读：屏幕不再持续滚动，右上 2×2 和左上 4 块保持，第 4 块绿色；
 TWRP 的 `slots_written` 继续增长。若静默后 2×2 消失，说明还有 console
 依赖，但当前重绘已与 quiet 解耦。
+
+## 86. H103fk：slot 500 ms + msg 变化判断（2026-11-05）
+
+H103fj 静默版正常。H103fk 提高 slot 更新频率：
+
+```text
+h103SlotTick():
+  节流 500 ms
+  只有 msgbufp->msg_bufx 变化时才写
+  仍从 readBlocks/readWindowBulk 解锁后触发
+```
+
+按 247 个 slot 计算，历史约 2 分钟。写入量约 256 KiB/s，对 UFS 读影响
+可接受。
+
+候选：
+
+```text
+kernel:  90ed23031b45f195fca40f631cd7e9e7bfd45985e322fe7c88def7e8fce1d6cc
+payload: 17b7894192bfaffdd91e40b21eb02b1b160a0cb51c12daeeb83dc918a508a8ed
+boot:    f3c461aeb8510db31bb6d5e9c22dedb99c84e7e550dad100bdc1008cfb749626
+```
+
+判读：TWRP 最新 slot 应明显更新更快；`slots_written` 增长更快；2×2、左上
+4 块和静默 console 保持。
