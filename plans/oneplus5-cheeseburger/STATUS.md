@@ -3409,6 +3409,51 @@ H108-cpu2 boot:    a60a4eb1ec16c438188286db5aa4e30910ed41216385189f9a67e9e351550
   owner；
 - 在 `KextLog` 之前就挂 → 只能当作辅核启动观察，不能作为对照结论。
 
+## H109 timer_call 心跳与 PROC_NOWAITTRANS（2026-11-06）
+
+H108-cpu2 日志（`h103-log-20261106-004029.txt`）确认三件事：
+
+- `NATIVE_TICK` 只有 `thread rc=0` 一行，没有 `sec=` → **`tsleep` 也不醒**，
+  线程定时在这个移植上整体不可用；
+- cpu2 到白（`comm=backboardd` 187.7 s，dump `flags=f`），UFS 锁失败只有
+  4 条且都是精确 2.0 s（`ticks=38400003`），没有 cpu1 那种 20 s 放大 →
+  cpu1 的锁死循环是**单核饿死**；
+- dump 打完 5 个进程、15 条线程后卡住：没有 `NATIVE_PROC_SUM`、没有
+  `end`，2.2 s 后 SystemOS 读拿不到锁、`disk4` 超时、`navd` pagein 失败。
+  原因是 `proc_iterate()` 默认对每个进程 `proc_transwait(p, 0)` 无限等待
+  exec 过渡，而 dump 正跑在 UFS 读路径线程上，与需要读 SystemOS 的 exec
+  互相锁死。
+
+H109 改动：
+
+- `timer_call` 每秒（定时器中断）：翻 16×16 心跳格、`gH109Ticks++`、需要时
+  `thread_wakeup` 唤醒 worker，然后重装；不用任何线程超时；
+- 新增 `h109WorkerThread`：`assert_wait` + `thread_block` 等显式唤醒，
+  被唤醒后执行 dump + flush；
+- 读路径保留 dump 兜底，并在 `h103SlotTick` 每 30 秒打印
+  `NATIVE_TICK: sec=…`，屏幕不可见时也能证明 timer_call 在走；
+- `proc_iterate` 改为 `PROC_ALLPROCLIST | PROC_NOWAITTRANS`（`1U | 4U`）；
+- 删除 H108 的 tsleep 线程。
+
+```text
+H109 kernel:  265425cc223dcd71b37440ec1281812186163c77bbc0c0b3ea10b76743d0f427
+H109 payload: 5f3e022472fbe6e9ae3ed5de7a171c14dd101fc7da6fb743fe5fcf133aed20e0
+H109 boot:    f03c895cad7c956f2b329ef4eaee7c995a5b03c55f745d3f35773bfbcf2f21d4
+```
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H109.img`（已核对）、
+Mac `~/h103/boot-H109.img`、仓库 `out/cheeseburger/boot/boot-H109.img`。
+payload 以 H108 为基线，只换 kernel（args 仍为 `cpus=1 h103-slot=1
+h103-load-iogpu=0 h103-log-secs=5`）。
+
+判读：
+
+- 白之后左上第 3 格应**每秒独立翻转**，与日志速度无关 → `timer_call` 可用；
+- 日志每 30 秒出现一次 `NATIVE_TICK: sec=…`；
+- `NATIVE_PROC_SUM` 应完整出现且不再卡住，stage 2/3 应能落盘；
+- 若心跳仍随日志闪、也没有 `sec=` 行 → `timer_call` 也不触发，下一步只剩
+  arch timer 中断直挂。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
