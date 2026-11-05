@@ -3294,6 +3294,57 @@ SHA-256 与 81,147,904 B）、Mac `~/h103/boot-H106.img`、仓库
 - 拉 `h103log.bin` 后应能搜到 `NATIVE_PROC_DUMP: trigger stage=1/2` 与
   `NATIVE_PROC_THREAD`。
 
+## H107 dump 覆盖绿阶段并强制落盘（2026-11-05）
+
+H106 上机两次，两份日志的来源不同：
+
+| 文件 | boot_id | msg_bytes | slots | 结论 |
+| --- | --- | --- | --- | --- |
+| `h103-log-20261105-231341.txt` | `4459027769` | 131072（旧格式） | 8 | 与 `194941` 那份逐字节相同，是 19:49 启动的旧内容；第一次 H106 停在绿阶段，门槛没开，没有写入 |
+| `h103-log-20261105-232033.txt` | `3776623905` | 102400（25 块） | 1 | 第二次启动到白（`comm=backboardd` 186.35 s，`flags=f`），H106 增量写入成功，`write_errors=0` |
+
+第二次启动的 dump 落盘了 stage=1，符号化后：
+
+| 进程 | 线程 | 等待点 |
+| --- | --- | --- |
+| backboardd (55) | 1 | `ipc_mqueue_receive_continue` |
+| IOMFB_FDR_Loader (78) | 2 | `ulock_wait_continue`、`ipc_mqueue_receive_continue` |
+| driverkitd (63) | 2 | `thread_preempted`、`workq_unpark_continue` |
+| launchd (1) | 6 | `semaphore_wait_continue`、`_sleep_continue`、`clock_delay_until` 等 |
+
+即 backboardd exec 后 2 秒只有一条线程、停在 mach 消息接收上；控制台在
+196.6 s 后安静。stage=2 没落盘：dump 只挂在 64 条命令的完成路径上，
+196–230 s 没有完成事件，而 flush 又可能先于 dump 拷贝。
+
+H107 的改动（`drivers/NativeUfsProbe/NativeUfsProbe.cpp`、
+`patches/xnu/zzzzzzzzzzz-h103-proc-state.patch`）：
+
+- dump 触发移进读路径的 `h103SlotTick()`（完成路径保留），不再依赖 64 条
+  命令；
+- 阶段改为 +2 s / +12 s / +60 s；
+- 每次 dump 当次强制 flush，绕过 10 秒间隔；
+- 门槛增加兜底：`native_boot_flags & 4`（backboardd）**或** SpringBoard
+  exec 后 60 秒，绿阶段也能留下 dump 和一次增量日志；
+- dump 进程列表加入 SpringBoard(27)。
+
+```text
+H107 kernel:  6acb0d39af24bfe38071bb90020b2450dc39b5603304b2f7fec2c626b409ff54
+H107 payload: 7189630e8d14f74c25e3101fc9d17d5a98afaa94b654aa2c2aced8445863539a
+H107 boot:    30d3de7397865499bdd84b9c805c06c89b1a3a14719e80048902d6c9e5fd2949
+```
+
+payload 以 H106 的为基线，只有 `kernel.macho` 不同；args、ADT、trust
+cache、scratch-data、firmware 全部沿用。镜像在 Windows
+`D:\Users\ls\Documents\OnePlus5_ios\boot-H107.img`（已核对）、Mac
+`~/h103/boot-H107.img`、仓库 `out/cheeseburger/boot/boot-H107.img`。
+
+判读：
+
+- 白阶段：`trigger stage=1/2/3`，每阶段后紧跟一次 `NATIVE_UFS_SLOT`
+  写入，`NATIVE_PROC` 行应完整落在日志里；
+- 绿阶段：SpringBoard 后 60 秒出现 `trigger stage=1 … fallback`，同样
+  带完整 `NATIVE_PROC_THREAD`，用于查 backboardd 为什么没起来。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
