@@ -2798,6 +2798,24 @@ H104a payload: 58d7463c2dcc0bbebc5e37a3e3aa89a4059b5da115df31adc6cfef4c5364c3a2
 H104a boot:    72a06e3965a012139e50f61546f1729afbd9e49c605ae5f07764b0af34fed78b
 ```
 
+H104a 上机：没有 `NATIVE_A540_PUBLISH`，也没有 `comm=backboardd` 的实际
+exec；日志仍停在 `KextLog: driverkitd is not active`（199.3s），2×2 左上
+仍是绿色。延迟服务发布没有解决问题，说明差异来自 **A540 类在 display
+probe 的 pre/post 窗口注册**，而不是服务发布。
+
+H104b 完全移除 A540 static init/类注册，回到 H103fo 的 display archive
+行为；A540 对象仍在 archive 中但不再注册。
+
+```text
+H104b kernel:  5ec6ddd29fe941883fb3777e15d5a27040c910ae4569bdc24610f943c3fa0e40
+H104b payload: 4dda07372741ebc7b65a0f6cf873c974fc9c670b8f167f4ca55eeebb68ee84dd
+H104b boot:    8cc632f2f1fc12714fd7a05fae6a76face35ac73714962db5f2b19171688dcec
+```
+
+判读：应恢复到 `driverkitd is active`、`comm=backboardd` 实际 exec、2×2
+左上变白；A540 块会变黑（没有 probe）。若仍停 `driverkitd not active`，
+说明 A540 类注册也不是原因，需要查 H103fo→H103fs 之间的其他差异。
+
 判读：应看到 `NATIVE_EXEC ... comm=backboardd`、2×2 左上角变白，然后
 `NATIVE_A540_PUBLISH: rc=... flags=4`；再看 client 块是否变化。若仍停在
 `driverkitd is not active`，说明提前发布不是唯一原因，需要查 display

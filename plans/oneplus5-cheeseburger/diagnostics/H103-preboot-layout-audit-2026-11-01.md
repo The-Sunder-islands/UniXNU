@@ -4143,3 +4143,52 @@ boot:    72a06e3965a012139e50f61546f1729afbd9e49c605ae5f07764b0af34fed78b
   被发现。
 - 仍停在 `driverkitd is not active`：不是提前发布导致，回到 display
   archive/IOKit 匹配排查。
+
+## 97. H104a 结果与 H104b：移除 A540 类注册（2026-11-05）
+
+H104a 日志：
+
+```text
+170.059 SpringBoard/27 actual exec
+170.119 NATIVE_IOGPU_LOAD: begin flags=8
+170.150 NATIVE_IOGPU_LOAD: rc=0 flags=8
+182.196 driverkitd actual exec
+183.236 IOMFB_FDR_Loader
+199.295 KextLog: driverkitd is not active
+```
+
+没有 `NATIVE_A540_PUBLISH`（bit 4 从未置位），也没有 `comm=backboardd`
+实际 exec；2×2 左上仍是绿色。延迟服务发布没有改变停点。
+
+H103fo（prelinked IOGPUFamily，display archive 无 A540 static init）能到
+`driverkitd is active`；H103fs/H104a 都在 display probe 的 pre/post 窗口
+调用 `native_a540_accelerator_static_init()`。因此 H104b 移除这次调用：
+
+```text
+LegacyDisplayProbe.cpp:
+  删除 native_a540_accelerator_static_init() 和 probe 声明
+  只保留 display/presenter static init
+
+NativeUfsProbe.cpp:
+  删除 h103MaybePublishA540() 和调用
+```
+
+A540 对象仍在 display archive 里（archive 成员集合不变），但不再注册；
+final kernel 里仍有未使用的类符号，但没有 `OSMetaClass` 注册/实例。
+
+候选：
+
+```text
+kernel:  5ec6ddd29fe941883fb3777e15d5a27040c910ae4569bdc24610f943c3fa0e40
+payload: 4dda07372741ebc7b65a0f6cf873c974fc9c670b8f167f4ca55eeebb68ee84dd
+boot:    8cc632f2f1fc12714fd7a05fae6a76face35ac73714962db5f2b19171688dcec
+```
+
+判读：
+
+- 恢复到 `driverkitd active`、`comm=backboardd`、2×2 左上白：A540 类
+  注册确实是 driverkitd 交接的阻塞点。
+- A540 块黑色是预期（没有 probe）；下一步要么做 post-userland 的
+  独立类加载，要么先回到 backboardd/显示 provider。
+- 仍停 `driverkitd not active`：A540 类注册也不是原因，需比较
+  H103fo/H103fs 的其余 display archive 差异。
