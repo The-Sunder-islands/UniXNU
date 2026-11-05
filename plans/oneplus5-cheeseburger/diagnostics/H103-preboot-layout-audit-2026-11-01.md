@@ -3864,10 +3864,11 @@ aa9bc99 chore: pin fetched sources and ignore external bring-up inputs
 - `runtime/RootAuth.cpp` 按 origin 删除；`scripts/RootAuth.cpp` 仍在；
 - `backup/h103-local-six` 保留合并前的 6 个 commit。
 
-合并后的 `main` 未 push：Mac/Linux/Windows 都没有 GitHub 凭据（HTTPS 无
-credential helper、无 SSH key）。本地 bundle：
-`/tmp/opencode/uniXNU-cheeseburger-main.bundle`（Mac 上为
-`/tmp/uniXNU-cheeseburger-main.bundle`）。
+合并后的 `main` 已 push 到 GitHub：`c1e91be..1ca9258`。主仓库
+`UniXNU` 的 `ffdcf31` 指向 `drivers/NativeMobileDisplay` 的
+`53f5d20`；该 commit 不在 origin/main 线上，已 push 到
+`lss717/GopFramebuffer` 的分支 `h103-a540`，superproject 指针可解析。
+Mac 的 `origin` 已切换为 SSH。
 
 ## 91. P2：A540 在 preModLoad 窗口注册并发布（2026-11-05）
 

@@ -2744,9 +2744,9 @@ display archive。若 rc 仍非 0，先查 prelink 注册，不要动 A540。
 `6fef5db`（power）、`9ad41b0`（adt）、`2bf3c61`（patch tool）、
 `097d00c`（lock + bring-up inputs）。origin/main 原本已在 `5ad54e2`
 跟踪 11 个 DinnerABC 文件、`SystemVolume.im4p` 和 `cpu-tables.h`；本地
-H103 线已 merge origin/main（`1ca9258`），这些文件不再被忽略。合并后的
-`main` 尚未 push：本机没有 GitHub 凭据；bundle 在
-`/tmp/opencode/uniXNU-cheeseburger-main.bundle`。
+H103 线已 merge origin/main（`1ca9258`），这些文件不再被忽略。设备仓库
+`main` 已 push 到 GitHub（`c1e91be..1ca9258`）；`GopFramebuffer` 的
+`53f5d20` 也已 push 到分支 `h103-a540`，供 H103fp 的 submodule 指针使用。
 
 ### 关键产物
 
