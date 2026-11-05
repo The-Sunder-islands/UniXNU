@@ -2901,6 +2901,39 @@ H104e payload: e15f7962d99069be89f35a73cf99554c8d62fc8b5025765272d90de429d4a67c
 H104e boot:    108a5181ec655665fc9bead733c6674fe328ee538c7feb84db2674c215c21130
 ```
 
+H104e 上机仍是左上绿，A540 黑（backboardd 未 exec，探针未运行）。检查
+H104b/H104c/H104d 的日志后确认这是 **launchd 启动顺序 race**：
+
+```text
+成功:
+  driverkitd 实际 exec -> IOMFB_FDR_Loader exec -> backboardd 实际 exec
+  -> loader 在 backboardd 之后 open 显示
+
+失败:
+  IOMFB_FDR_Loader exec -> driverkitd 实际 exec -> backboardd 永不 exec
+```
+
+H104d-green 的 loader 比 driverkitd 早 0.26s；成功时 driverkitd 早约
+1.0–1.1s。H104b 也多数停在绿，说明不是某张镜像的独立回归，而是 loader
+抢跑后占住显示、backboardd 无法 exec。
+
+先做两个只改 boot args 的 H104b 对照：
+
+```text
+boot-H104b-slot0.img    h103-slot=0        关闭持久化日志/slot 写入
+boot-H104b-noiogpu.img  h103-load-iogpu=0  不加载 IOGPUFamily
+```
+
+```text
+H104b-slot0 boot:   1aa9829522cf7f79713dc8ce577c084f83c564485c5f41aa35025ee2556e7fc0
+H104b-noiogpu boot: 90b8d14229944b5308d0995b5371472a4abaab2fc233b39e6685ab141f455aae
+```
+
+判读：如果 `slot0` 能稳定白，说明 slot 写入/UFS 争用让 driverkitd 输掉
+race；如果 `noiogpu` 能稳定白，说明 IOGPUFamily load 影响时序。两者都无效
+则做 H104f：在 `newUserClient` 里把 FDR loader 的 open 延迟到 backboardd
+实际 exec 之后。
+
 判读：先看 H104e 是否恢复到左上白（backboardd 实际 exec）。然后看
 `NATIVE_IOGPU_ACCEL: class=... object=... service=...` 和 A540 块：
 - alloc 返回 0：真实类不可用/抽象；

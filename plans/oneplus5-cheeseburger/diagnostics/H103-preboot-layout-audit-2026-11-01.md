@@ -4337,3 +4337,53 @@ boot:    108a5181ec655665fc9bead733c6674fe328ee538c7feb84db2674c215c21130
   accelerator 属性/ABI 或 user client；下一步补属性或检查 CA 的 open。
 - 如果 H104e 又停在左上绿：说明新增 archive 代码也触发同一 layout
   停点，需要把探针拆到更晚的独立 kext/窗口。
+
+## 101. 左上白的 launchd 顺序 race 与 H104b 对照（2026-11-05）
+
+H104e 仍是左上绿；A540 黑，说明 backboardd 没 exec，真实 IOGPU 探针没有
+运行。把成功和失败日志的启动顺序对齐：
+
+```text
+H104b 白:
+  506.100 driverkitd actual
+  508.025 IOMFB_FDR_Loader exec
+  519.691 backboardd actual
+  526.480 loader opens display
+
+H104c 白:
+  176.119 driverkitd actual
+  177.183 IOMFB_FDR_Loader exec
+  187.883 backboardd actual
+  189.198 loader opens display
+
+H104d 绿:
+  283.818 IOMFB_FDR_Loader exec
+  284.079 driverkitd actual
+  (no backboardd actual)
+```
+
+失败时 loader 比 driverkitd 早 0.26s；成功时 driverkitd 早约 1.0–1.1s。
+因此左上白不是显示颜色随机，而是 launchd 启动顺序的 race：loader 抢跑后
+占住显示，backboardd 就卡在 exec 之前。H104b 也多数失败，说明不是
+H104c/H104e 的独立回归。
+
+两个仅改 boot args 的 H104b 对照：
+
+```text
+boot-H104b-slot0.img    h103-slot=0        关闭持久化日志/slot 写入
+boot-H104b-noiogpu.img  h103-load-iogpu=0  不加载 IOGPUFamily
+```
+
+```text
+slot0:   1aa9829522cf7f79713dc8ce577c084f83c564485c5f41aa35025ee2556e7fc0
+noiogpu: 90b8d14229944b5308d0995b5371472a4abaab2fc233b39e6685ab141f455aae
+```
+
+判读：
+
+- `slot0` 稳定白：slot 写入/UFS 争用让 driverkitd 输掉 race，先关闭/后移
+  持久化日志。
+- `noiogpu` 稳定白：IOGPUFamily load 影响时序，先不加载它，白稳定后再加回。
+- 两者都绿：做 H104f，在 `NativeLegacyDisplay::newUserClient` 里对
+  `IOMFB_FDR_Loader` 返回 `kIOReturnNotReady`，直到 `native_boot_flags & 4`，
+  让 loader 在 backboardd 之后重试 open。
