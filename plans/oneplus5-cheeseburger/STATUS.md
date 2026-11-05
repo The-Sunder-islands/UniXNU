@@ -3007,6 +3007,35 @@ backboardd 的 `state`/`wait_event`/`continuation`：
 - loader 在 mach/IOKit 等待：查对应 service；
 - 两者已运行但没 open：查用户态/launchd 依赖。
 
+H104i 上机：左上白，2×2 右上黄、左下蓝，日志出现
+
+```text
+NATIVE_DISPLAY_OPEN: service=NativeLegacyDisplay process=IOMFB_FDR_Loader grant=backboardd match=0
+NATIVE_LEGACY: client enter pid=78 comm=IOMFB_FDR_Loader
+```
+
+说明 loader 这次成功打开了显示。但 10 分钟后仍没有 `NATIVE_PROC_DUMP`：
+心跳线程没有继续打印 ALIVE，说明它在 2×2 draw 或 dump 的 `task_lock` 上
+停住了。
+
+H104j 调整：
+
+```text
+dump 移到 native_legacy_test_pattern() 之前
+backboardd 实际 exec 后不再 draw 2×2（避免 loader open 持有显示锁时卡住）
+task_lock -> task_lock_try，失败打印 task lock busy
+dump 增加 begin/find/end 日志
+```
+
+```text
+H104j kernel:  7e85bc444764676f410ba0481826044eaf9056962386f35727f75a627fdf04c3
+H104j payload: e2033722ca0ca18a4575e481c14ff69a58240dba38e9ef3be216e7504c959dfb
+H104j boot:    3f161865f038d47891ab9724b70fb98f111ea627590b9585b91dea6388ef9f35
+```
+
+判读：左上白后 30–40 秒应出现 `NATIVE_PROC_DUMP: begin/find/...`。2×2 可能
+停在 backboardd 之前的状态，这是预期；以控制台 dump 为准。
+
 判读：看 `NATIVE_IOGPU_ACCEL: name=... mc=... obj=... service=...`。
 - 某个 `obj/service` 非 0：真实 concrete 类可分配，attach/register 后看
   A540 绿和 CA 反应。

@@ -4528,3 +4528,34 @@ boot:    4647216c5ddb03c43d5118b9db577402250a630d0382460b5b034600e20278e1
 - loader/backboardd 的 state/wait_event/continuation 若相同：定位共同等待点；
 - loader 在 IOKit/mach 等待：查对应 service；
 - 两者 running 但未 open：查用户态/launchd 依赖。
+
+## 106. H104i 结果与 H104j：dump 前置/非阻塞（2026-11-05）
+
+H104i 上机：左上白，2×2 右上黄、左下蓝，日志出现
+
+```text
+NATIVE_DISPLAY_OPEN: service=NativeLegacyDisplay
+        process=IOMFB_FDR_Loader grant=backboardd match=0
+NATIVE_LEGACY: client enter pid=78 comm=IOMFB_FDR_Loader
+```
+
+说明 loader 这次成功打开了显示。但 10 分钟后没有 `NATIVE_PROC_DUMP`，也没有
+后续 `NATIVE_UFS_ALIVE`，说明心跳线程停在 2×2 draw 或 dump 的
+`task_lock` 上。
+
+H104j：
+
+- dump 移到 `native_legacy_test_pattern()` 之前；
+- `native_boot_flags & 4` 后不再 draw 2×2，避免 loader open 持有显示锁时
+  卡住心跳线程；
+- `task_lock` 改为 `task_lock_try`，失败打印 `task lock busy`；
+- dump 增加 begin/find/end 日志。
+
+```text
+kernel:  7e85bc444764676f410ba0481826044eaf9056962386f35727f75a627fdf04c3
+payload: e2033722ca0ca18a4575e481c14ff69a58240dba38e9ef3be216e7504c959dfb
+boot:    3f161865f038d47891ab9724b70fb98f111ea627590b9585b91dea6388ef9f35
+```
+
+判读：白后 30–40 秒应出现 `NATIVE_PROC_DUMP: begin/find/...`。2×2 可能停在
+backboardd 之前的状态，这是预期；以控制台 dump 为准。
