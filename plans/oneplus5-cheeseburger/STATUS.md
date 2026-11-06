@@ -4795,6 +4795,48 @@ launchd 拉起下一个 XPC 又碰到同一文件 → 循环。我们的补丁�
 python3 scripts/h103-log-pull.py --adb ~/.local/bin/adb --slots 120
 ```
 
+### H127h 合并日志结论与 H127i（2026-11-06）
+
+`h127-2-log-20261106-233158.txt`（`--slots` 合并，681 KB，66 s → 2505 s）确认：
+
+- **定时器完全正常**：`clock19 == t19`、`forced=0`、`ctl=1`，速率约 80/s，连续运行 42 分钟；
+- 系统 exec 571 次、backboardd 被反复拉起；`flags` 一路到 `0xef`；
+- **backboardd 反复崩溃 `status=0xa`**（`Too many corpses being created`）；
+- 根因是 **SystemOS 读超时**：
+
+```text
+NATIVE_UFS_LOCK: window SystemOS blocked req=... 
+IOBlockStorageDriver: executeRequest: request failed to start!
+disk4: I/O timeout.
+_vnode_dev_read: disk4 *** got err 60 reading blknum ... (num read errs: 93..96)
+apfs_collect_hash_records: disk4s1 ... Operation timed out(60)
+```
+
+`err 60` = ETIMEDOUT；它连锁出 `dpage_pager_compressed: err 94`、AMFI
+`Verification failed with error 94` 和进程崩溃。也就是说 backboardd 的 0xa 是**读不到
+SystemOS 数据**的症状，不是它自身的缺陷。
+
+嫌疑：我们的 UFS 窗口/日志写入路径在高并发读时抢锁（`executeRequest` 根本没能启动）。
+无中断时 I/O 少、问题不明显；定时器恢复后并发读变多，窗口路径成了瓶颈。
+
+H127i 是零构建对照：沿用 H127h 内核，只把 payload 的 `h103-log-secs` 从 5 改成 30，
+把 flush 频率降 6 倍：
+
+```text
+H127i kernel:  59519748c1e79dbded8ba6d39695f5a49a361e92342549fe210c50ee997ed881 (H127h)
+H127i payload: 189567210f55a563e3391e66737d70f189ca8d830bbfc147b7235ddea9a094cb
+H127i boot:    7513677f572dc4bef7c53dd7da6220d0fdb649ac51f2766c571f550ba01c847b
+```
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H127i.img`（已核对）、
+Mac `~/h103/boot-H127i.img`、仓库 `out/cheeseburger/boot/boot-H127i.img`。
+
+判读：
+
+- `disk4: I/O timeout` / `err 60` 明显减少、backboardd 不再 0xa → 是日志窗口争用，
+  下一步把 flush 改成真正的后台线程 + 更小窗口；
+- 超时照旧 → 是 UFS 窗口设备在高并发下的锁/队列问题（`readWindowBulk`），单独查。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
