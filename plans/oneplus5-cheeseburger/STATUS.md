@@ -4724,6 +4724,34 @@ Mac `~/h103/boot-H127h.img`、仓库 `out/cheeseburger/boot/boot-H127h.img`。
 - 仍停在同一位置 → `rtclock_intr`（或其触发的其它 timer_call）在此上下文不安全，
   退回 H127e 的 rearm-only 行为，`tick` 问题另行处理。
 
+### H127h 初步观察（2026-11-06，待日志确认）
+
+用户实测：**H127h 在 dyld 共享缓存加载阶段明显比 H127g 快**，说明去掉
+`h109-tick=1`（定时器上下文里的 `IOLog`）确实缓解了中断上下文与 UFS 日志的
+console 锁争用，`rtclock_intr` 本身很可能没有问题。
+
+需要注意：用户随后提供的一张屏幕照片与 H127f 卡住那张逐字相同
+（`timer=61270801 t19=61270801 tval=0493ee6d dispatch=0 clock19=0`），
+那是 H127f 的格式与数值，不是 H127h；H127h 的 `NATIVE_IRQ` 字段是
+`clock19=` / `forced=`（没有 `dispatch=`）。**因此 H127h 的 `clock19`/`forced`
+走向仍待日志确认。** 另：`tick` 是 `h109-tick` 的计数，本轮已关掉，`tick=0`
+不能用来判断时钟是否接管。
+
+待确认项：
+
+1. `clock19` 是否随 `t19` 增长、`forced` 是小值（XNU 自己武装）还是 ~100/s（兜底 tick）；
+2. 启动是否能越过 200 s 附近的历史停点，`NATIVE_EXEC` 是否继续增加；
+3. `vm_shared_region_start_address() failed`（dyld 共享区）是否仍出现——它是与定时器
+   独立的另一条线索。
+
+判据与后续：
+
+- `clock19` 增长、`forced` 小、启动继续 → 时钟接管成功；下一步把诊断日志彻底移出
+  定时器上下文，并观察 200 s 停点是否消失；
+- `forced` ~100/s → 兜底 tick 生效，XNU 未自行武装 deadline，需要单独查
+  `set_timer_deadline` 为何没有生效；
+- 仍卡在同一位置 → 退回 H127e 的 rearm-only（速度已知可恢复）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
