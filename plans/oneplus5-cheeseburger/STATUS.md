@@ -3770,6 +3770,44 @@ H117-nogic boot:    22b5b806ebf8f6826e0f0fe42773b5f980762defe5114b5ee117ed5d9ed0
   panic 前的现场；没有 `NATIVE_PANIC` 且 `boot_id` 仍不变 → 连 panic 钩子
   都没机会执行，问题在写盘或更早的路径。
 
+## H118 GIC 状态改为初始化缓存（2026-11-06）
+
+H117 的 A/B 结论：`boot-H117.img`（GIC 采样开）黑屏，`boot-H117-nogic.img`
+（`h114-gic=0`）正常启动，日志 `boot_id 3796218264`、`slots_written=4`、
+`write_errors=0`，`NATIVE_IRQ: timer=0 … ctl=5 tick=0` 依旧是核心问题。
+所以 H114 新增的**运行期 GIC/ICC 读取**确实是黑屏原因（用户怀疑成立）。
+
+H118 把 GIC 读取挪到初始化、并拆开两个开关：
+
+- ArmCpu 在 `enableGic()` 写完 `kSgiPpiEnable` 之后**回读一次**
+  `GICR_TYPER/ISENABLER0/IGROUPR0/ISPENDR0/IPRIORITYR[27]`，存进
+  `armcpu_ppi_probe[]`；`armcpu_probe_ppi27()` 变成空操作，运行期不再做
+  GIC MMIO；
+- `h114-gic=0/1`：是否打印缓存值（默认 1，安全）；
+- `h114-icc=0/1`：是否读 `ICC_HPPIR1/HPPIR0/RPR`（默认 0，H114 的另一个
+  嫌疑，单独做对照）。
+
+```text
+H118 kernel:       d3ac7d09ed4d51696ea5e0968951a025ac5252665690c020552100c9585c6532
+H118 payload:      792198fa710a440f5734b004199cc38f862851f0190b0bbc1762ea7c6e90be1b
+H118 boot:         44da43d3bcc7c1490d69f23b9da1007767cf4d418e3ed0499f088b0089f6fc2f
+H118-icc payload:  a3f307dc07b7704dfc1086a6658bdc71058912a3b09db31b7f8e8157289993af
+H118-icc boot:     b491d9c815abc130874562512980f1055b1c42e9d11c7bc45c6416eb31981d99
+```
+
+子模块 `drivers/ArmCpu` 提交 `b2ece97`（分支 `h118-gic-cache`，已推送）。
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\`、Mac `~/h103/`、仓库
+`out/cheeseburger/boot/`。
+
+判读（先刷默认 `boot-H118.img`）：
+
+- `NATIVE_GIC: … isen=…` 若 bit27=1、`igrp` bit27=1、`ipri=0x80` →
+  redistributor 配置正确，中断没到是 CPU/异常路由问题；
+- `isen` bit27=0 → ArmCpu 的使能写没落到这块 frame；
+- `igrp` bit27=0 → 被分到 Group 0（FIQ），ArmCpu 只处理 Group 1；
+- 默认镜像不再黑屏（同 nogic）即可确认运行期 MMIO 是崩溃源；
+- 需要时再用 `boot-H118-icc.img` 单独验证 ICC 读取。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
