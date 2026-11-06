@@ -4270,6 +4270,33 @@ Mac `~/h103/boot-H125spi2.img`、仓库 `out/cheeseburger/boot/boot-H125spi2.img
   "PPI 19 交接/固件"两条路；
 - panic/卡死 → 记录屏幕尾部与 `armcpu_spi_unhandled`，回退 H124。
 
+## H124-2（15 分钟运行）与 B4 中断结论（2026-11-06）
+
+`H124-2-log-20261106-174445.txt`（同一 `boot-H124.img`，等 15 分钟后导出）：
+
+- 日志最后一条 `[196.875] NATIVE_CACHE_SIG`，头部 `uptime_s: 172`；
+- 控制台最后是 `pid=92 countryd / pid=91 cryptexd / pid=90 eligibilityd`，同在这一带；
+- `NATIVE_IOKIT ... comm=backboardd`：**0 条**（全部 IOKit 行只有 UserEventAgent、
+  containermanager）。
+
+结论：**"启动太慢、backboardd 还没轮到"不成立**——这次系统在 ~200 s 就停住了。
+无中断时用户态会在 200 s 附近随机停住（H122/H125spi2 能到 400 s+，H124-2 只有 ~197 s），
+等更久只是等同一个停点。
+
+**证据链（B4 / 中断）：**
+
+| 层 | 结论 | 依据 |
+| --- | --- | --- |
+| SGI/PPI | 全部 Group 0，NS 写不进 | H122：`IGROUPR0` 写 `1<<27` 回读 0 |
+| SPI | 自 IPI 也投递不到 | H125spi2：`armcpu-self-ipi=1` 强制发 SPI 1008，`ipi` 仍 0 |
+| 对照 | 同设备、同 `fastboot boot` 的 TWRP/Linux 定时器正常 | TWRP：`arch_timer = GICv3 19`，计数在涨 |
+| 差异 | 只在 ABL→edk2→DarwinBoot 这条链 | TWRP 是 ABL→Linux 内核直启 |
+| 后果 | 用户态 ~200 s 停住，backboardd 到不了显示初始化 | H122/H124/H124-2/H125spi2 |
+
+**决定：内核侧 GIC 实验全部停止**（H125/H125b 已证明会挂死），只保留
+`boot-H124.img` 作为稳定基线。唯一剩下的路线是固件侧：在 edk2 里做**只读** GIC dump，
+确认 Group 0 是进入 UEFI 前就有（TZ/ABL 交接），还是 UEFI 期间被改的（可修）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
