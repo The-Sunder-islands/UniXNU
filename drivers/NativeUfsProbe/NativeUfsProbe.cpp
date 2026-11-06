@@ -160,6 +160,7 @@ extern "C" void armcpu_enable_ppi19 (void);
 extern "C" volatile uint32_t armcpu_irq_first_id;
 extern "C" volatile uint32_t armcpu_irq_storm_id;
 extern "C" volatile uint64_t armcpu_irq_storm_count;
+extern "C" volatile uint32_t armcpu_ppi_seen;
 extern "C" volatile uint32_t armcpu_ppi19_done;
 extern "C" volatile uint32_t armcpu_ppi19_isen_before;
 extern "C" volatile uint32_t armcpu_ppi19_isen_after;
@@ -699,7 +700,7 @@ h103SlotTick (void)
       __asm__ volatile ("mrs %0, daif" : "=r" (daif));
       __asm__ volatile ("mrs %0, icc_pmr_el1" : "=r" (pmr));
       __asm__ volatile ("mrs %0, icc_igrpen1_el1" : "=r" (grp1));
-      IOLog ("NATIVE_IRQ: timer=%llu ipi=%llu daif=%llx pmr=%llx grp1=%llx ctl=%llx tval=%llx t19=%llu t27=%llu first=%llx storm=%llx sn=%llu flags=%x tick=%u\n",
+      IOLog ("NATIVE_IRQ: timer=%llu ipi=%llu daif=%llx pmr=%llx grp1=%llx ctl=%llx tval=%llx t19=%llu t27=%llu seen=%llx first=%llx storm=%llx sn=%llu flags=%x tick=%u\n",
              (unsigned long long) armcpu_timer_interrupts,
              (unsigned long long) armcpu_ipi_interrupts,
              (unsigned long long) (daif & 0x3ffULL),
@@ -708,6 +709,7 @@ h103SlotTick (void)
              (unsigned long long) ctl, (unsigned long long) tval,
              (unsigned long long) armcpu_timer19_interrupts,
              (unsigned long long) armcpu_timer27_interrupts,
+             (unsigned long long) armcpu_ppi_seen,
              (unsigned long long) armcpu_irq_first_id,
              (unsigned long long) armcpu_irq_storm_id,
              (unsigned long long) armcpu_irq_storm_count,
