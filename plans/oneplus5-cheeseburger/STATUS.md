@@ -4297,6 +4297,51 @@ Mac `~/h103/boot-H125spi2.img`、仓库 `out/cheeseburger/boot/boot-H125spi2.img
 `boot-H124.img` 作为稳定基线。唯一剩下的路线是固件侧：在 edk2 里做**只读** GIC dump，
 确认 Group 0 是进入 UEFI 前就有（TZ/ABL 交接），还是 UEFI 期间被改的（可修）。
 
+## H126：UEFI 侧 GIC 交接快照（2026-11-06）
+
+背景：H124-2 证明"等更久"无效（~197 s 停住、无 `comm=backboardd`），H122/H125spi2
+证明内核侧拿不到任何中断（PPI/SGI 分组写不进、SPI 自 IPI 也到不了），而 TWRP/Linux
+在同设备、同 `fastboot boot` 下定时器正常。因此只剩"启动链交接"一个变量，需要看
+**进入 UEFI 时 GIC 是什么状态**。
+
+改动（`edk2-msm8998` fork，提交 `c2d06c2`，分支 `unixnu-cheeseburger`，已推 `fork`）：
+
+- `Platforms/Msm8998Pkg/Device/oneplus/cheeseburger/Drivers/CheeseburgerBootMemoryDxe`：
+  驱动进入时、以及 ExitBootServices 事件各打印一次 GIC 快照（`Print` 到 UEFI console）；
+- `Common/edk2/ArmPkg/Drivers/ArmGic/GicV3/ArmGicV3Dxe.c`：在**任何写之前**打印一次；
+  vendored edk2 的改动另存为 `Patches/h126-gic-snapshot.patch`（1002 行 diff）；
+- 输出：
+
+```text
+UNIXNU-GIC[-entry|-exit]: CTLR=%08x DS=%d ARE=%d TYPER=%08x%08x IGROUPR0=%08x ISENABLER0=%08x ISPENDR0=%08x WAKER=%08x
+```
+
+构建（本机 Linux，1m52s）：
+
+```sh
+cd edk2-msm8998
+UNIXNU_TREE=/mnt/data_2048/project/ios/UniXNU ./build.sh --device cheeseburger --skip-rootfs-gen
+```
+
+产物：`workspace/uefi-cheeseburger.img.gz-dtb` `635e735a7a0a0576d74b5e812b184596c4294a0018ad9b6a55ac3bcf830e88b5`
+
+```text
+H126-gic boot: 62aa3a430e4d24c320339f72a4e18c25f2bbe0beabc501533a00fd8d6ff6bded
+```
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H126-gic.img`（已核对）、
+Mac `~/h103/boot-H126-gic.img`、仓库 `out/cheeseburger/boot/boot-H126-gic.img`。
+payload 用 H124 的（内核未改），只换 firmware 字段。
+
+判读：
+
+- `UNIXNU-GIC`（ArmGicDxe，最早）就已经 `DS=0` 且 `IGROUPR0=00000000`
+  → 安全世界/ABL 在进入 UEFI 前就这样交接；内核侧彻底无解，只能继续查 ABL/TZ
+  为什么对 Linux 镜像与对我们镜像不同；
+- 若最早处是 `DS=1` 或 `IGROUPR0=ffffffff`、而 `-exit` 变了
+  → 变化发生在我们能控制的 UEFI/DarwinBoot 链里，可以定位到具体驱动；
+- 三处都一样且都是 Group 0 → 同上，属交接问题。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
