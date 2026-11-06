@@ -5308,6 +5308,47 @@ H133 boot:    44b356bf25e8f15f457ec9b993f857c82c51601e7646ef4e6380e4566b0ceebb
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H133.img`（已核对）、
 Mac `~/h103/boot-H133.img`、仓库 `out/cheeseburger/boot/boot-H133.img`。
 
+### H133 结果：镜像查找执行成功但全部 no-match（2026-11-07）
+
+`h133-log-20261107-030945.txt`：
+
+```text
+NATIVE_TRAP_IMAGE: pid=26 comm=SpringBoard     addr=0x1bd14b2ec no-match count=1235
+NATIVE_TRAP_IMAGE: pid=91 comm=liveactivitiesd addr=0x1df6624f8 no-match count=413
+```
+
+`count` 分别是 1235 / 413，都是合理镜像数 → `dyld_all_image_infos` 的头字段读对了；
+但 1235 条里没有一条 `imageLoadAddress <= addr`。同一次启动内 PC 固定
+（SpringBoard 14 次全在 `0x1bd14b2ec`），跨启动不同（H132 是 `0x1aa1b32ec`），
+说明 ASLR 开启，必须靠镜像归属定位。
+
+两种可能待区分：数组指针读错（每行都是垃圾值），或地址确实落在匿名映射
+（objc trampoline RWX 页、JIT、cache 头区域）。
+
+### H134：让镜像列表自证（2026-11-07）
+
+`patches/xnu/zzzzzzzzzzzzzzzzzz-h134-image-attest.patch`：`native_report_trap_image()`
+追加 `version`、成功 `copyin` 的行数、`min_base`/`max_base`，并在无匹配时打印最近
+的两个“低于 addr”候选和一个“高于 addr”候选：
+
+```text
+NATIVE_TRAP_IMAGE: pid=… addr=0x… version=… rows=…/… min=0x… max=0x…
+NATIVE_TRAP_IMAGE_ROW: pid=… base=0x… delta=0x… above=0/1 <path>
+```
+
+- `rows` 正常且 `min/max` 是合理地址、addr 仍在区间外 → PC 在匿名映射，
+  下一步打印 `lr`/`sp` 反推调用者；
+- `rows` 为 0 或 `min/max` 是垃圾 → 结构偏移不对，按样本修正。
+
+```text
+H134 kernel:  5b9a7017c32d1bfe70dc88c6d8f0c39c01f6082b46d929f55b550d5011dc9ecf
+H134 payload: 019281a8fe6e90a5a5812a42e519f987af03eb4aefc7e703b3f6018ca32ace73
+H134 boot:    40df985f7fc7921082616f70ae4bd3b59bc3afda9c2033dd3d0db1d6e7910da7
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H134.img`（已核对）、
+Mac `~/h103/boot-H134.img`、仓库 `out/cheeseburger/boot/boot-H134.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
