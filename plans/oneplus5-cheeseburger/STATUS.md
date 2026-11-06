@@ -3894,6 +3894,33 @@ Mac `~/h103/boot-H120.img`、仓库 `out/cheeseburger/boot/boot-H120.img`。
 - `grp0`=0 且 `igrp=0` 若确为 Group 0 → 需要打开 IGRPEN0 并处理 FIQ，
   工作量大，暂不做。
 
+## H121 移除 IGRPEN0 采样（2026-11-06）
+
+H120 在 `ArmCpu::enableGic()` 之前的位置直接黑屏（`IOCPUInterruptController:
+not registry member` 之后），与 H118 的 panic 同一停点。新增的读取里只有
+`ICC_IGRPEN0_EL1` 属于 Group 0 寄存器，和 H119-icc 里读 `HPPIR0` 一样会让
+启动挂住。
+
+H121 只把这一项去掉（`armcpu_ppi_probe[7]` 固定为 0），保留
+`GICD_CTLR / GICD_TYPER / GICR_WAKER` 和 IGROUPR0 重写回读。
+
+```text
+H121 kernel:  353cde096200147110597e4fe855de9c7551b1aff3a67e4b883538d07d453fbc
+H121 payload: e854d922d4636edafb914ad388c5220d01365e58ccb5713d7832f3f5e5bb2f19
+H121 boot:    49de3eabb728f160373b9b839d72b7464e10e643a744fa90e6e7fd75503ba686
+```
+
+子模块 `drivers/ArmCpu` 提交 `e036c49`（分支 `h118-gic-cache`，已推送）。
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H121.img`（已核对）、
+Mac `~/h103/boot-H121.img`、仓库 `out/cheeseburger/boot/boot-H121.img`。
+
+判读：`NATIVE_GIC2: dctl=.. gtyper=.. waker=.. grp0=0 igrp2=..`
+
+- `dctl` bit6（DS）=1 → `igrp=0` 只是 RAZ，中断本来就是 Group 1，问题在
+  CPU 接口/redistributor 唤醒或亲和；
+- DS=0 且 `igrp2` 仍为 0 → IGROUPR0 写不进去（frame 安全态问题）；
+- `waker` 的 ProcessorSleep/ChildrenAsleep 未清零 → redistributor 没唤醒。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
