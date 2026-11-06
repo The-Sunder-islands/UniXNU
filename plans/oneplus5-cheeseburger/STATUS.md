@@ -4384,6 +4384,50 @@ Mac `~/h103/boot-H126b-gic.img`、仓库 `out/cheeseburger/boot/boot-H126b-gic.i
 - 三处都 `DS=0`、`IGROUPR0=00000000` → 安全世界/ABL 在进 UEFI 前就这样交接；
 - 若最早 `UNIXNU-GIC:` 是 `DS=1` 或 `IGROUPR0=ffffffff`、后面变了 → 变化在 UEFI 链里。
 
+## H126c：用 DiagDraw 把 GIC 状态画到屏幕上（2026-11-06）
+
+H126b 上机后屏幕与 H126 完全一致，进一步定位到两个事实：
+
+1. **窗口大小来自 payload 的 ADT，不是固件宏**。`kernel.macho.adt` 的
+   `chosen/darwinboot-memory-size` 是 `0x1_0000_0000`（4 GiB）；
+   `DarwinBoot` 只在 ADT 没有该属性时才用 `WINDOW_SIZE`。所以 H126b 把宏改成
+   192 MB 完全无效，屏幕仍是 4 GiB 窗口 + 最大连续 run `0xFCCC0000`（3.94 GiB），
+   差 64 MB → `NO WINDOW`。H124 能启动是因为旧固件 `fw-H103ea` 留下的内存图里
+   那块连续区刚好 ≥ 4 GiB，重建固件多占约 64 MB 后就不够了。
+2. **`Print`（UEFI console）在 UniXNU 菜单接管屏幕后不可见**。屏幕上能看到的
+   `NO WINDOW` / `FREE` 是 `DiagDraw` 直接写 framebuffer 画的；H126/H126b 的
+   `UNIXNU-GIC` 全是 `Print`，所以一直看不到。
+
+H126c 改动：
+
+- `drivers/DarwinBoot`：新增 `GicRead32` / `DiagGic`，在 `Boot()` 开头用
+  `DiagDraw` 在屏幕第 9 行画一行：
+  ```text
+  GIC CTLR=........ DS=. ARE=. IGROUPR0=........ ISEN=........ ISPEND=........ WAKER=........
+  ```
+- 去掉 ArmGicDxe 的 10 秒 `Stall`、`CheeseburgerBootMemoryDxe` 的 1 秒轮询
+  （都不可见），`WINDOW_SIZE` 恢复 `SIZE_256MB`（ADT 存在时它本来就不生效）。
+- **ADT 不动**：保持 4 GiB 窗口，让启动继续停在 UEFI，屏幕保持不动便于拍照。
+
+```text
+H126c firmware: 15e529be48b0726dfc3f53f7c735d8a2cfb4f2937637819783108eb38fb216be
+H126c boot:     c3b0842a797d7bd3524b629fe7c2043c529d2af32f19ae9496d120005c07ec24
+```
+
+edk2-msm8998 提交 `02a1ace`（分支 `unixnu-cheeseburger`，已推 `fork`）；
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H126c-gic.img`（已核对）、
+Mac `~/h103/boot-H126c-gic.img`、仓库 `out/cheeseburger/boot/boot-H126c-gic.img`。
+
+判读（屏幕第 9 行）：
+
+| 读数 | 结论 |
+| --- | --- |
+| `DS=0` 且 `IGROUPR0=00000000` | 进入 UEFI 时就已经是 Group 0 → 安全世界/ABL 交接问题 |
+| `DS=1` 或 `IGROUPR0=ffffffff` | 交接是正常的，问题在别处（需再查） |
+
+后续（H126d）：把 ADT 的 `darwinboot-memory-size` 降到 2 GiB 重打 payload，
+即可让内核重新启动（无需重建固件）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
