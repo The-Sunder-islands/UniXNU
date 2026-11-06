@@ -1145,10 +1145,11 @@ waitForCompletion (uint8_t *list, uint32_t *ocs, unsigned *loops,
 }
 
 // H128: the data path is clean now (no dumps, no flushes, no printf while a
-// storage lock is held), so the bound only has to cover one UFS command.  Keep
-// it short so a real fault surfaces at once instead of stalling the file
-// system for half a minute.
-#define UFS_DATA_LOCK_TICKS  (38400000ULL)  /* 2 s at 19.2 MHz */
+// storage lock is held).  H129: the bound must still exceed UFS_TIMEOUT_TICKS
+// (5.2 s), otherwise the lock expires while a command is legitimately running;
+// that is what turned the slow read at LBA 0x5b17b0 into repeated 2 s
+// kIOReturnTimeout failures.  115200000 ticks is 6 s at 19.2 MHz.
+#define UFS_DATA_LOCK_TICKS  (115200000ULL)  /* 6 s at 19.2 MHz */
 // Bounded lock acquisition: a stuck holder must not turn a diagnostic read into
 // an unobservable hang. 19.2 MHz timebase, so 38400000 ticks is two seconds.
 // H128: the wait must sleep, not spin.  `yield` is only a pipeline hint and

@@ -5061,6 +5061,39 @@ H129 把数据锁上限改为 **6 s**（略大于 5.2 s）。
 3. IOKit trace 对 backboardd / SpringBoard 取消 24 条上限，并记录每次
    `IOClass/IOProviderClass/IONameMatch` 与结果，直接回答"backboardd 找没找显示服务"。
 
+### H129：测量 SpringBoard 的死因与 backboardd 的 matching（2026-11-07）
+
+三处改动，都不改变正常行为：
+
+1. `drivers/NativeUfsProbe/NativeUfsProbe.cpp`：`UFS_DATA_LOCK_TICKS`
+   2 s → **6 s**（115200000）。原来数据锁上限（2 s）比 `UFS_TIMEOUT_TICKS`
+   （5.2 s）还短，命令仍在合法执行期内锁就判死；H128 残留的 5 次 2 秒超时
+   全部命中同一 LBA `0x5b17b0`，正是这个顺序问题。
+2. `patches/xnu/zzzzzzzzzzzzz-h129-diag.patch`：`native_trace_process_exit()`
+   把 `SpringBoard` 加入过滤列表，打印 `status/ns/code`（信号 = `rv & 0x7f`）。
+   同时顺手去掉了 H103 补丁里多出来的行首 `+`（一元加号，能编译但没意义）。
+3. 同一补丁：`native_iokit_log()` 对 `backboardd` / `SpringBoard` **取消 24 条上限**，
+   并让 `native_match_trace()` 在没有 `IOClass` 时回退打印 `IONameMatch`。
+   这样"backboardd 到底向内核要哪个类、成功与否"会完整落盘。
+
+```text
+H129 kernel:  5902d441bc23cd93f4365ce236f58a9f0c19cef8f4f92674520cc77a1bdc4a88
+H129 payload: 3f39041073287530c13db1154c4be3d5a0d684afcd8f875051bf25b4977ce397
+H129 boot:    dcb30d4db8c24fcc0d59d85120f77b7e1a733a5afc605ac0cb52b12a5a75e410
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H129.img`（已核对）、
+Mac `~/h103/boot-H129.img`、仓库 `out/cheeseburger/boot/boot-H129.img`。
+
+判读要点：
+
+- `NATIVE_EXIT: … comm=SpringBoard status=0x…` 的 `status & 0x7f` 是信号
+  （11=SIGSEGV、6=SIGABRT、4=SIGILL、9=SIGKILL），`ns` 是 `os_reason` 命名空间
+  （jetsam/crash/codesigning），`code` 是具体代码；
+- `NATIVE_IOKIT: op=match comm=backboardd cls=… d=… ok=…` 首次出现即说明
+  backboardd 开始找显示服务，`ok=1` 表示注册表里能匹配到；
+- `err 60` 应归零；若 6 秒仍不够，说明单次命令确实超过 6 秒，要查 UFS 设备侧。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

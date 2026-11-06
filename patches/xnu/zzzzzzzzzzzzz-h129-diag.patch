@@ -1,0 +1,56 @@
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -1522,9 +1522,11 @@
+ 	uint32_t ns = 0;
+ 	uint64_t code = 0;
+ 
+-	if (strcmp(comm, "cryptexd") != 0 && strcmp(comm, "eligibilityd") != 0 &&
++	/* H129: SpringBoard's exit status is the evidence for the missing UI. */
++	if (strcmp(comm, "SpringBoard") != 0 &&
++	    strcmp(comm, "cryptexd") != 0 && strcmp(comm, "eligibilityd") != 0 &&
+ 	    strcmp(comm, "launchd") != 0 && strcmp(comm, "xpcproxy") != 0 &&
+-+	    strcmp(comm, "driverkitd") != 0 && strcmp(comm, "backboardd") != 0 &&
++	    strcmp(comm, "driverkitd") != 0 && strcmp(comm, "backboardd") != 0 &&
+ 	    strcmp(comm, "logd_helper") != 0 && strcmp(comm, "logd") != 0) {
+ 		return;
+ 	}
+diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
+--- a/iokit/Kernel/IOUserClient.cpp
++++ b/iokit/Kernel/IOUserClient.cpp
+@@ -2718,13 +2718,19 @@
+ static void
+ native_iokit_log(const char *op, const char *cls, const char *detail, int ok)
+ {
+-	if (strcmp(op, "match") == 0) {
+-		if (native_iokit_match_logs++ >= 24) return;
+-	} else if (native_iokit_open_logs++ >= 24) {
+-		return;
+-	}
+ 	char comm[17] = {};
+ 	proc_selfname(comm, sizeof(comm));
++	/* H129: backboardd and SpringBoard are never capped, so the log answers
++	 * "which class does backboardd ask for" instead of a boot flag. */
++	bool native_focus = (strcmp(comm, "backboardd") == 0) ||
++	    (strcmp(comm, "SpringBoard") == 0);
++	if (!native_focus) {
++		if (strcmp(op, "match") == 0) {
++			if (native_iokit_match_logs++ >= 24) return;
++		} else if (native_iokit_open_logs++ >= 24) {
++			return;
++		}
++	}
+ 	IOLog("NATIVE_IOKIT: op=%s comm=%s cls=%s d=%s ok=%d flags=%x\n",
+ 	    op, comm, cls ? cls : "-", detail ? detail : "-", ok, native_boot_flags);
+ }
+@@ -2756,7 +2762,9 @@
+ 			if (success) native_boot_flags |= 0x1000U;
+ 		}
+ 	}
+-	native_iokit_log("match", native_dict_string(dict, "IOClass"),
++	const char *native_cls = native_dict_string(dict, "IOClass");
++	const char *native_name = native_dict_string(dict, "IONameMatch");
++	native_iokit_log("match", native_cls ? native_cls : native_name,
+ 	    native_dict_string(dict, "IOProviderClass"), success ? 1 : 0);
+ }
+ static kern_return_t
