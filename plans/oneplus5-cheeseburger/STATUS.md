@@ -4752,6 +4752,49 @@ console 锁争用，`rtclock_intr` 本身很可能没有问题。
   `set_timer_deadline` 为何没有生效；
 - 仍卡在同一位置 → 退回 H127e 的 rearm-only（速度已知可恢复）。
 
+### H127h 结果与日志拉取改进（2026-11-06）
+
+`h127h-log-20261106-231958.txt`（4.7 KB）里 `NATIVE_IRQ` 稳定为：
+
+```text
+timer=211811 ... ctl=1 tval=1366c t19=211811 t27=0 clock19=211811
+forced=0 storm=ffffffff sn=0 flags=ef tick=0
+```
+
+- **`clock19 == t19`、`forced=0`、`ctl=1`** → PPI 19 完全由 XNU 接管，XNU 自己武装
+  deadline，不需要兜底 tick，也没有风暴；中断率约 85/s；
+- `uptime_s: 2180`、最后一条 2505 s → **连续运行 42 分钟**，是目前最长的一次；
+- `NATIVE_UFS_ALIVE` 正常出现 → `IOSleep` 现在真的会醒；
+- **`flags=ef`** = logd_helper + driverkitd + backboardd + SpringBoard 均 exec，
+  **SpringBoard 已退出 (0x20)**、**backboardd 已退出 (0x40)**，且
+  **backboardd 调用过 IOKit matching (0x80)**（首次出现，但未带 IOMobile 关键字，
+  0x200/0x400 未置）。
+
+新出现的故障是**压缩页读失败的死循环**（屏幕可见）：
+
+```text
+dpage_pager_compressed: (private): err 94          (EBADMSG)
+... Verification failed with error 94 (0x5e) ...
+Failed to send exception EXC_CORPSE_NOTIFY. error code: 308
+NATIVE_EXEC: ... ReportCrash / NATIVE_EXIT: ... status=0xb
+```
+
+即某个压缩文件在读时解压失败（反复同一 `disk1s1` 偏移），AMFI 拒绝该页、进程被杀，
+launchd 拉起下一个 XPC 又碰到同一文件 → 循环。我们的补丁里**没有改过 decmpfs 压缩页
+路径**，iOS 原生是 16 KiB 页，这条线疑似 4 KiB 与压缩页/校验的交互，待定位到具体文件。
+
+**日志为什么只有 4.7 KB**：写盘是 delta 环，每次 flush 只把 msgbuf 的尾部快照写进一个
+32 块（128 KB）槽，全局头里的 `msg_bytes` 只记录**最后一次**的 delta 大小（这次 4096）。
+`slots_written: 1291` 说明盘上其实有 1291 份快照，只是拉取工具只读最新那一个。
+
+因此 `scripts/h103-log-pull.py` 新增 `--slots N`：把最后 N 个槽一起解码、按
+`[ timestamp ]` 去重排序合并。整个槽环（247×32 块 ≈ 31.6 MB）本来就在 32 MiB 窗口里，
+所以同一块盘不用重跑就能取出更长历史：
+
+```sh
+python3 scripts/h103-log-pull.py --adb ~/.local/bin/adb --slots 120
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

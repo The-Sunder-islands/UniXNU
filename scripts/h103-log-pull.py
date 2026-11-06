@@ -138,6 +138,69 @@ def decode_header(data: bytes) -> dict:
     return out
 
 
+
+def _split_records(text: str):
+    """Split decoded slot text into (timestamp, payload) records.
+
+    Continuation lines without a leading "[  123.456789]:" timestamp belong to
+    the previous record (the ring interleaves userland text that way).
+    """
+    records = []
+    current_ts = None
+    current = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("[") and "]: " in stripped:
+            if current:
+                records.append((current_ts, "\n".join(current)))
+            head, _, rest = stripped.partition("]: ")
+            try:
+                current_ts = float(head[1:].strip())
+            except ValueError:
+                current_ts = None
+            current = [rest]
+        else:
+            current.append(stripped)
+    if current:
+        records.append((current_ts, "\n".join(current)))
+    return records
+
+
+def merge_slots(window: bytes, header: dict, count: int) -> str:
+    """Reconstruct a longer history from the last `count` delta slots.
+
+    Every slot is a tail snapshot of the kernel message ring, so consecutive
+    slots overlap heavily; records are deduplicated by (timestamp, text).
+    """
+    slot_blocks = header["slot_blocks"] or 32
+    slot_count = header["slot_count"] or 0
+    slots_written = header["slots_written"] or 0
+    if not slot_count or not slots_written:
+        return ""
+    count = max(1, min(count, slot_count, slots_written))
+    slot_bytes = slot_blocks * BLOCK
+    merged = {}
+    order = []
+    for offset in range(count - 1, -1, -1):
+        index = (slots_written - 1 - offset) % slot_count
+        start = (header["slot_first"] + index * slot_blocks) * BLOCK
+        body = window[start:start + slot_bytes]
+        text = body.decode("utf-8", "replace")
+        # Slots are padded with uninitialized bytes past the delta; keep only
+        # the printable prefix up to the first long NUL run.
+        text = text.split("\0" * 8, 1)[0]
+        for ts, payload in _split_records(text):
+            key = (ts, payload)
+            if key in merged:
+                continue
+            merged[key] = True
+            order.append((ts, payload))
+    order.sort(key=lambda item: (item[0] is None, item[0] if item[0] is not None else 0.0))
+    return "\n".join(f"[{ts:>13.6f}]: {payload}" if ts is not None else payload
+                      for ts, payload in order)
+
 def write_report(header: dict, text: str, path: pathlib.Path) -> None:
     lines = [
         "H103 persistent kernel log",
@@ -161,6 +224,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="write the report here (default: h103-log-<time>.txt)")
     parser.add_argument("--keep-window", type=pathlib.Path,
                         help="keep the pulled 32 MiB window at this path")
+    parser.add_argument("--slots", type=int, default=1,
+                        help="merge the last N delta slots (default 1; the whole ring is "
+                             "already inside the pulled window)")
     args = parser.parse_args(argv)
 
     if args.input:
@@ -196,13 +262,18 @@ def main(argv: list[str] | None = None) -> int:
         msg_bytes = min(header["msg_bytes"], slot_blocks * BLOCK)
         body = window[slot_offset:slot_offset + msg_bytes]
         text = body.decode("utf-8", "replace").rstrip("\0 \n")
+        if args.slots > 1:
+            merged = merge_slots(window, header, args.slots)
+            if merged:
+                text = merged
         report = args.output or pathlib.Path(
             "h103-log-" + time.strftime("%Y%m%d-%H%M%S") + ".txt")
         write_report(header, text, report)
         print(f"partition bytes: {size if size is not None else 'from file'}")
         print(f"window: first_lba={header['first_lba']} blocks={header['window_blocks']} "
               f"slot={slot} slots_written={slots_written}/{slot_count} "
-              f"msg_bytes={msg_bytes} state={header['state']} tag={header['tag']}")
+              f"msg_bytes={msg_bytes} merged_slots={args.slots} "
+              f"state={header['state']} tag={header['tag']}")
         print(f"report: {report}")
         print("-" * 72)
         print("\n".join(text.splitlines()[-80:]))
