@@ -1599,21 +1599,35 @@ ufsNop (UfsQueue *q)
 static void
 h103ProbeIomfb (void)
 {
-  static volatile int done;
-  if (done || !gH103StartTicks) {
+  static volatile uint64_t lastTicks;
+  uint64_t now = mach_absolute_time ();
+  if (!gH103StartTicks) {
     return;
   }
-  if (mach_absolute_time () - gH103StartTicks < 60 * 19200000ULL) {
+  if (now - gH103StartTicks < 60 * 19200000ULL) {
     return;
   }
-  done = 1;
+  if (lastTicks && now - lastTicks < 60 * 19200000ULL) {
+    return;
+  }
+  lastTicks = now;
+  // H139: the verdict also goes into native_boot_flags, which every NATIVE_IRQ
+  // line prints.  A one-shot IOLog lands in the dyld-cache flood and is
+  // routinely trimmed by the slot delta, which is what happened in H138.
+  const uint32_t bits[2] = { 0x20000U, 0x40000U };
   const char *names[2] = { "IOMobileFramebuffer", "IOMobileFramebufferLegacy" };
   for (unsigned i = 0; i < 2; i++) {
     OSDictionary *matching = IOService::serviceMatching (names[i]);
     IOService *service = matching ? IOService::copyMatchingService (matching) : nullptr;
-    IOLog ("NATIVE_IOMFB_PROBE: name=%s match=%u service=%p class=%s\n",
+    if (service) {
+      native_boot_flags |= bits[i];
+    } else {
+      native_boot_flags &= ~bits[i];
+    }
+    IOLog ("NATIVE_IOMFB_PROBE: name=%s match=%u service=%p class=%s flags=%x\n",
            names[i], matching ? 1 : 0, service,
-           service ? service->getMetaClass ()->getClassName () : "-");
+           service ? service->getMetaClass ()->getClassName () : "-",
+           native_boot_flags);
     OSSafeReleaseNULL (service);
     OSSafeReleaseNULL (matching);
   }

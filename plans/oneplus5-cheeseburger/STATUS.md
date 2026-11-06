@@ -5535,6 +5535,48 @@ H138 boot:    a6c86d30881e3ba42686e2cb41ee28521e2d43f8f49ea7961110058a7969f9eb
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H138.img`（已核对）、
 Mac `~/h103/boot-H138.img`、仓库 `out/cheeseburger/boot/boot-H138.img`。
 
+### H138 结果：backboardd 只注册服务通知，从不查显示（2026-11-07）
+
+`h138-log-20261107-041242.txt`。完整匹配字典终于可见（`IOServiceNotificationUser`
+说明这些是**通知注册**而不是一次性查询）：
+
+```text
+NATIVE_IOKIT_DICT: comm=backboardd count=2 IOPropertyMatch=(non-string)
+NATIVE_IOKIT_DICT: comm=backboardd count=2 IONameMatch=aop-smart-cover
+NATIVE_IOKIT_DICT: comm=backboardd count=2 IOProviderClass=IOPlatformExpertDevice
+NATIVE_IOKIT_DICT: comm=backboardd count=2 IOProviderClass=IOAccessoryManager
+```
+
+仍然没有一次 `IOMobileFramebuffer`；`IOPropertyMatch` 的嵌套字典因只打印一层而未展开。
+
+`NATIVE_IOMFB_PROBE` 一行未出现：代码确实编进内核（`strings kernel-H138.macho`
+可查到），同一函数的 120 秒强制 dump 也正常执行，说明探针在 ~117 秒触发时正好
+落在 dyld 缓存批量打开（115–121 s）的刷屏区间，被持久日志“只保留 delta 尾部”裁掉。
+
+### H139：探针结论进 boot flags + 展开嵌套字典（2026-11-07）
+
+1. `drivers/NativeUfsProbe/NativeUfsProbe.cpp`：探针改为每 60 秒一次，并把结论写进
+   `native_boot_flags`（每条 `NATIVE_IRQ … flags=` 都会打印，不会被裁掉）：
+
+   - `0x20000` = `serviceMatching("IOMobileFramebuffer")` 能找到服务
+   - `0x40000` = `serviceMatching("IOMobileFramebufferLegacy")` 能找到服务
+
+2. `patches/xnu/zzzzzzzzzzzzzzzzzzzzzzz-h139-nested-dict.patch`：对
+   `backboardd`/`SpringBoard` 的匹配字典，值是 `OSDictionary` 时再展开一层
+   （最多 3 项），打印 `key.{inner}=value`。
+
+```text
+H139 kernel:  742e2b34b3b8d52a3403ddf6fa293e9479844ba3fa3dee09dda5bebf960129e2
+H139 payload: 86f1905eb099a48f586087f97c0579e02f5a202d0b99dc44aefaaa3fd01fc7f2
+H139 boot:    df24845234f5554dc07082af5efc8c7adb133c036566b6bd08531eb9b5cc0da5
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H139.img`（已核对）、
+Mac `~/h103/boot-H139.img`、仓库 `out/cheeseburger/boot/boot-H139.img`。
+
+判读：`NATIVE_IRQ … flags=` 里是否出现 `2`/`4` 位决定服务是否可匹配；
+`NATIVE_IOKIT_DICT … IOPropertyMatch.{…}` 决定 backboardd 在等什么。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

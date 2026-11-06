@@ -1,0 +1,32 @@
+diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
+--- a/iokit/Kernel/IOUserClient.cpp
++++ b/iokit/Kernel/IOUserClient.cpp
+@@ -2783,6 +2783,28 @@
+ 				IOLog("NATIVE_IOKIT_DICT: comm=%s count=%u %s=%s\n", comm,
+ 				    dict->getCount(), key->getCStringNoCopy(),
+ 				    vs ? vs->getCStringNoCopy() : (val ? "(non-string)" : "(null)"));
++				/* H139: IOPropertyMatch and friends carry a nested dictionary; one
++				 * level is enough to see what the client is waiting for. */
++				OSDictionary *nested = OSDynamicCast(OSDictionary, val);
++				if (nested) {
++					OSCollectionIterator *inner = OSCollectionIterator::withCollection(nested);
++					if (inner) {
++						unsigned m = 0;
++						OSObject *next2;
++						while (m < 3 && (next2 = inner->getNextObject()) != NULL) {
++							OSSymbol *k2 = OSDynamicCast(OSSymbol, next2);
++							if (!k2) {
++								break;
++							}
++							OSString *v2 = OSDynamicCast(OSString, nested->getObject(k2));
++							IOLog("NATIVE_IOKIT_DICT: comm=%s %s.{%s}=%s\n", comm,
++							    key->getCStringNoCopy(), k2->getCStringNoCopy(),
++							    v2 ? v2->getCStringNoCopy() : "(non-string)");
++							m++;
++						}
++						inner->release();
++					}
++				}
+ 				n++;
+ 			}
+ 			iter->release();
