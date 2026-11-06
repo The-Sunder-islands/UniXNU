@@ -4428,6 +4428,55 @@ Mac `~/h103/boot-H126c-gic.img`、仓库 `out/cheeseburger/boot/boot-H126c-gic.i
 后续（H126d）：把 ADT 的 `darwinboot-memory-size` 降到 2 GiB 重打 payload，
 即可让内核重新启动（无需重建固件）。
 
+## H127：按 UEFI 交接数据改用 PPI 19 / 全 PPI 观察（2026-11-06）
+
+H126c 在 UEFI 交接处画出的 GIC 状态（`boot-H126c-gic.img`）：
+
+```text
+GIC CTLR=00000012 DS=0 ARE=1 IGROUPR0=00000000 ISEN=240C0000 ISPEND=40200000 WAKER=00000000
+```
+
+解码：
+
+- `CTLR=0x12`：EnableGrp1NS + ARE_NS，**DS=0**；
+- `IGROUPR0=0`：**从非安全态读这个寄存器是 RAZ/WI**，读 0 并不代表 Group 0
+  （此前 H122 的"全 Group 0"结论据此作废）；
+- `ISEN=0x240C0000`：非安全视角能看到 **PPI 29/26/19/18 已使能** → 它们是 Group 1 NS；
+  其中 **19 正是 TWRP/Linux 的 arch_timer INTID**；
+- `ISPEND=0x40200000`：PPI 30（物理定时器）在拉高但未使能；
+- `WAKER=0`：redistributor 已唤醒。
+
+问题因此改写为：`ArmCpu::wakeRedistributor()` 里的 `ICENABLER0=0xffffffff`
+把这 4 个已交给 NS 的 PPI 全关了，然后只重开 SGI 0-7 和 **PPI 27**（不在 NS 集合里），
+所以 `timer=0`。
+
+H127 改动（在 H124 基线上）：
+
+- `kSgiPpiEnable = 0xffff | 0xffff0000`（SGI + 全部 PPI 16–31）；
+- 分发器：`16..31` 全部记入 `armcpu_ppi_seen`（bit = INTID-16）后 EOI，不再 panic；
+  其中 19 与 27 调 `rtclock_intr(0)` 并分别计数；
+- 保留 H125b 的风暴保护（单次 drain > 32 就关掉该 INTID 并记录）；
+- `NATIVE_IRQ` 增加 `seen=%llx`。
+
+```text
+H127 kernel:  9b82687044bb21feecfbec1fde4b441cb9e2f3d70d7ad658078827cf519a2abc
+H127 payload: 82e2cad0bf49d14fd0db9514c9286688354571ae4302b39983fbf236521b4475
+H127 boot:    d6c17b02c2b83f92d5902e3e762d058185e86ac67db55d556286ebdb45cd6bee
+```
+
+firmware 用回可启动的 `fw-H103ea.img.gz-dtb`（`163917aa…`），只换 payload 里的
+kernel。子模块 `drivers/ArmCpu` 提交 `cc5f7d9`（分支 `h118-gic-cache`，已推送），
+父仓库 `f016756`。
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H127.img`（已核对）、
+Mac `~/h103/boot-H127.img`、仓库 `out/cheeseburger/boot/boot-H127.img`。
+
+判读 `NATIVE_IRQ: ... t19=.. t27=.. seen=....`：
+
+- `seen` 出现 bit19（`0x8xxxx`）→ 定时器就是 PPI 19，`t19`/`timer` 应开始增长；
+- 出现 bit18/26/29 → NS 还能收到这些，可作备选；
+- `seen=0` 且 `storm=` 有值 → 某条线在风暴，被保护关掉，看 `storm=` 的 ID。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
