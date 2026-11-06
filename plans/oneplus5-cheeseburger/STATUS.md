@@ -4591,6 +4591,42 @@ Mac `~/h103/boot-H127d.img`、仓库 `out/cheeseburger/boot/boot-H127d.img`。
 - 若 120 s 之后立刻挂，说明 `rtclock_intr` 在这条路径上不安全，下一版只重装 CNTV
   并自己数 tick。
 
+### H127e：只验证 CNTV 重装，不调用 `rtclock_intr`（2026-11-06）
+
+H127d 日志 `/home/ls/UniXNU/h126d-log-20261106-210032.txt` 是 8 KiB 环形消息区，
+已到 uptime 2183 s，120 s 时的一次性 dispatch 标记可能已被覆盖；所以不能判断
+`armcpu_timer_dispatch` 是否置位。仍可确认：
+
+```text
+[2143.55] NATIVE_IRQ: timer=971151029 ... t19=971151029 t27=0 ... tick=0
+[2211.80] NATIVE_IRQ: timer=1001202864 ... t19=1001202864 t27=0 ... tick=0
+```
+
+`t19` 在约 68 s 增长约 30 M，即 **~440k/s**，与 H127c 的 count-only 速率相当；
+`tick=0`，采样 `CNTV_TVAL` 仍显示已到期的负值。结论：H127d 没有证实重装有效，可能是
+dispatch 未触发/日志标记已被覆盖，也可能是 `rtclock_intr` 与固定 TVAL 重装互相覆盖。
+
+H127e 只做分离实验：
+
+- 120 s 前仍 count-only；120 s 后 PPI 19 **只写** `CNTV_TVAL=192000`（10 ms），
+  不调用 `rtclock_intr`，也不写 `CNTV_CTL`；PPI 27 保持原处理；
+- `NATIVE_IRQ` 每次周期采样都带 `dispatch=` 与 `rearm=` 累计数，解决一次性标记会被
+  环形日志覆盖的问题；现有 `ctl/tval` 保留作为状态读数；
+- 若 `dispatch=1`、`rearm` 增长、`tval` 落入约 0..192000 且 `t19` 增量降到约 100/s，
+  说明重装有效；之后再单独把 `rtclock_intr` 接入（不再用固定 TVAL 覆盖 XNU deadline）；
+- 若 `dispatch=0`，120 s 切换没触发；若 `dispatch=1` 而 `t19` 仍高速增长且 `tval`
+  仍负值，则重装没有控制此中断源，暂停时钟接线并进一步查 timer/PPI 对应关系。
+
+```text
+H127e kernel:  7b785c00cd825d404cc4667a2dd1c6926eea22fe116ceb8b10256c757fdd2f01
+H127e payload: b76321ab62d9e3efa3cb15305d988451ea75318be3fe76d3a72c3e7cc1e9004e
+H127e boot:    8cdf3648bdb493b679f6ac244fd38859e527fc2b6b4f5dd63b13e4b47fc8ba5e
+```
+
+firmware 仍用可启动的 `fw-H103ea`。子模块 `drivers/ArmCpu` 提交 `0d06524`，父仓库
+H127e 代码提交见后续 commit；镜像 Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H127e.img`
+（已核对）、Mac `~/h103/boot-H127e.img`、仓库 `out/cheeseburger/boot/boot-H127e.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
