@@ -115,6 +115,7 @@ static NativeUfsProbe *gH103Probe;
 static void h103SlotWriteThunk (void);
 static void h103HeaderWriteThunk (void);
 static void h103FlushNow (void);
+static void h103SlotTick (void);
 
 // H103cg's probe periodically redrew the GOP test pattern from its heartbeat.
 // The display archive is force-loaded into the kernel and exports this symbol;
@@ -264,10 +265,21 @@ heartbeatThread (void *, wait_result_t)
            (unsigned long long) gUfsLastBytes,
            (unsigned long long) gWindowLastReqBlock,
            (unsigned long long) gWindowLastReqCount);
-    // H105: the process-state dump lives in the UFS completion path below.
-    // Nothing may depend on this thread waking; IOSleep never returns here.
-    if (!gH103SkipPattern && !gH103HbTimerOn && !(native_boot_flags & 4)) {
-      native_legacy_test_pattern ();
+    // H128: the process dumps and the persistent-log flush run here, in thread
+    // context with no storage lock held.  They used to run from the UFS
+    // completion path and from inside NativeUfsWindow's request lock, where
+    // they could hold a block-storage request for tens of seconds.
+    h103SlotTick ();
+    // H124/H128: the 2x2 repaint moved here with the dumps.  Repaint on a gate
+    // bit change, and keep blinking until backboardd execs.
+    {
+      static uint32_t paintedFlags;
+      uint32_t gate = native_boot_flags & 0xfff;
+      if (!gH103SkipPattern && !gH103HbTimerOn &&
+          (!(native_boot_flags & 4) || gate != paintedFlags)) {
+        paintedFlags = gate;
+        native_legacy_test_pattern ();
+      }
     }
     uint64_t start = gWindowStartTicks;
     if (gWindowInFlight && start && mach_absolute_time () - start > 10 * 19200000ULL) {
@@ -660,9 +672,12 @@ native_panic_flush (void)
   h103FlushNow ();
 }
 
-// The spawned threads never wake from IOSleep on this kernel. Run the slot
-// timer from the normal read paths only after fLock has been released; calling
-// it from ufsCommand's completion would deadlock on the non-recursive fLock.
+// H128: driven from heartbeatThread() only.  The spawned slot thread never
+// woke from IOSleep on the pre-H127 kernels, which is why this used to be
+// called from the normal read paths after fLock had been released.  It must
+// never run from a block-storage completion: it allocates, copies the message
+// buffer, writes to the persistent log and can print process dumps, all of
+// which took tens of seconds while NativeUfsWindow's request lock was held.
 static void
 h103SlotTick (void)
 {
@@ -1129,24 +1144,32 @@ waitForCompletion (uint8_t *list, uint32_t *ocs, unsigned *loops,
   }
 }
 
-// H127k: the window device serves all SystemOS/Data I/O and is synchronous, so
-// a 2 s lock bound turned ordinary queuing into kIOReturnTimeout ("executeRequest:
-// request failed to start!", err 60). Give the data path 20 s; the diagnostic
-// log paths keep their short 2 s bound so a stuck write cannot stall the system.
-#define UFS_DATA_LOCK_TICKS  (384000000ULL)  /* 20 s at 19.2 MHz */
+// H128: the data path is clean now (no dumps, no flushes, no printf while a
+// storage lock is held), so the bound only has to cover one UFS command.  Keep
+// it short so a real fault surfaces at once instead of stalling the file
+// system for half a minute.
+#define UFS_DATA_LOCK_TICKS  (38400000ULL)  /* 2 s at 19.2 MHz */
 // Bounded lock acquisition: a stuck holder must not turn a diagnostic read into
 // an unobservable hang. 19.2 MHz timebase, so 38400000 ticks is two seconds.
+// H128: the wait must sleep, not spin.  `yield` is only a pipeline hint and
+// never reschedules; on the single-CPU baseline a spinning waiter can starve
+// the lock holder, which is how a 2 s bound turned into 20 s stalls.
 static bool
 lockWithTimeout (IOLock *lock, const char *who, uint64_t timeoutTicks)
 {
   uint64_t start = mach_absolute_time ();
+  unsigned spins = 0;
   while (!IOLockTryLock (lock)) {
     if (mach_absolute_time () - start > timeoutTicks) {
       IOLog ("NATIVE_UFS_LOCK: %s timeout ticks=%llu\n", who,
              (unsigned long long) (mach_absolute_time () - start));
       return false;
     }
-    __asm__ volatile ("yield" ::: "memory");
+    if (++spins < 64) {
+      __asm__ volatile ("yield" ::: "memory");
+    } else {
+      IOSleep (1);
+    }
   }
   return true;
 }
@@ -1419,28 +1442,10 @@ ufsSubmit (UfsQueue *q, unsigned direction, unsigned bytes,
   gUfsLastLoops = loops;
   gUfsLastTicks = mach_absolute_time () - commandStart;
   if ((gUfsCommands & 63) == 0) {
-    // H103bd's UFS completion path redrew the 2x2 before printing PROGRESS.
-    // That frequent redraw, not the 10-second heartbeat alone, is what kept
-    // the panel alive while the console scrolled. Restore it verbatim. Keep
-    // the redraw independent of gH103Quiet so a later quiet build cannot lose
-    // the panel again. H103fl's 1 Hz timer adds extra redraws; at the stuck
-    // screen a 1 Hz blink proves the work loop is alive, a static cell means
-    // the timer did not fire or the kernel hung.
-    // H105: dump before the draw (a display open can block it), and stop
-    // drawing once backboardd has exec'd, as H104j intended for the heartbeat.
-    h105DumpTick ();
-    {
-      // H124: repaint whenever a gate bit changes instead of freezing the
-      // panel at its pre-backboardd colour. The old "stop drawing once
-      // backboardd exec'd" left the 2x2 green even after the white gate was
-      // reached, because the heartbeat thread never wakes without a timer.
-      static uint32_t paintedFlags;
-      uint32_t gate = native_boot_flags & 0xfff;
-      if (!(native_boot_flags & 4) || gate != paintedFlags) {
-        paintedFlags = gate;
-        native_legacy_test_pattern ();
-      }
-    }
+    // H128: nothing but counters here.  This block used to call
+    // h105DumpTick() (proc_iterate() plus ~100 lines of printf) and repaint
+    // the 2x2 while fLock was held, inside a block-storage request.  Both now
+    // run from the heartbeat thread, which the working PPI 19 timer wakes.
     if (!gH103Quiet) {
       IOLog ("NATIVE_UFS_PROGRESS: cmds=%llu last=%llx/%llu loops=%llu ticks=%llu "
              "winReq=%llu winBytes=%llu winFlight=%llu lastWin=%llx/%llu "
@@ -1594,11 +1599,6 @@ NativeUfsProbe::readBlocks (uint8_t unit, uint64_t block, uint64_t count,
       !blockSize || block > 0xffffffffULL) {
     return false;
   }
-  if (!lockWithTimeout (fLock, "readBlocks", UFS_DATA_LOCK_TICKS)) {
-    IOLog ("NATIVE_UFS_LOCK: readBlocks blocked block=%llx count=%llu\n",
-           block, count);
-    return false;
-  }
   uint64_t total = 0;
   bool ok = true;
   while (count) {
@@ -1610,6 +1610,14 @@ NativeUfsProbe::readBlocks (uint8_t unit, uint64_t block, uint64_t count,
     if (count < chunk) {
       chunk = static_cast<unsigned> (count);
     }
+    // H128: one command per lock.  The old code held fLock across the whole
+    // request, so a 1 MiB read blocked every other UFS user for eight chunks.
+    if (!lockWithTimeout (fLock, "readBlocks", UFS_DATA_LOCK_TICKS)) {
+      IOLog ("NATIVE_UFS_LOCK: readBlocks blocked block=%llx count=%llu\n",
+             block, count);
+      ok = false;
+      break;
+    }
     uint8_t cdb[16] = { 0 };
     cdb[0] = 0x28;
     putBe32 (cdb + 2, static_cast<uint32_t> (block));
@@ -1618,13 +1626,13 @@ NativeUfsProbe::readBlocks (uint8_t unit, uint64_t block, uint64_t count,
     unsigned bytes = chunk * blockSize;
     gUfsLastLba = block;
     gUfsLastBytes = bytes;
-    if (!ufsCommand (&fQueue, unit, cdb, bytes, nullptr)) {
-      ok = false;
-      break;
-    }
-    if (dst->writeBytes (static_cast<IOByteCount> (total), fQueue.data,
-                         static_cast<IOByteCount> (bytes)) !=
-        static_cast<IOByteCount> (bytes)) {
+    bool commandOk = ufsCommand (&fQueue, unit, cdb, bytes, nullptr);
+    bool copyOk = commandOk &&
+        dst->writeBytes (static_cast<IOByteCount> (total), fQueue.data,
+                         static_cast<IOByteCount> (bytes)) ==
+        static_cast<IOByteCount> (bytes);
+    IOLockUnlock (fLock);
+    if (!commandOk || !copyOk) {
       ok = false;
       break;
     }
@@ -1632,8 +1640,6 @@ NativeUfsProbe::readBlocks (uint8_t unit, uint64_t block, uint64_t count,
     block += chunk;
     count -= chunk;
   }
-  IOLockUnlock (fLock);
-  h103SlotTick ();
   if (done) {
     *done = total;
   }
@@ -1667,7 +1673,8 @@ NativeUfsProbe::readWindowBulk (uint64_t lba, uint32_t blocks, void *out)
   uint64_t commandTicks = mach_absolute_time () - commandStart;
   uint64_t unlockStart = mach_absolute_time ();
   IOLockUnlock (fLock);
-  h103SlotTick ();
+  // H128: h103SlotTick() used to run here, i.e. still inside the window
+  // device's request lock; it now runs from the heartbeat thread.
   uint64_t unlockTicks = mach_absolute_time () - unlockStart;
   static unsigned gBulkPhases;
   unsigned call = gBulkPhases++;
@@ -2954,12 +2961,24 @@ NativeUfsProbe::start (IOService *provider)
     thread_deallocate (heartbeat);
   }
   if (gH103SlotMode) {
-    thread_t slotThread = nullptr;
-    IOLog ("NATIVE_UFS_HB: slot start\n");
-    kern_return_t slotRet = kernel_thread_start (h103SlotThread, nullptr, &slotThread);
-    IOLog ("NATIVE_UFS_HB: slot rc=%x\n", slotRet);
-    if (slotRet == KERN_SUCCESS) {
-      thread_deallocate (slotThread);
+    // H128: the 2-second slot thread is now opt-in.  It ignored
+    // h103-log-secs (it wrote a 16 KiB slot every 2 s, ~170 writes per boot)
+    // and its delta cursor never advanced, so it duplicated the heartbeat's
+    // flush and added a write burst every 2 s to the very path that was
+    // starving the file system.  The heartbeat drives h103SlotTick() now.
+    uint32_t slotThread = 0;
+    PE_parse_boot_argn ("h103-slot-thread", &slotThread, sizeof slotThread);
+    if (slotThread) {
+      thread_t slotThreadHandle = nullptr;
+      IOLog ("NATIVE_UFS_HB: slot start\n");
+      kern_return_t slotRet =
+          kernel_thread_start (h103SlotThread, nullptr, &slotThreadHandle);
+      IOLog ("NATIVE_UFS_HB: slot rc=%x\n", slotRet);
+      if (slotRet == KERN_SUCCESS) {
+        thread_deallocate (slotThreadHandle);
+      }
+    } else {
+      IOLog ("NATIVE_UFS_HB: slot thread off (heartbeat owns the flush)\n");
     }
   } else {
     IOLog ("NATIVE_UFS_HB: slot disabled\n");

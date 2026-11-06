@@ -4962,6 +4962,57 @@ Mac `~/h103/boot-H127k.img`、仓库 `out/cheeseburger/boot/boot-H127k.img`。
   锁超时是主因；下一步把窗口设备改成异步 + 请求队列；
 - 仍大量超时 → 单次窗口读真的超过 20 秒，要查 `readBlocks` 的命令轮询/重试上限。
 
+### H128：把诊断移出存储路径（2026-11-07）
+
+H127k（20 秒锁上限）没有改善：`err 60` 131→151、`executeRequest` 151→170、
+`NATIVE_UFS_LOCK` 329→357、崩溃 54→73。日志里 `OCS timeout` = **0**、
+`bad response` = **0**，每次 `NATIVE_UFS_ALIVE` 都是 `ufsFlight=0`——**没有一次
+UFS 命令失败**，20 秒的等待完全是软件造成的。
+
+代码定位（`drivers/NativeUfsProbe/NativeUfsProbe.cpp`）：
+
+1. `ufsSubmit()` 每 64 条命令调 `h105DumpTick()` → `native_proc_state_dump()` /
+   `native_proc_wait_graph()`：`proc_iterate()` 取进程列表锁并 `printf` 上百行，
+   而且是在 `fLock` 之内执行的。
+2. `readBlocks()` / `readWindowBulk()` 调 `h103SlotTick()` → `h103FlushNow()` →
+   `h103SlotWrite()`：`IOMallocAligned(128 KiB)` + 拷贝 msg buffer + 两条 UFS
+   写命令。`readWindowBulk()` 的调用者 `NativeUfsWindow::doAsyncReadWrite()`
+   在整个请求期间持有窗口设备 `lock`，所以这段诊断跑在窗口锁内部。
+3. `lockWithTimeout()` 是纯自旋（`IOLockTryLock` + ARM `yield`，不让出 CPU）。
+   基线 `cpus=2`（H127i/j/k 的 payload 都是 `cpus=2`），自旋者会把持有者挤住，
+   2 秒的等待被拉长成 20 秒，所以 2→20 秒只是把"快速失败"换成"长时间失败"。
+4. `h103SlotThread`（2 秒槽线程）无视 `h103-log-secs`，每次启动写约 170 个
+   16 KiB 槽，而且 delta 游标不前进，重复写同样的内容。
+
+H128 改动：
+
+- `ufsSubmit()`：删除 `h105DumpTick()` 与 2x2 重绘，只保留 `NATIVE_UFS_PROGRESS`
+  计数行；
+- `readBlocks()`：`fLock` 改为**每块命令加放一次**（原来一次请求跨整段多块循环
+  一直持有全局锁），并删除 `h103SlotTick()`；
+- `readWindowBulk()`：删除 `h103SlotTick()`；
+- `h103SlotTick()` 改由 `heartbeatThread()`（10 秒，`IOSleep` 已能返回）驱动，
+  进程 dump、120 秒强制 dump、持久日志 flush 全部回到线程上下文；
+- 2x2 重绘也移到心跳（gate 位变化时重绘）；
+- `lockWithTimeout()`：自旋 64 次后改 `IOSleep(1)`，不再饿死持有者；
+- `UFS_DATA_LOCK_TICKS` 退回 2 秒（路径干净后只需覆盖一条命令）；
+- 2 秒槽线程改为 `h103-slot-thread=1` 才启动（默认关闭）。
+
+payload 沿用 H127k（`cpus=2 h103-slot=1 h103-log-secs=60 h109-tick=0`）。
+
+```text
+H128 kernel:  7c229371b059b724bf2ad3383f90e296dba8fdeca5d59b2830f669f45720a7eb
+H128 payload: 60e57fbcd457bad42c3df31b18dda27655cede98dd8f19c426582e44c431b756
+H128 boot:    783e60e7eb1e3de79f5efbc965070dfadb1b01a2271a24a1d3c8b23461525d87
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H128.img`（已核对）、
+Mac `~/h103/boot-H128.img`、仓库 `out/cheeseburger/boot/boot-H128.img`。
+
+判读：`err 60` / `executeRequest: request failed to start!` / `NATIVE_UFS_LOCK`
+应接近零，`winReq` 恢复数百/秒；若仍有超时，则问题在 `readBlocks` 的块大小或
+窗口设备本身，再按 H127k 的判读往下查。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
