@@ -142,6 +142,9 @@ extern "C" void native_legacy_heartbeat_cell(void);
 // tsleep and timer_call all failing to wake anything.
 extern "C" volatile uint64_t armcpu_timer_interrupts;
 extern "C" volatile uint64_t armcpu_ipi_interrupts;
+// H114: ArmCpu export that reads the boot CPU's redistributor PPI 27 state.
+extern "C" void armcpu_probe_ppi27 (void);
+extern "C" volatile uint64_t armcpu_ppi_probe[6];
 
 static int gH109Chan;
 static volatile uint32_t gH109Ticks;
@@ -640,14 +643,33 @@ h103SlotTick (void)
       __asm__ volatile ("mrs %0, daif" : "=r" (daif));
       __asm__ volatile ("mrs %0, icc_pmr_el1" : "=r" (pmr));
       __asm__ volatile ("mrs %0, icc_igrpen1_el1" : "=r" (grp1));
-      IOLog ("NATIVE_IRQ: timer=%llu ipi=%llu daif=%llx pmr=%llx grp1=%llx ctl=%llx tval=%llx flags=%x tick=%u\n",
+      // H114: is the GIC signalling this CPU (HPPIR1) and where is the vector?
+      uint64_t el = 0, vbar = 0, h1 = 0, h0 = 0, rpr = 0;
+      __asm__ volatile ("mrs %0, CurrentEL" : "=r" (el));
+      __asm__ volatile ("mrs %0, vbar_el1" : "=r" (vbar));
+      __asm__ volatile ("mrs %0, icc_hppir1_el1" : "=r" (h1));
+      __asm__ volatile ("mrs %0, icc_hppir0_el1" : "=r" (h0));
+      __asm__ volatile ("mrs %0, icc_rpr_el1" : "=r" (rpr));
+      armcpu_probe_ppi27 ();
+      IOLog ("NATIVE_IRQ: timer=%llu ipi=%llu daif=%llx pmr=%llx grp1=%llx ctl=%llx tval=%llx el=%llu vbar=%llx h1=%llx h0=%llx rpr=%llx flags=%x tick=%u\n",
              (unsigned long long) armcpu_timer_interrupts,
              (unsigned long long) armcpu_ipi_interrupts,
              (unsigned long long) (daif & 0x3ffULL),
              (unsigned long long) (pmr & 0xffULL),
              (unsigned long long) (grp1 & 1ULL),
              (unsigned long long) ctl, (unsigned long long) tval,
+             (unsigned long long) ((el >> 2) & 3ULL),
+             (unsigned long long) vbar,
+             (unsigned long long) (h1 & 0xffffffULL),
+             (unsigned long long) (h0 & 0xffffffULL),
+             (unsigned long long) (rpr & 0xffULL),
              native_boot_flags, gH109Ticks);
+      IOLog ("NATIVE_GIC: typer=%llx isen=%llx igrp=%llx ipend=%llx ipri=%llx\n",
+             (unsigned long long) armcpu_ppi_probe[0],
+             (unsigned long long) armcpu_ppi_probe[1],
+             (unsigned long long) armcpu_ppi_probe[2],
+             (unsigned long long) armcpu_ppi_probe[3],
+             (unsigned long long) armcpu_ppi_probe[4]);
     }
   }
   // H112: one forced dump + flush 120 s after the UFS start, independent of
