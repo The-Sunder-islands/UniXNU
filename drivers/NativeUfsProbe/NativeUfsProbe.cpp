@@ -152,7 +152,7 @@ extern "C" volatile uint64_t armcpu_timer_interrupts;
 extern "C" volatile uint64_t armcpu_ipi_interrupts;
 // H114: ArmCpu export that reads the boot CPU's redistributor PPI 27 state.
 extern "C" void armcpu_probe_ppi27 (void);
-extern "C" volatile uint64_t armcpu_ppi_probe[10];
+extern "C" volatile uint64_t armcpu_ppi_probe[13];
 
 static int gH109Chan;
 static volatile uint32_t gH109Ticks;
@@ -704,6 +704,10 @@ h103SlotTick (void)
                (unsigned long long) armcpu_ppi_probe[6],
                (unsigned long long) armcpu_ppi_probe[7],
                (unsigned long long) armcpu_ppi_probe[8]);
+        IOLog ("NATIVE_GIC3: isen_off=%llx isen_on=%llx grp27=%llx\n",
+               (unsigned long long) armcpu_ppi_probe[10],
+               (unsigned long long) armcpu_ppi_probe[11],
+               (unsigned long long) armcpu_ppi_probe[12]);
       }
     }
   }
