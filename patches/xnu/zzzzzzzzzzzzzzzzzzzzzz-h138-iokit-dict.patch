@@ -1,0 +1,32 @@
+diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
+--- a/iokit/Kernel/IOUserClient.cpp
++++ b/iokit/Kernel/IOUserClient.cpp
+@@ -2766,6 +2766,28 @@
+ 	const char *native_name = native_dict_string(dict, "IONameMatch");
+ 	native_iokit_log("match", native_cls ? native_cls : native_name,
+ 	    native_dict_string(dict, "IOProviderClass"), success ? 1 : 0);
++	/* H138: the two processes that decide whether a display exists get the
++	 * whole dictionary, so a match we cannot decode is never silent. */
++	if (strcmp(comm, "backboardd") == 0 || strcmp(comm, "SpringBoard") == 0) {
++		OSCollectionIterator *iter = OSCollectionIterator::withCollection(dict);
++		if (iter) {
++			unsigned n = 0;
++			OSObject *next;
++			while (n < 6 && (next = iter->getNextObject()) != NULL) {
++				OSSymbol *key = OSDynamicCast(OSSymbol, next);
++				if (!key) {
++					break;
++				}
++				OSObject *val = dict->getObject(key);
++				OSString *vs = OSDynamicCast(OSString, val);
++				IOLog("NATIVE_IOKIT_DICT: comm=%s count=%u %s=%s\n", comm,
++				    dict->getCount(), key->getCStringNoCopy(),
++				    vs ? vs->getCStringNoCopy() : (val ? "(non-string)" : "(null)"));
++				n++;
++			}
++			iter->release();
++		}
++	}
+ }
+ static kern_return_t
+ internal_io_service_get_matching_services(

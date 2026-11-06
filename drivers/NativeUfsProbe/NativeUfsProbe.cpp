@@ -116,6 +116,7 @@ static void h103SlotWriteThunk (void);
 static void h103HeaderWriteThunk (void);
 static void h103FlushNow (void);
 static void h103SlotTick (void);
+static void h103ProbeIomfb (void);
 
 // H103cg's probe periodically redrew the GOP test pattern from its heartbeat.
 // The display archive is force-loaded into the kernel and exports this symbol;
@@ -774,6 +775,7 @@ h103SlotTick (void)
   if (!gH103SlotMode) {
     return;
   }
+  h103ProbeIomfb ();
   h103MaybeLoadIogpu ();
   h103MaybePublishIogpu ();
   // H104f/H107: no slot/header writes before backboardd actual exec. When
@@ -1589,6 +1591,32 @@ ufsNop (UfsQueue *q)
   }
   const uint8_t *response = q->ucd + UFS_RSP_OFFSET;
   return response[0] == 0x20 && response[3] == 1;
+}
+
+// H138: is the Legacy framebuffer service visible to IOKit matching at all?
+// backboardd never issues an IOMobile* match in the logs, so first prove the
+// service can be found from the kernel side, and under which class name.
+static void
+h103ProbeIomfb (void)
+{
+  static volatile int done;
+  if (done || !gH103StartTicks) {
+    return;
+  }
+  if (mach_absolute_time () - gH103StartTicks < 60 * 19200000ULL) {
+    return;
+  }
+  done = 1;
+  const char *names[2] = { "IOMobileFramebuffer", "IOMobileFramebufferLegacy" };
+  for (unsigned i = 0; i < 2; i++) {
+    OSDictionary *matching = IOService::serviceMatching (names[i]);
+    IOService *service = matching ? IOService::copyMatchingService (matching) : nullptr;
+    IOLog ("NATIVE_IOMFB_PROBE: name=%s match=%u service=%p class=%s\n",
+           names[i], matching ? 1 : 0, service,
+           service ? service->getMetaClass ()->getClassName () : "-");
+    OSSafeReleaseNULL (service);
+    OSSafeReleaseNULL (matching);
+  }
 }
 
 bool

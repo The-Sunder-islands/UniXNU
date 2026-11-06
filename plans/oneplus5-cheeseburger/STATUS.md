@@ -5473,6 +5473,68 @@ H137 boot:    b5357eb00dab591ad3e3d4557041fb0e3ff550df4954de2d110cdc7ca84ea3f7
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H137.img`（已核对）、
 Mac `~/h103/boot-H137.img`、仓库 `out/cheeseburger/boot/boot-H137.img`。
 
+### H136 结果：SpringBoard 断言的是“找不到 CADisplay”（2026-11-07）
+
+`h137-log-20261107-035921.txt`（H136 内核 + H137 trust cache 修复）：
+
+```text
+NATIVE_BRK: pc=0x1a34032ec lr=0x1a34032ec x0=… x1=0x8000100 …
+NATIVE_TRAP_IMAGE_ROW: base=0x1a33e5000 delta=0x1e2ec FrontBoardServices
+NATIVE_TRAP_STR: pid=26 comm=SpringBoard x0="failed to find the main CADisplay"
+```
+
+断言原文拿到了：**“failed to find the main CADisplay”**。liveactivitiesd
+（`SessionSyncEngine + 0x1d4f8`）的寄存器里没有可打印串，属次级问题。
+H137 的 trust cache 修复也生效，日志里没有 `NATIVE_TRUSTCACHE` panic。
+
+当前完整链条：
+
+```text
+IOMobileFramebufferLegacy 服务（已注册）
+   → backboardd 不取用 → 没有 display
+   → 没有 CADisplay 发布给 CoreAnimation
+   → SpringBoard: "failed to find the main CADisplay" → brk #1 → SIGTRAP 循环
+```
+
+显示驱动本身是起来的：
+
+```text
+NATIVE_LEGACY: nub attach=1 start=1
+IOMobileFramebufferLegacy::start: provider was not AppleARMIODevice.（基类返回 false）
+NATIVE_LEGACY: startHardware gop=1 … valid=1
+NATIVE_LEGACY: registerService object=0xfffffff5f5be9000
+NATIVE_LEGACY: base start ok primary=1 mapping=…
+```
+
+但 backboardd 的 IOKit 调用只有 `aop-smart-cover`、空字典、`IOPlatformExpertDevice`
+和 `IOPMrootDomain`，从未出现 `IOMobile*`；其中 `cls=- d=- ok=0` 的空字典匹配
+因为 trace 只记录三个键而无法辨认。
+
+### H138：证明服务是否可被匹配 + 打印完整匹配字典（2026-11-07）
+
+1. `drivers/NativeUfsProbe/NativeUfsProbe.cpp`：心跳里一次性探测
+
+```text
+NATIVE_IOMFB_PROBE: name=IOMobileFramebuffer match=1 service=0x… class=…
+NATIVE_IOMFB_PROBE: name=IOMobileFramebufferLegacy match=… service=… class=…
+```
+
+   找到说明注册表正常、问题在 backboardd 侧；找不到说明服务没有以可匹配的
+   类/属性发布，需要改发布方式。
+
+2. `patches/xnu/zzzzzzzzzzzzzzzzzzzzzz-h138-iokit-dict.patch`：
+   `native_match_trace()` 对 `backboardd` / `SpringBoard` 打印完整匹配字典
+   （最多 6 个键值）：`NATIVE_IOKIT_DICT: comm=… count=… key=value`。
+
+```text
+H138 kernel:  92a8db9e8464389f91c0bc6a18c786fa9b78a5bb7f0adb91ce14531532acc9fc
+H138 payload: f12bdaed6e967af9bb39c5d3e26c1ddecb34c38f1cdbf06db3b267920c0cbe8c
+H138 boot:    a6c86d30881e3ba42686e2cb41ee28521e2d43f8f49ea7961110058a7969f9eb
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H138.img`（已核对）、
+Mac `~/h103/boot-H138.img`、仓库 `out/cheeseburger/boot/boot-H138.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
