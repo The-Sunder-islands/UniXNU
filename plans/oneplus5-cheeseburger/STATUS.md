@@ -3692,6 +3692,46 @@ h109-tick=1`）。
 - `nonblack>0` 但屏幕黑 → 帧有内容，问题在扫描/背光；
 - 没有 `NATIVE_FRAME` → 事件之前就停了，看最后一条 `NATIVE_IRQ` 与 exec。
 
+## H116 显示路径触发落盘（2026-11-06）
+
+H115 的事件驱动 flush 同样没有写盘（拉到的仍是最初 H113 的 `boot_id`）。
+事件触发器全部挂在 UFS 读路径上，而黑屏发生在 backboardd 第一帧拷贝覆盖
+控制台之后；那时读路径已经没有 tick，触发器不会被检查。
+
+H116 反过来：由**显示路径直接调用** UFS 的落盘钩子。
+
+- `NativeUfsProbe` 新增导出：
+
+  ```c
+  extern "C" void native_log_flush_hook(void) { if (gH103Probe) h103FlushNow(); }
+  ```
+
+- display archive（`LegacyDisplayProbe.cpp`）弱引用该符号，并在
+  `native_legacy_client_enter()`（显示 user client 打开）和
+  `native_legacy_transfer_observed()`（首帧拷贝成功，之后每 16 帧）调用它。
+
+这样即使控制台被覆盖、读路径停摆，黑屏瞬间的 msgbuf 也会被强制写进
+userdata_ios 的日志窗口。
+
+```text
+H116 kernel:  10a1bb08ba37894276e453b9ab898afb2ff89329e57feb6511093b6f7b489ba2
+H116 payload: cecf64d1692ae59691405d6ed4498bade17224c87e43ae5cdb14c712c08dfd07
+H116 boot:    0dc6a0e8247f799fff1261766184147572c0f4e77f01dff596aa182088b8c2f7
+```
+
+子模块 `drivers/NativeMobileDisplay` 提交 `6d27403`（分支 `h103-a540`，已
+推送）。镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H116.img`、
+Mac `~/h103/boot-H116.img`、仓库 `out/cheeseburger/boot/boot-H116.img`。
+
+判读：
+
+- `boot_id` 变了、日志含 `NATIVE_LEGACY: client …` / `NATIVE_FRAME: frames=…`
+  → 拿到黑屏瞬间记录，看 `nonblack` 判断帧是否全黑；
+- `boot_id` 仍不变 → 写盘本身失败（队列 poisoned / 命令超时），下一步查
+  UFS 写路径；
+- 若在 `native_log_flush_hook` 里加锁失败，会出现 `NATIVE_UFS_LOCK: logWrite`
+  或 `write_errors` 增长，同样说明写路径有问题而不是没触发。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
