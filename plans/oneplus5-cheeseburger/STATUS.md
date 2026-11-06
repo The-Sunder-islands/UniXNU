@@ -4139,6 +4139,49 @@ args 不变（`cpus=2 h103-slot=1 h103-load-iogpu=0 h103-log-secs=5 h109-tick=1 
 - 两者都是 0 → 看 `grp1927`（19 能否进 Group 1）、`dctl_ds`（NS 能否置 DS）、
   `pend2`（19 是否 pending），再决定帧布局或固件路线。
 
+## H125 上机结果与 H125spi（2026-11-06）
+
+**H125 内核卡死在早期启动**：屏幕停在
+
+```text
+NATIVE_UFS_LOG: deferred snapshot to window read
+NATIVE_UFS_HB: enter
+```
+
+之后 10 分钟无变化，且 TWRP 里的持久日志与上一次完全相同（`NativeUfsProbe`
+窗口从未被重写）→ 卡点在 `NativeUfsProbe::start()` 之后、第一次文件系统读之前。
+
+与 H124 的差异只有 `ArmCpu` 里三处：`kSgiPpiEnable` 加 `1<<19`、分发器接受 19、
+以及早期 `enableGic()` 里的 `IGROUPR0` 写和 `GICD_CTLR |= DS(1<<6)` 写。最可疑的
+是后两个**带副作用的写测试**放在了早期启动路径（上游 `uefi-sheng` 的
+`Gic-Spurious.patch` 正是处理"无 handler 的电平中断刷爆 CPU"）。尚未二分。
+
+**H125spi（零构建实验，当前候选镜像）**：不改内核，沿用 H124 内核
+（`5f8350f1…`），只把 payload 的 `unixnu.toml` 的 args 追加
+`armcpu-spi-ipi=1`，用来测 **GICD_IGROUPR**（distributor 侧分组）是否可写、
+SPI IPI 是否可投递——H122 只测过 redistributor 侧的 `GICR_IGROUPR0`。
+
+```text
+H125spi kernel:  5f8350f1dffcb1e136d0c657f8cb81ff029981704b66bb2464e8f7d0e7e482c1 (H124)
+H125spi payload: fb32df8c5f36ce4c6d5e6938f56a009b953c4bc3200072b722f6dd9945bbaa66
+H125spi boot:    c6eadde17a68c43aeeefbc44e9b17a57a50778382bd25c778d3fa472ddf94aa4
+```
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H125spi.img`（已核对）、
+Mac `~/h103/boot-H125spi.img`、仓库 `out/cheeseburger/boot/boot-H125spi.img`。
+其余 args 与 H124 完全一致。
+
+判读：`NATIVE_IRQ: ... ipi=N`
+
+- `ipi > 0` → SPI 属于 NS 且可投递：中断空间不是全锁死；下一步可评估用
+  `arch_mem_timer`（TWRP `/proc/interrupts` 里的 `GICv3 39`，SPI）作为 tick 源；
+- `ipi = 0` → PPI+SGI+SPI 都归安全世界，中断只能走固件线；
+- 卡死/panic → 记录 `armcpu_spi_unhandled` 与屏幕尾部，回退到 H124。
+
+另：TWRP 实测 `arch_timer = GICv3 19`（`dmesg` 为 `(virt/virt)`），说明正常
+启动链下安全世界**至少把定时器那条 PPI 交给了 NS**；Group 0 是本次启动链的
+交接结果，不是硬件常量。上游对比报告里"只能由安全世界写死"的表述需要按此修正。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
