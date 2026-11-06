@@ -3808,6 +3808,50 @@ H118-icc boot:     b491d9c815abc130874562512980f1055b1c42e9d11c7bc45c6416eb31981
 - 默认镜像不再黑屏（同 nogic）即可确认运行期 MMIO 是崩溃源；
 - 需要时再用 `boot-H118-icc.img` 单独验证 ICC 读取。
 
+## H119 GICR_IPRIORITYR 非对齐读修复（2026-11-06）
+
+H118 默认镜像一启动就 panic：
+
+```text
+panic(cpu 0 …): Unaligned kernel data abort
+pc 0xfffffff0079afb00  ← atos: ArmCpu::enableGic() (ArmCpu.cpp:347)
+esr 0x96000021         ← data abort, DFSC=0x21 alignment fault
+far 0xfffffff8debc5241b ← 末位 b，正是 0x400 + 27
+```
+
+根因：GICv3 的 `GICR_IPRIORITYR<n>` 是**按字节编址**（0x400 + n），H118 用
+`read32(..., 0x400 + 27)` 做了 32 位非对齐读。这也解释了 H114–H116 的运行期
+probe 黑屏：同一句读取在第一次 `h103SlotTick`（读路径起来，约 190 s）执行时
+崩溃。
+
+H119 只改这一行：
+
+```c
+- armcpu_ppi_probe[4] = read32 (redist + 0x10000, 0x400 + 27);
++ armcpu_ppi_probe[4] = *reinterpret_cast<volatile uint8_t *> (redist + 0x10000 + 0x400 + 27);
+```
+
+```text
+H119 kernel:       a390c2fc8d36eae5a43c6b8524993736607a853b92819e613c32c69c1ed48506
+H119 payload:      caf5d0bfc3f26ff84e19228a404db804451823cbeb451f5db7d83a3772eda244
+H119 boot:         fd2cb95e43ec4742647db862bfef6a0e6ccafc0fd86a81693e97c192d0ea7819
+H119-icc payload:  05063042c8a791b79529f40ee505193e5623741f926cc25568e8d2a2947dde53
+H119-icc boot:     24fc419614fd96e4a857820c3c84a12082ac455284c3b79398ca3e89679750b3
+```
+
+子模块 `drivers/ArmCpu` 提交 `a984efc`（分支 `h118-gic-cache`，已推送）。
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\`、Mac `~/h103/`、仓库
+`out/cheeseburger/boot/`。
+
+判读（先刷 `boot-H119.img`）：
+
+- 不再 panic，`NATIVE_GIC: typer=… isen=… igrp=… ipend=… ipri=…` 给出真实值；
+- `isen` bit27=1、`igrp` bit27=1、`ipri=0x80` → redistributor 配置正确，
+  中断没到是 CPU 侧/异常路由问题；
+- `isen` bit27=0 → 使能写没落到本核 frame；
+- `igrp` bit27=0 → 被分到 Group 0（FIQ）；
+- `boot-H119-icc.img`（`h114-icc=1`）用于单独确认 ICC 读取是否也会崩。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
