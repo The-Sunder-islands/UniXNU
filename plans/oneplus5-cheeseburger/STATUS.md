@@ -4182,6 +4182,42 @@ Mac `~/h103/boot-H125spi.img`、仓库 `out/cheeseburger/boot/boot-H125spi.img`�
 启动链下安全世界**至少把定时器那条 PPI 交给了 NS**；Group 0 是本次启动链的
 交接结果，不是硬件常量。上游对比报告里"只能由安全世界写死"的表述需要按此修正。
 
+## H125b：PPI 19 推迟使能 + 中断风暴保护（2026-11-06）
+
+H125 的教训是把"写 GIC"放在 `enableGic()` 早期路径上。H125b 只做两件事：
+
+1. **早期恢复 H124 行为**：`kSgiPpiEnable` 回到 `0xffff | (1<<27)`；删掉早期
+   `IGROUPR0` 写、`ISENABLER0` 清/置 19、`GICD_CTLR |= DS` 写；只保留只读采样
+   （`NATIVE_GIC4: grp/isen/pend/pend2/dctl/dgrp1`）。
+2. **PPI 19 推迟到 120 s**：新增 `armcpu_enable_ppi19()`，由 `NativeUfsProbe`
+   在 120 s 强制 dump 前调用（此时系统已跑 2 分钟，日志/中断上下文稳定），
+   并打印 `NATIVE_PPI19: done=.. isen_before=.. isen_after=.. pend=..`。
+3. **风暴保护**：`ArmCpu::interrupt()` 单次调用里摘取超过 32 个中断时，
+   直接 `ICENABLER` 掉该 INTID（PPI 用 redistributor，SPI 用 distributor），
+   记录 `armcpu_irq_storm_id/count` 后返回。上游 `uefi-sheng` 的
+   `Gic-Spurious.patch` 正是处理同一类问题。
+4. `NATIVE_IRQ` 增加 `first=`（第一次取到的 INTID）、`storm=`/`sn=`。
+
+```text
+H125b kernel:  5f18e46865ead282ed3ed90af1ec4474955a98defb7a5e1107cf291dc8b4d472
+H125b payload: 153678fe7a9f8b13558c2c4a1907cfbd972b810beb5d32ad585e5300dc057d3d
+H125b boot:    2e8a5399190db3057574994aca37b846d36dc71c557202048056eb287e60dd1b
+```
+
+子模块 `drivers/ArmCpu` 提交 `d9c0b1a`（分支 `h118-gic-cache`，已推送）。
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H125b.img`（已核对）、
+Mac `~/h103/boot-H125b.img`、仓库 `out/cheeseburger/boot/boot-H125b.img`。
+args 与 H124 相同（不含 `armcpu-spi-ipi`，与 H125spi 互不影响）。
+
+判读：
+
+- 先看能否正常启动到 120 s 并打印 `NATIVE_PPI19`；
+- `t19 > 0` 且 `timer` 开始增长 → 定时器确实在 INTID 19，接下来把它设为默认
+  定时器源并去掉 27；
+- `storm=19` → 19 是一条无消费者的电平线，被风暴保护关掉，说明 19 不是定时器；
+- `first=..` 是这台机器上第一次真正取到的 INTID，可作为"中断到底有没有进来"的
+  第一手证据。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
