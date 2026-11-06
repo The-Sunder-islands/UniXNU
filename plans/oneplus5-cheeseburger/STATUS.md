@@ -4549,6 +4549,48 @@ Mac `~/h103/boot-H127c.img`、仓库 `out/cheeseburger/boot/boot-H127c.img`。
   并确保重装 CNTV；
 - 若仍停在原位 → 使能 19 本身破坏了某条线，改为只读方案。
 
+## H127c 结果与 H127d（2026-11-06）
+
+**H127c 上机确认：PPI 19 就是这颗 SoC 的定时器中断，而且确实送达 EL1。**
+
+```text
+NATIVE_IRQ: timer=434919119 ipi=0 ... t19=434919119 t27=0 storm=ffffffff sn=0
+```
+
+- `t19` 一路上涨、`t27` 恒 0 → 定时器在 **INTID 19**（与 TWRP/Linux 的 arch_timer 一致）；
+- 系统跑到 500 s，进程/IOKit/launchd 都在动；
+- 因为只计数、没有重新装载 CNTV，电平一直拉着，中断率约 **40 万/秒**
+  （`t19`/时间），CPU 大量耗在中断里；
+- 风暴保护没有触发（`storm=ffffffff sn=0`）。
+
+H127b（19 直接接 `rtclock_intr`）在第一笔 UFS I/O 处挂 → 早期就让定时器打断存储/驱动
+初始化不安全，所以 H127d 采用分阶段：
+
+1. 120 s 之前：19 只计数（等同 H127c，已验证可启动）；
+2. 120 s 的 UFS dump 点把 `armcpu_timer_dispatch` 置 1，并打印
+   `NATIVE_TIMER_DISPATCH: on t19=.. t27=..`；
+3. 之后 19 的每次中断：调 `rtclock_intr(0)`，然后主动
+   `CNTV_TVAL = 192000`（10 ms @19.2 MHz）+ `CNTV_CTL = 1`，把电平消掉、中断率降到 100 Hz；
+4. 27 保持原路径；仍然没有任何额外 GIC 读/写。
+
+```text
+H127d kernel:  616e71dc7d81ef79fe4bb9e788f2b24e1b0b9aec2dc5359cf7d628a2e9090898
+H127d payload: c36deccb5f975d6eddb8d5cdc607b4354845ad8a96ced011aff8dbd92f2bdc19
+H127d boot:    2cfd7e1cb738cc6408b14ebf7c3750e8361674b9246fe766c933a85a94196eeb
+```
+
+firmware 仍用可启动的 `fw-H103ea`（`163917aa…`）。子模块 `drivers/ArmCpu` 与父仓库
+均已提交并推送。镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H127d.img`（已核对）、
+Mac `~/h103/boot-H127d.img`、仓库 `out/cheeseburger/boot/boot-H127d.img`。
+
+判读：
+
+- `NATIVE_IRQ` 的 `timer`/`t19` **增量速率**应从 ~40 万/秒降到 ~100/秒；
+- 若随后系统能越过 200 s 的停点、出现更多 `NATIVE_EXEC`/`NATIVE_IOKIT`，说明定时器
+  已经把超时/抢占带回正轨；
+- 若 120 s 之后立刻挂，说明 `rtclock_intr` 在这条路径上不安全，下一版只重装 CNTV
+  并自己数 tick。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
