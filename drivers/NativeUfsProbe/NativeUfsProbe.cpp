@@ -153,10 +153,12 @@ extern "C" volatile uint64_t native_legacy_frame_stats[32][5];
 // interrupt itself never reaches the kernel, which would explain IOSleep,
 // tsleep and timer_call all failing to wake anything.
 extern "C" volatile uint64_t armcpu_timer_interrupts;
+extern "C" volatile uint64_t armcpu_timer19_interrupts;
+extern "C" volatile uint64_t armcpu_timer27_interrupts;
 extern "C" volatile uint64_t armcpu_ipi_interrupts;
 // H114: ArmCpu export that reads the boot CPU's redistributor PPI 27 state.
 extern "C" void armcpu_probe_ppi27 (void);
-extern "C" volatile uint64_t armcpu_ppi_probe[13];
+extern "C" volatile uint64_t armcpu_ppi_probe[20];
 
 static int gH109Chan;
 static volatile uint32_t gH109Ticks;
@@ -688,13 +690,15 @@ h103SlotTick (void)
       __asm__ volatile ("mrs %0, daif" : "=r" (daif));
       __asm__ volatile ("mrs %0, icc_pmr_el1" : "=r" (pmr));
       __asm__ volatile ("mrs %0, icc_igrpen1_el1" : "=r" (grp1));
-      IOLog ("NATIVE_IRQ: timer=%llu ipi=%llu daif=%llx pmr=%llx grp1=%llx ctl=%llx tval=%llx flags=%x tick=%u\n",
+      IOLog ("NATIVE_IRQ: timer=%llu ipi=%llu daif=%llx pmr=%llx grp1=%llx ctl=%llx tval=%llx t19=%llu t27=%llu flags=%x tick=%u\n",
              (unsigned long long) armcpu_timer_interrupts,
              (unsigned long long) armcpu_ipi_interrupts,
              (unsigned long long) (daif & 0x3ffULL),
              (unsigned long long) (pmr & 0xffULL),
              (unsigned long long) (grp1 & 1ULL),
              (unsigned long long) ctl, (unsigned long long) tval,
+             (unsigned long long) armcpu_timer19_interrupts,
+             (unsigned long long) armcpu_timer27_interrupts,
              native_boot_flags, gH109Ticks);
       if (gH114GicProbe) {
         IOLog ("NATIVE_GIC: typer=%llx isen=%llx igrp=%llx ipend=%llx ipri=%llx\n",
@@ -715,6 +719,17 @@ h103SlotTick (void)
                (unsigned long long) armcpu_ppi_probe[10],
                (unsigned long long) armcpu_ppi_probe[11],
                (unsigned long long) armcpu_ppi_probe[12]);
+        // H125: PPI 19 path and the single-security-state attempt.
+        // grp1927: IGROUPR0 after writing (1<<19)|(1<<27); isen19_off/on:
+        // ISENABLER0 around clearing/setting INTID 19; pend2: later ISPENDR0;
+        // dctl_ds: GICD_CTLR after trying to set DS(bit6); dgrp1: GICD_IGROUPR1.
+        IOLog ("NATIVE_GIC4: grp1927=%llx isen19_off=%llx isen19_on=%llx pend2=%llx dctl_ds=%llx dgrp1=%llx\n",
+               (unsigned long long) armcpu_ppi_probe[13],
+               (unsigned long long) armcpu_ppi_probe[14],
+               (unsigned long long) armcpu_ppi_probe[15],
+               (unsigned long long) armcpu_ppi_probe[16],
+               (unsigned long long) armcpu_ppi_probe[17],
+               (unsigned long long) armcpu_ppi_probe[18]);
       }
     }
   }
