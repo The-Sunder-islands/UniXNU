@@ -4648,7 +4648,7 @@ H127f boot:    59b4a4fbe70b3cad407a8e3afb847348f7fd3a7c19c3279c5cf6f9b3e3afbcec
 ```
 
 子模块 `drivers/ArmCpu` 提交 `3ad455d`（分支 `h118-gic-cache`，已推送）；父仓库源码提交
-见本节文档提交。镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H127f.img`
+`a2fe4d1`、文档提交 `6343fa3`（均已推送）。镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H127f.img`
 （已核对）、Mac `~/h103/boot-H127f.img`、仓库 `out/cheeseburger/boot/boot-H127f.img`。
 
 判读：`dispatch=1` 后若 `clock19` 与 `t19` 同步增长、`tval` 不再长期过期且 `tick`
