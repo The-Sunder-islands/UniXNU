@@ -1129,6 +1129,11 @@ waitForCompletion (uint8_t *list, uint32_t *ocs, unsigned *loops,
   }
 }
 
+// H127k: the window device serves all SystemOS/Data I/O and is synchronous, so
+// a 2 s lock bound turned ordinary queuing into kIOReturnTimeout ("executeRequest:
+// request failed to start!", err 60). Give the data path 20 s; the diagnostic
+// log paths keep their short 2 s bound so a stuck write cannot stall the system.
+#define UFS_DATA_LOCK_TICKS  (384000000ULL)  /* 20 s at 19.2 MHz */
 // Bounded lock acquisition: a stuck holder must not turn a diagnostic read into
 // an unobservable hang. 19.2 MHz timebase, so 38400000 ticks is two seconds.
 static bool
@@ -1589,7 +1594,7 @@ NativeUfsProbe::readBlocks (uint8_t unit, uint64_t block, uint64_t count,
       !blockSize || block > 0xffffffffULL) {
     return false;
   }
-  if (!lockWithTimeout (fLock, "readBlocks", 38400000ULL)) {
+  if (!lockWithTimeout (fLock, "readBlocks", UFS_DATA_LOCK_TICKS)) {
     IOLog ("NATIVE_UFS_LOCK: readBlocks blocked block=%llx count=%llu\n",
            block, count);
     return false;
@@ -2215,7 +2220,7 @@ NativeUfsWindow::doAsyncReadWrite (IOMemoryDescriptor *buffer, UInt64 block,
   uint64_t writeTicks = 0;
   bool ok = true;
   uint64_t lockStart = mach_absolute_time ();
-  if (!lockWithTimeout (lock, label, 38400000ULL)) {
+  if (!lockWithTimeout (lock, label, UFS_DATA_LOCK_TICKS)) {
     IOLog ("NATIVE_UFS_LOCK: window %s blocked req=%llu block=%llx count=%llu\n",
            label, request, block, count);
     gWindowInFlight = 0;

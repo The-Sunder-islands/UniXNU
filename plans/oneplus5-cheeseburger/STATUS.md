@@ -4924,6 +4924,44 @@ Mac `~/h103/boot-H127j.img`、仓库 `out/cheeseburger/boot/boot-H127j.img`。
   队列/锁行为（`executeRequest` 被拒绝）；
 - 同时应给读失败路径加防护：`memcpy` 前校验目标缓冲区和长度，避免升级成内核 panic。
 
+### H127j 结果与 H127k（2026-11-07）
+
+`h127j-log-20261107-002401.txt`（286 KB，139–782 s）说明**提高日志间隔并没有改善 I/O**：
+
+| 指标 | H127i（`log-secs=30`） | H127j（`log-secs=60`） |
+| --- | --- | --- |
+| `err 60` | ~100 | **131** |
+| `disk4 / disk5: I/O timeout` | 93 / — | 62 / 88 |
+| `executeRequest: request failed to start!` | 多 | **151** |
+| `NATIVE_UFS_LOCK: window ... blocked` | 有 | **329** |
+
+定时器依旧正常（`clock19 == t19`、`forced=0`、`ctl=1`）。因此主因不是日志频率。
+
+代码层面定位到根因：`NativeUfsWindow::doAsyncReadWrite()` 是**同步单锁**实现，
+`lockWithTimeout(lock, ..., 38400000)` 只有 **2 秒**（19.2 MHz），超时即返回
+`kIOReturnTimeout`，于是出现 `executeRequest: request failed to start!` 和 `err 60`。
+SystemOS 的所有 I/O 都经过这个设备，一次较长的窗口读（日志里见过 `count=96`）期间
+其它请求排队，超过 2 秒就被判死。
+
+H127k 只改锁上限：新增 `UFS_DATA_LOCK_TICKS = 384000000`（20 秒），用于
+`readBlocks` 与窗口设备；日志路径（`logWrite`/`logSync`）仍保留 2 秒，避免卡死时拖住系统。
+payload 沿用 H127j 的 `h103-log-secs=60`。
+
+```text
+H127k kernel:  712864f00970b7a36dfa528ab6a5690ad01d8f71ec2c9ccf4b04ac44d0c3cb1c
+H127k payload: 61fe24d48b2aa36a6784638563d2e3f1d4f4c2aeca9bf1471afe2b160c9acd49
+H127k boot:    0699e3920825b0c80af0207249dab3c547f4e1f9b977f640671398a6a393a437
+```
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H127k.img`（已核对）、
+Mac `~/h103/boot-H127k.img`、仓库 `out/cheeseburger/boot/boot-H127k.img`。
+
+判读：
+
+- `executeRequest: request failed to start!` 与 `err 60` 大幅下降、崩溃减少 →
+  锁超时是主因；下一步把窗口设备改成异步 + 请求队列；
+- 仍大量超时 → 单次窗口读真的超过 20 秒，要查 `readBlocks` 的命令轮询/重试上限。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
