@@ -5094,6 +5094,66 @@ Mac `~/h103/boot-H129.img`、仓库 `out/cheeseburger/boot/boot-H129.img`。
   backboardd 开始找显示服务，`ok=1` 表示注册表里能匹配到；
 - `err 60` 应归零；若 6 秒仍不够，说明单次命令确实超过 6 秒，要查 UFS 设备侧。
 
+### H129 结果：存储归零，SpringBoard 是 ObjC 异常（2026-11-07）
+
+`h129-log-20261107-015227.txt`（370 KB，57–775 s）：
+
+| 指标 | H128 | **H129** |
+| --- | --- | --- |
+| `err 60` | 12 | **0** |
+| `executeRequest: request failed` | 5 | **0** |
+| `NATIVE_UFS_LOCK` | 10 | **0** |
+
+存储路径彻底干净。`UFS_DATA_LOCK_TICKS` = 6 s > `UFS_TIMEOUT_TICKS` 5.2 s
+之后，同一 LBA 的重复超时消失。
+
+SpringBoard 共 16 次退出，**签名完全一致**：
+
+```text
+NATIVE_EXIT: pid=… comm=SpringBoard status=0x6 ns=8 code=0x1
+```
+
+`status=0x6` 是 SIGABRT；`ns=8` 在 `bsd/sys/reason.h` 中是 **`OS_REASON_OBJC`**，
+即 `objc_exception_throw` → `abort_with_payload()`，不是段错误、不是 jetsam。
+
+backboardd 的 matching 全记录（H129 取消上限后）：
+
+```text
+match comm=backboardd cls=-              d=-                      ok=0
+match comm=backboardd cls=aop-smart-cover d=-                     ok=0
+match comm=backboardd cls=multi-touch     d=-                     ok=0
+match comm=backboardd cls=mtp-transport   d=-                     ok=0
+match comm=backboardd cls=-              d=IOPlatformExpertDevice ok=1
+open  comm=backboardd cls=IOPMrootDomain
+```
+
+**没有任何一次 `IOMobileFramebuffer` / `IOFramebuffer` 查询**，配合
+`IOMobileFramebufferLegacy::start: provider was not AppleARMIODevice`（65 s）
+和 `NATIVE_FRAME … client=0 frames=0`，说明 backboardd 的显示初始化从未开始。
+
+### H130：打印异常描述串（2026-11-07）
+
+`patches/xnu/zzzzzzzzzzzzzz-h130-exit-desc.patch`：
+
+- `native_trace_process_exit()` 先取 `ns/code`，再决定是否过滤，因此**任何
+  `ns != 0` 的退出都会被记录**（ObjC 异常、dyld abort、jetsam、exec 失败）；
+- 追加 `NATIVE_EXIT_DESC` 行，内容来自现成的 `exit_reason_get_string_desc()`
+  （`kern_exit.c:1305`，launchd panic 用的是同一个访问器），截断到 320 字符；
+- 描述为空时回退打印 kcdata 缓冲区的可打印字节（`NATIVE_EXIT_RAW` 同格式）。
+
+```text
+H130 kernel:  9bbe0ff2bfb143eb7d725ec39092dcf929540df2e20f80024fdd1de07e9aa708
+H130 payload: 6e92ef1d9e8e120ec764aceaabb375a3b0e9e54eb139b8c84d953a2167c48b41
+H130 boot:    f42d020fe3ae06c450a23baaf67c15e38729177c4af7454b9f3dfe7d7c31c7b9
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H130.img`（已核对）、
+Mac `~/h103/boot-H130.img`、仓库 `out/cheeseburger/boot/boot-H130.img`。
+
+判读：`NATIVE_EXIT_DESC: … comm=SpringBoard …` 里的异常名与 reason 决定下一步——
+若是显示/BackBoard 断言，修的是 `IOMobileFramebufferLegacy::start()` 的 provider
+判定；若是无关的缺类/缺服务，直接按描述定位。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

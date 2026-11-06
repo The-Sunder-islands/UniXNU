@@ -1,0 +1,62 @@
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -1522,14 +1522,6 @@
+ 	uint32_t ns = 0;
+ 	uint64_t code = 0;
+ 
+-	/* H129: SpringBoard's exit status is the evidence for the missing UI. */
+-	if (strcmp(comm, "SpringBoard") != 0 &&
+-	    strcmp(comm, "cryptexd") != 0 && strcmp(comm, "eligibilityd") != 0 &&
+-	    strcmp(comm, "launchd") != 0 && strcmp(comm, "xpcproxy") != 0 &&
+-	    strcmp(comm, "driverkitd") != 0 && strcmp(comm, "backboardd") != 0 &&
+-	    strcmp(comm, "logd_helper") != 0 && strcmp(comm, "logd") != 0) {
+-		return;
+-	}
+ 	if (reason == OS_REASON_NULL) {
+ 		reason = p->p_exit_reason;
+ 	}
+@@ -1537,8 +1529,43 @@
+ 		ns = reason->osr_namespace;
+ 		code = reason->osr_code;
+ 	}
++	/* H129: SpringBoard's exit status is the evidence for the missing UI.
++	 * H130: every exit that carries an os_reason is traced too (ObjC
++	 * exception, dyld abort, jetsam, exec failure), together with the
++	 * user description string, so the abort message itself reaches the log. */
++	if (ns == 0 &&
++	    strcmp(comm, "SpringBoard") != 0 &&
++	    strcmp(comm, "cryptexd") != 0 && strcmp(comm, "eligibilityd") != 0 &&
++	    strcmp(comm, "launchd") != 0 && strcmp(comm, "xpcproxy") != 0 &&
++	    strcmp(comm, "driverkitd") != 0 && strcmp(comm, "backboardd") != 0 &&
++	    strcmp(comm, "logd_helper") != 0 && strcmp(comm, "logd") != 0) {
++		return;
++	}
+ 	printf("NATIVE_EXIT: pid=%d ppid=%d comm=%s status=0x%x ns=%u code=0x%llx\n",
+ 	    proc_getpid(p), p->p_ppid, comm, rv, ns, (unsigned long long)code);
++	if (ns != 0 && reason != OS_REASON_NULL) {
++		const char *desc = exit_reason_get_string_desc(reason);
++		char text[321];
++		unsigned n = 0;
++		if (desc) {
++			while (n < 320 && desc[n]) {
++				text[n] = desc[n];
++				n++;
++			}
++		} else if (reason->osr_kcd_buf && reason->osr_bufsize) {
++			unsigned lim = reason->osr_bufsize > 160 ? 160 : reason->osr_bufsize;
++			while (n < lim) {
++				char c = reason->osr_kcd_buf[n];
++				text[n] = (c >= 32 && c < 127) ? c : '.';
++				n++;
++			}
++		}
++		text[n] = 0;
++		if (n) {
++			printf("NATIVE_EXIT_DESC: pid=%d comm=%s len=%u %s\n",
++			    proc_getpid(p), comm, n, text);
++		}
++	}
+ }
+ 
+ /*
