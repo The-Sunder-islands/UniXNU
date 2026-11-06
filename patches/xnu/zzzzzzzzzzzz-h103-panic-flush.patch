@@ -1,0 +1,17 @@
+--- a/osfmk/kern/debug.c
++++ b/osfmk/kern/debug.c
+@@ -1132,7 +1132,13 @@
+ panic_trap_to_debugger(const char *panic_format_str, va_list *panic_args, unsigned int reason, void *ctx,
+     uint64_t panic_options_mask, void *panic_data_ptr, unsigned long panic_caller)
+ {
+ #pragma clang diagnostic pop
+ 
++	/*
++	 * H117: persist the console ring (and a NATIVE_PANIC marker) before the
++	 * machine-layer handler prints the panic text and stops the machine.
++	 */
++	{ extern void native_panic_flush(void); native_panic_flush(); }
++
+ #if defined(__x86_64__) && (DEVELOPMENT || DEBUG)
+ 	read_lbr();
+ #endif
