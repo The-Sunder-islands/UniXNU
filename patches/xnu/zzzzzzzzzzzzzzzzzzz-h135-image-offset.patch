@@ -1,0 +1,13 @@
+diff --git a/bsd/uxkern/ux_exception.c b/bsd/uxkern/ux_exception.c
+--- a/bsd/uxkern/ux_exception.c
++++ b/bsd/uxkern/ux_exception.c
+@@ -136,7 +136,8 @@
+ 		return;
+ 	}
+ 	version = head[0];
+-	if (copyin((user_addr_t)infos + 2 * sizeof(user_addr_t), &array, sizeof(array)) != 0 ||
++	/* H135: version and infoArrayCount are 4 bytes each; infoArray is at +8. */
++	if (copyin((user_addr_t)infos + 2 * sizeof(uint32_t), &array, sizeof(array)) != 0 ||
+ 	    !array) {
+ 		printf("NATIVE_TRAP_IMAGE: pid=%d comm=%s addr=0x%llx no-image-array version=%u\n",
+ 		    pid, p->p_comm, (unsigned long long)addr, version);

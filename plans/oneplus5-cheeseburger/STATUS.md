@@ -5349,6 +5349,45 @@ H134 boot:    40df985f7fc7921082616f70ae4bd3b59bc3afda9c2033dd3d0db1d6e7910da7
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H134.img`（已核对）、
 Mac `~/h103/boot-H134.img`、仓库 `out/cheeseburger/boot/boot-H134.img`。
 
+### H134 结果：读到的是代码，偏移错了（2026-11-07）
+
+`h134-log-20261107-032226.txt`：
+
+```text
+NATIVE_TRAP_IMAGE: pid=26 comm=SpringBoard addr=0x1b001b2ec version=17 rows=1235/1235
+                   min=0xd65f03c0 max=0xfd46bd0090000288
+```
+
+`version=17`、`rows=1235/1235`、`count=1235` 都正常，说明 `dyld_all_image_infos`
+的地址与头字段是对的；但 `min=0xd65f03c0` 正是 ARM64 的 `ret` 指令，
+`max=0xfd46bd0090000288` 是两条相邻指令（`adrp` + `ldr d0`）被当成一个 64 位
+指针读出。
+
+原因：`version`/`infoArrayCount` 各 4 字节，`infoArray` 在 **+8**；H133/H134 写成了
+`2 * sizeof(user_addr_t)` = +16，取到的是 `notification`（`dyld_image_notifier`
+函数指针），于是按 24 字节步长读出来全是指令。
+
+### H135：修正 infoArray 偏移（2026-11-07）
+
+`patches/xnu/zzzzzzzzzzzzzzzzzzz-h135-image-offset.patch`：
+
+```c
+copyin((user_addr_t)infos + 2 * sizeof(uint32_t), &array, sizeof(array))
+```
+
+其余诊断（`version/rows/min/max`、`NATIVE_TRAP_IMAGE_ROW`）保留。
+预期 `min` 回到 `0x100000000` 级别、`max` 落在共享缓存区域，并直接打印出
+SpringBoard / liveactivitiesd 那个 PC 所属的框架与 `off`。
+
+```text
+H135 kernel:  a652405b14605ba3a6261f218dd6f41e5e9517cb088dcda54926523c537228d6
+H135 payload: 169689228ab9efb9780726cff43b20c4cfcbbe0953abbab7a7ed70bf2cf00bc0
+H135 boot:    8e8fdec88adc714a83d03ab26e67a7ae59ffcc55c810870a6ad77dbe4c711ffb
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H135.img`（已核对）、
+Mac `~/h103/boot-H135.img`、仓库 `out/cheeseburger/boot/boot-H135.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
