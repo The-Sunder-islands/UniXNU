@@ -5427,6 +5427,52 @@ H136 boot:    5f826d78860f7de30420af63139f993fffe74e2b10b77f7ec1dc4ed896da59e8
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H136.img`（已核对）、
 Mac `~/h103/boot-H136.img`、仓库 `out/cheeseburger/boot/boot-H136.img`。
 
+### H137：trust cache 初始化不再 panic（2026-11-07）
+
+H136 上机时撞到启动 panic（屏幕照片）：
+
+```text
+panic(cpu 0 caller 0xfffffff007a41d94): NATIVE_TRUSTCACHE: img4=0 amfi=0 @kern_trustcache.c:477
+```
+
+（照片里读成 `len=0`，实际是 `img4=0`。）
+
+调用链：`osfmk/kern/startup.c:762` → `trust_cache_runtime_init()` →
+`bsd/kern/kern_trustcache.c:475`（`PMAP_CS_PPL_MONITOR` 关掉时的 `#else` 分支）。
+`amfi` 由 AMFI 内建 kext 在 `mpo_policy_init` 填充，**先后顺序取决于预链接内核里
+kext 的启动顺序**，所以这是启动期竞态：
+
+- H135 正常：`calling mpo_policy_init for AMFI` → `Security policy loaded: AMFI`
+  → `NATIVE_TRUSTCACHE_LOAD_START … amfi=0xfffffff00bcfc690 version=3`；
+- 这次：`calling mpo_policy_init for vnguard` 之后立刻 panic，AMFI 尚未注册。
+
+同一 panic 在 2026-10-23 出现过（当时是关掉 `CONFIG_XNU_TRUST_CACHE_RUNTIME` 绕过的）。
+H136 只改了 `sleh.c` 与 `ux_exception.c`，与本路径无关，属于**概率性启动失败**。
+
+而且原注释写的是“不要初始化锁，让查询干净地失败”，代码却直接 panic；后半段的
+`trust_cache_ready` 保护已经写好，所以去掉 panic 是安全的。
+
+`patches/xnu/zzzzzzzzzzzzzzzzzzzzz-h137-trustcache-race.patch`：
+
+```c
+	if (img4if == NULL || amfi == NULL) {
+		printf("NATIVE_TRUSTCACHE: not ready img4=%p amfi=%p\n", img4if, amfi);
+		return;      /* trust_cache_ready 保持 false，所有查询提前返回 */
+	}
+```
+
+AMFI 正常注册的启动行为不变；撞上竞态时只是这一轮不加载静态 trust cache
+（本端口的 AMFI/签名路径本来就是旁路的）。
+
+```text
+H137 kernel:  8e7a4bc630dd1cc37ee793fa9abc6f6467c621ef9eba00812307a203f454b499
+H137 payload: 70f8aa9f683de19956bdfafcde44d2337630256db6ffe2d29c0a110727ba5a4d
+H137 boot:    b5357eb00dab591ad3e3d4557041fb0e3ff550df4954de2d110cdc7ca84ea3f7
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H137.img`（已核对）、
+Mac `~/h103/boot-H137.img`、仓库 `out/cheeseburger/boot/boot-H137.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

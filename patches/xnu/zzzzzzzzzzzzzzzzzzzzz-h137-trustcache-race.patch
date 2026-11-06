@@ -1,0 +1,22 @@
+diff --git a/bsd/kern/kern_trustcache.c b/bsd/kern/kern_trustcache.c
+--- a/bsd/kern/kern_trustcache.c
++++ b/bsd/kern/kern_trustcache.c
+@@ -470,11 +470,14 @@
+ 	allow_legacy_caches = true;
+ #endif
+ 
+-	/* Image4/AMFI are absent in this native bring-up.  Do not initialize
+-	 * trust_cache_rt_lock, and let query callers fail cleanly instead of
+-	 * taking an uninitialized non-sleepable RW lock. */
++	/* H137: Image4/AMFI may not be registered yet when startup() reaches
++	 * this point; MAC policy registration follows the prelinked kext
++	 * order, so this is a boot-to-boot race.  Leaving the runtime
++	 * uninitialized is safe: every query already returns early while
++	 * trust_cache_ready is false. */
+ 	if (img4if == NULL || amfi == NULL) {
+-		panic("NATIVE_TRUSTCACHE: img4=%p amfi=%p", img4if, amfi);
++		printf("NATIVE_TRUSTCACHE: not ready img4=%p amfi=%p\n", img4if, amfi);
++		return;
+ 	}
+ 	if (amfi->TrustCache.version < 2) {
+ 		panic("amfi interface is stale: %u", amfi->TrustCache.version);
