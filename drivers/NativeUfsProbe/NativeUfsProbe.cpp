@@ -152,15 +152,14 @@ extern "C" volatile uint64_t armcpu_timer_interrupts;
 extern "C" volatile uint64_t armcpu_ipi_interrupts;
 // H114: ArmCpu export that reads the boot CPU's redistributor PPI 27 state.
 extern "C" void armcpu_probe_ppi27 (void);
-extern "C" volatile uint64_t armcpu_ppi_probe[6];
+extern "C" volatile uint64_t armcpu_ppi_probe[10];
 
 static int gH109Chan;
 static volatile uint32_t gH109Ticks;
 static timer_call_t gH109TimerCall;
 // H117: h114-gic=0 keeps the H114 redistributor/ICC reads out of the A/B run.
-// H118: the GIC values are cached at init; h114-icc gates only the ICC reads.
+// H118/H120: the GIC values are cached at init; no runtime GIC/ICC reads.
 static volatile uint32_t gH114GicProbe = 1;
-static volatile uint32_t gH114IccProbe = 0;
 // H110: h109-tick=0 keeps the timer_call off so the same kernel can be booted
 // with and without the interrupt heartbeat.
 static volatile uint32_t gH110TickEnabled = 1;
@@ -697,23 +696,14 @@ h103SlotTick (void)
                (unsigned long long) armcpu_ppi_probe[2],
                (unsigned long long) armcpu_ppi_probe[3],
                (unsigned long long) armcpu_ppi_probe[4]);
-      }
-      if (gH114IccProbe) {
-        // H118: the ICC reads are the second suspect for the H114 crash, so they
-        // stay behind their own switch (off by default).
-        uint64_t el = 0, vbar = 0, h1 = 0, h0 = 0, rpr = 0;
-        __asm__ volatile ("mrs %0, CurrentEL" : "=r" (el));
-        __asm__ volatile ("mrs %0, vbar_el1" : "=r" (vbar));
-        __asm__ volatile ("mrs %0, icc_hppir1_el1" : "=r" (h1));
-        __asm__ volatile ("mrs %0, icc_hppir0_el1" : "=r" (h0));
-        __asm__ volatile ("mrs %0, icc_rpr_el1" : "=r" (rpr));
-        IOLog ("NATIVE_IRQ2: el=%llu vbar=%llx h1=%llx h0=%llx rpr=%llx flags=%x\n",
-               (unsigned long long) ((el >> 2) & 3ULL),
-               (unsigned long long) vbar,
-               (unsigned long long) (h1 & 0xffffffULL),
-               (unsigned long long) (h0 & 0xffffffULL),
-               (unsigned long long) (rpr & 0xffULL),
-               native_boot_flags);
+        // H120: DS bit, redistributor wake state, Group 0 enable and the retried
+        // group assignment. The ICC_HPPIR/HPPIR0/RPR reads are gone: they crash.
+        IOLog ("NATIVE_GIC2: dctl=%llx gtyper=%llx waker=%llx grp0=%llu igrp2=%llx\n",
+               (unsigned long long) armcpu_ppi_probe[5],
+               (unsigned long long) armcpu_ppi_probe[9],
+               (unsigned long long) armcpu_ppi_probe[6],
+               (unsigned long long) armcpu_ppi_probe[7],
+               (unsigned long long) armcpu_ppi_probe[8]);
       }
     }
   }
@@ -2941,9 +2931,6 @@ NativeUfsProbe::start (IOService *provider)
   uint32_t gicProbe = 1;
   PE_parse_boot_argn ("h114-gic", &gicProbe, sizeof gicProbe);
   gH114GicProbe = gicProbe ? 1 : 0;
-  uint32_t iccProbe = 0;
-  PE_parse_boot_argn ("h114-icc", &iccProbe, sizeof iccProbe);
-  gH114IccProbe = iccProbe ? 1 : 0;
   if (!gH110TickEnabled) {
     IOLog ("NATIVE_TICK: timer disabled\n");
   } else {
