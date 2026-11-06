@@ -157,6 +157,8 @@ extern "C" volatile uint64_t armcpu_ppi_probe[6];
 static int gH109Chan;
 static volatile uint32_t gH109Ticks;
 static timer_call_t gH109TimerCall;
+// H117: h114-gic=0 keeps the H114 redistributor/ICC reads out of the A/B run.
+static volatile uint32_t gH114GicProbe = 1;
 // H110: h109-tick=0 keeps the timer_call off so the same kernel can be booted
 // with and without the interrupt heartbeat.
 static volatile uint32_t gH110TickEnabled = 1;
@@ -627,6 +629,21 @@ native_log_flush_hook (void)
   h103FlushNow ();
 }
 
+// H117: called from XNU's panic path before the machine-layer handler prints
+// and stops the machine. The marker goes into the message buffer first, so a
+// written log proves a panic even though the panic text is printed afterwards.
+extern "C" void
+native_panic_flush (void)
+{
+  if (gH103Probe == nullptr) {
+    return;
+  }
+  IOLog ("NATIVE_PANIC: flags=%x client=%u xfer=%u frames=%u\n",
+         native_boot_flags, native_legacy_client_calls,
+         native_legacy_transfer_calls, native_legacy_frame_count);
+  h103FlushNow ();
+}
+
 // The spawned threads never wake from IOSleep on this kernel. Run the slot
 // timer from the normal read paths only after fLock has been released; calling
 // it from ufsCommand's completion would deadlock on the non-recursive fLock.
@@ -663,27 +680,31 @@ h103SlotTick (void)
       __asm__ volatile ("mrs %0, daif" : "=r" (daif));
       __asm__ volatile ("mrs %0, icc_pmr_el1" : "=r" (pmr));
       __asm__ volatile ("mrs %0, icc_igrpen1_el1" : "=r" (grp1));
-      // H114: is the GIC signalling this CPU (HPPIR1) and where is the vector?
-      uint64_t el = 0, vbar = 0, h1 = 0, h0 = 0, rpr = 0;
-      __asm__ volatile ("mrs %0, CurrentEL" : "=r" (el));
-      __asm__ volatile ("mrs %0, vbar_el1" : "=r" (vbar));
-      __asm__ volatile ("mrs %0, icc_hppir1_el1" : "=r" (h1));
-      __asm__ volatile ("mrs %0, icc_hppir0_el1" : "=r" (h0));
-      __asm__ volatile ("mrs %0, icc_rpr_el1" : "=r" (rpr));
-      armcpu_probe_ppi27 ();
-      IOLog ("NATIVE_IRQ: timer=%llu ipi=%llu daif=%llx pmr=%llx grp1=%llx ctl=%llx tval=%llx el=%llu vbar=%llx h1=%llx h0=%llx rpr=%llx flags=%x tick=%u\n",
+      IOLog ("NATIVE_IRQ: timer=%llu ipi=%llu daif=%llx pmr=%llx grp1=%llx ctl=%llx tval=%llx flags=%x tick=%u\n",
              (unsigned long long) armcpu_timer_interrupts,
              (unsigned long long) armcpu_ipi_interrupts,
              (unsigned long long) (daif & 0x3ffULL),
              (unsigned long long) (pmr & 0xffULL),
              (unsigned long long) (grp1 & 1ULL),
              (unsigned long long) ctl, (unsigned long long) tval,
-             (unsigned long long) ((el >> 2) & 3ULL),
-             (unsigned long long) vbar,
-             (unsigned long long) (h1 & 0xffffffULL),
-             (unsigned long long) (h0 & 0xffffffULL),
-             (unsigned long long) (rpr & 0xffULL),
              native_boot_flags, gH109Ticks);
+      if (gH114GicProbe) {
+        // H114: is the GIC signalling this CPU (HPPIR1) and where is the vector?
+        uint64_t el = 0, vbar = 0, h1 = 0, h0 = 0, rpr = 0;
+        __asm__ volatile ("mrs %0, CurrentEL" : "=r" (el));
+        __asm__ volatile ("mrs %0, vbar_el1" : "=r" (vbar));
+        __asm__ volatile ("mrs %0, icc_hppir1_el1" : "=r" (h1));
+        __asm__ volatile ("mrs %0, icc_hppir0_el1" : "=r" (h0));
+        __asm__ volatile ("mrs %0, icc_rpr_el1" : "=r" (rpr));
+        armcpu_probe_ppi27 ();
+        IOLog ("NATIVE_IRQ2: el=%llu vbar=%llx h1=%llx h0=%llx rpr=%llx flags=%x\n",
+               (unsigned long long) ((el >> 2) & 3ULL),
+               (unsigned long long) vbar,
+               (unsigned long long) (h1 & 0xffffffULL),
+               (unsigned long long) (h0 & 0xffffffULL),
+               (unsigned long long) (rpr & 0xffULL),
+               native_boot_flags);
+      }
       IOLog ("NATIVE_GIC: typer=%llx isen=%llx igrp=%llx ipend=%llx ipri=%llx\n",
              (unsigned long long) armcpu_ppi_probe[0],
              (unsigned long long) armcpu_ppi_probe[1],
@@ -2913,6 +2934,9 @@ NativeUfsProbe::start (IOService *provider)
   uint32_t tickEnabled = 1;
   PE_parse_boot_argn ("h109-tick", &tickEnabled, sizeof tickEnabled);
   gH110TickEnabled = tickEnabled ? 1 : 0;
+  uint32_t gicProbe = 1;
+  PE_parse_boot_argn ("h114-gic", &gicProbe, sizeof gicProbe);
+  gH114GicProbe = gicProbe ? 1 : 0;
   if (!gH110TickEnabled) {
     IOLog ("NATIVE_TICK: timer disabled\n");
   } else {
