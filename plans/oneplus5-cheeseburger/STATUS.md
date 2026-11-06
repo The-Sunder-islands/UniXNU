@@ -5013,6 +5013,54 @@ Mac `~/h103/boot-H128.img`、仓库 `out/cheeseburger/boot/boot-H128.img`。
 应接近零，`winReq` 恢复数百/秒；若仍有超时，则问题在 `readBlocks` 的块大小或
 窗口设备本身，再按 H127k 的判读往下查。
 
+### H128 结果：存储路径修好，UI 仍不出现（2026-11-07）
+
+`h128-log-20261107-012700.txt`（560 KB，57–901 s）：
+
+| 指标 | H127k | **H128** |
+| --- | --- | --- |
+| `err 60` | 151 | **12** |
+| `executeRequest: request failed to start!` | 170 | **5** |
+| `NATIVE_UFS_LOCK` | 357 | **10** |
+| `disk4 / disk5: I/O timeout` | 62 / 105 | **4 / 1** |
+| `err 94` / panic | 7 / — | **0 / 0** |
+| 运行时长 | 538 s | **901 s** |
+| `NATIVE_UFS_ALIVE` 的 `winFlight` | 长期 1 | **72/75 为 0** |
+
+`NATIVE_PROC_DUMP`（74 行）与 `NATIVE_WAIT`（184 行）恢复输出，说明 dump 已经跑在
+心跳线程的上下文里。结论：**诊断代码离开存储路径后，存储不再是瓶颈**。
+
+#### 仍然不出现 UI 的直接原因
+
+- SpringBoard 每次 exec 后 **0.6–8 秒**就被 launchd 记为 corpse，共 13+ 次
+  （pid 26/27/87/88/92/93/96/97/113/125/130/172/190/219…），722 s 后 launchd 不再拉起；
+- 同期 powerd / liveactivitiesd / contextstored / sharingd / mobileactivation /
+  assistantd 也各崩 14–16 次，总计 131 次 corpse；
+- 全程 `IOMobileFramebuffer` 用户客户端一次未打开（`NATIVE_FRAME … client=0
+  xfer=0 frames=0`）。
+
+两个日志假象：
+
+- `NATIVE_IOKIT: op=open … ok=0` 的 `ok` 在 patch 里写死为 0，**不代表打开失败**；
+- match/open 日志各只记前 24 条且为全局计数，backboardd 后续查询不落盘。但 boot flag
+  位 512/1024 不受限制：`flags=af` 只有位 7（128 = backboardd 调过 matching），
+  **没有 512/1024**，说明 backboardd 的 matching 字典从未出现 `IOMobile*`。
+
+#### 残留毛刺是参数排序错误
+
+剩余 5 次 2 秒超时全部命中同一 LBA（`block=5b17b0`，333/335/337/542 s），
+`ticks≈38400000`（正好 2 秒）。`UFS_DATA_LOCK_TICKS` = 2 s，而
+`UFS_TIMEOUT_TICKS` = 5.2 s：命令还在合法执行期内，锁已经判死。
+H129 把数据锁上限改为 **6 s**（略大于 5.2 s）。
+
+#### H129 计划
+
+1. `UFS_DATA_LOCK_TICKS` 2 s → 6 s；
+2. `native_trace_process_exit()` 加入 `SpringBoard`，打印 `status/ns/code`
+   （信号 = `rv & 0x7f`）；
+3. IOKit trace 对 backboardd / SpringBoard 取消 24 条上限，并记录每次
+   `IOClass/IOProviderClass/IONameMatch` 与结果，直接回答"backboardd 找没找显示服务"。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
