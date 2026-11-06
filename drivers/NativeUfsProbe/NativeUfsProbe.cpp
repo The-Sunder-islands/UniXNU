@@ -155,6 +155,15 @@ extern "C" volatile uint64_t native_legacy_frame_stats[32][5];
 extern "C" volatile uint64_t armcpu_timer_interrupts;
 extern "C" volatile uint64_t armcpu_timer19_interrupts;
 extern "C" volatile uint64_t armcpu_timer27_interrupts;
+// H125b: late PPI 19 enable + storm/first-interrupt evidence.
+extern "C" void armcpu_enable_ppi19 (void);
+extern "C" volatile uint32_t armcpu_irq_first_id;
+extern "C" volatile uint32_t armcpu_irq_storm_id;
+extern "C" volatile uint64_t armcpu_irq_storm_count;
+extern "C" volatile uint32_t armcpu_ppi19_done;
+extern "C" volatile uint32_t armcpu_ppi19_isen_before;
+extern "C" volatile uint32_t armcpu_ppi19_isen_after;
+extern "C" volatile uint32_t armcpu_ppi19_pend;
 extern "C" volatile uint64_t armcpu_ipi_interrupts;
 // H114: ArmCpu export that reads the boot CPU's redistributor PPI 27 state.
 extern "C" void armcpu_probe_ppi27 (void);
@@ -690,7 +699,7 @@ h103SlotTick (void)
       __asm__ volatile ("mrs %0, daif" : "=r" (daif));
       __asm__ volatile ("mrs %0, icc_pmr_el1" : "=r" (pmr));
       __asm__ volatile ("mrs %0, icc_igrpen1_el1" : "=r" (grp1));
-      IOLog ("NATIVE_IRQ: timer=%llu ipi=%llu daif=%llx pmr=%llx grp1=%llx ctl=%llx tval=%llx t19=%llu t27=%llu flags=%x tick=%u\n",
+      IOLog ("NATIVE_IRQ: timer=%llu ipi=%llu daif=%llx pmr=%llx grp1=%llx ctl=%llx tval=%llx t19=%llu t27=%llu first=%llx storm=%llx sn=%llu flags=%x tick=%u\n",
              (unsigned long long) armcpu_timer_interrupts,
              (unsigned long long) armcpu_ipi_interrupts,
              (unsigned long long) (daif & 0x3ffULL),
@@ -699,6 +708,9 @@ h103SlotTick (void)
              (unsigned long long) ctl, (unsigned long long) tval,
              (unsigned long long) armcpu_timer19_interrupts,
              (unsigned long long) armcpu_timer27_interrupts,
+             (unsigned long long) armcpu_irq_first_id,
+             (unsigned long long) armcpu_irq_storm_id,
+             (unsigned long long) armcpu_irq_storm_count,
              native_boot_flags, gH109Ticks);
       if (gH114GicProbe) {
         IOLog ("NATIVE_GIC: typer=%llx isen=%llx igrp=%llx ipend=%llx ipri=%llx\n",
@@ -719,11 +731,10 @@ h103SlotTick (void)
                (unsigned long long) armcpu_ppi_probe[10],
                (unsigned long long) armcpu_ppi_probe[11],
                (unsigned long long) armcpu_ppi_probe[12]);
-        // H125: PPI 19 path and the single-security-state attempt.
-        // grp1927: IGROUPR0 after writing (1<<19)|(1<<27); isen19_off/on:
-        // ISENABLER0 around clearing/setting INTID 19; pend2: later ISPENDR0;
-        // dctl_ds: GICD_CTLR after trying to set DS(bit6); dgrp1: GICD_IGROUPR1.
-        IOLog ("NATIVE_GIC4: grp1927=%llx isen19_off=%llx isen19_on=%llx pend2=%llx dctl_ds=%llx dgrp1=%llx\n",
+        // H125b: read-only samples (no early writes any more).
+        // grp: IGROUPR0, isen: ISENABLER0, pend/pend2: ISPENDR0 samples,
+        // dctl: GICD_CTLR, dgrp1: GICD_IGROUPR1.
+        IOLog ("NATIVE_GIC4: grp=%llx isen=%llx pend=%llx pend2=%llx dctl=%llx dgrp1=%llx\n",
                (unsigned long long) armcpu_ppi_probe[13],
                (unsigned long long) armcpu_ppi_probe[14],
                (unsigned long long) armcpu_ppi_probe[15],
@@ -741,6 +752,16 @@ h103SlotTick (void)
     if (!forcedDone && gH103StartTicks &&
         mach_absolute_time () - gH103StartTicks >= 120 * 19200000ULL) {
       forcedDone = 1;
+      // H125b: only now turn on PPI 19, from this known-good context, and
+      // record what the redistributor reports. The storm guard in ArmCpu
+      // masks it again if it turns out to be a line with no consumer.
+      armcpu_enable_ppi19 ();
+      IOLog ("NATIVE_PPI19: done=%u isen_before=%x isen_after=%x pend=%x t19=%llu t27=%llu\n",
+             armcpu_ppi19_done,
+             armcpu_ppi19_isen_before, armcpu_ppi19_isen_after,
+             armcpu_ppi19_pend,
+             (unsigned long long) armcpu_timer19_interrupts,
+             (unsigned long long) armcpu_timer27_interrupts);
       IOLog ("NATIVE_TICK: forced dump at uptime 120 s flags=%x\n", native_boot_flags);
       native_proc_state_dump ();
       native_proc_wait_graph ();
