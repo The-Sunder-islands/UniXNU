@@ -3921,6 +3921,45 @@ Mac `~/h103/boot-H121.img`、仓库 `out/cheeseburger/boot/boot-H121.img`。
 - DS=0 且 `igrp2` 仍为 0 → IGROUPR0 写不进去（frame 安全态问题）；
 - `waker` 的 ProcessorSleep/ChildrenAsleep 未清零 → redistributor 没唤醒。
 
+## H122 验证 GIC 写入与 PPI 27 分组（2026-11-06）
+
+H121 正常启动，读数：
+
+```text
+NATIVE_GIC : typer=1 isen=80000ff igrp=0 ipend=40280000 ipri=80
+NATIVE_GIC2: dctl=12 gtyper=7b04f3 waker=0 grp0=0 igrp2=0
+```
+
+`dctl=0x12` → EnableGrp1NS=1、ARE_NS=1、**DS=0（双安全态）**；`waker=0`
+说明 redistributor 已唤醒；`igrp2=0` 说明写了两次 `IGROUPR0=0xffffffff`
+都不生效。结合 `ipend=0x40280000`（PPI 27 与 30 都 pending）和
+`timer=0/ipi=0`，指向"PPI 已被安全世界划为 Group 0，非安全态改不了"。
+
+H122 加三组写-读回做定性：
+
+- `ICENABLER0` 清 bit27 → 读回（`isen_off`）；
+- `ISENABLER0` 置 bit27 → 读回（`isen_on`）；
+- `IGROUPR0` 只写 `1<<27` → 读回（`grp27`）。
+
+```text
+H122 kernel:  eb2be3661dab038855d895293a5a4c703456f3845526a97ed3a30c24cf645e1e
+H122 payload: 6be3188d705248841b7b8c712cee78ab05ed9b39eb96c42fe864814ca898f6e0
+H122 boot:    699fae5d46fa3c592ed1e1e27805c3b27f92899987e455f4cf1e6f18f77534d0
+```
+
+子模块 `drivers/ArmCpu` 提交 `3ec9409`（分支 `h118-gic-cache`，已推送）。
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H122.img`（已核对）、
+Mac `~/h103/boot-H122.img`、仓库 `out/cheeseburger/boot/boot-H122.img`。
+
+判读：
+
+- `isen_off` bit27=0 且 `isen_on` bit27=1 → MMIO 写正常；此时
+  `grp27=0` 即证明 PPI 27 被安全世界占为 Group 0，XNU 侧无解，需在
+  固件/安全世界把 PPI 27/30 划成 Group 1 NS（下一步查 `edk2-msm8998` 的
+  GIC 初始化与 TZ 的初始分组）；
+- 若连 `ISENABLER0` 也写不动 → 我们映射/选错了 redistributor 帧，需要
+  重新核对 DT 描述与 stride。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
