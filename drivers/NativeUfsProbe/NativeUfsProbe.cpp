@@ -159,6 +159,7 @@ extern "C" volatile uint64_t armcpu_timer19_interrupts;
 extern "C" volatile uint64_t armcpu_timer27_interrupts;
 extern "C" volatile uint32_t armcpu_irq_storm_id;
 extern "C" volatile uint64_t armcpu_irq_storm_count;
+extern "C" volatile uint32_t armcpu_timer_dispatch;
 extern "C" volatile uint64_t armcpu_ipi_interrupts;
 // H114: ArmCpu export that reads the boot CPU's redistributor PPI 27 state.
 extern "C" void armcpu_probe_ppi27 (void);
@@ -736,6 +737,11 @@ h103SlotTick (void)
     if (!forcedDone && gH103StartTicks &&
         mach_absolute_time () - gH103StartTicks >= 120 * 19200000ULL) {
       forcedDone = 1;
+      // H127d: from here on PPI 19 drives rtclock_intr and re-arms CNTV.
+      armcpu_timer_dispatch = 1;
+      IOLog ("NATIVE_TIMER_DISPATCH: on t19=%llu t27=%llu\n",
+             (unsigned long long) armcpu_timer19_interrupts,
+             (unsigned long long) armcpu_timer27_interrupts);
       IOLog ("NATIVE_TICK: forced dump at uptime 120 s flags=%x\n", native_boot_flags);
       native_proc_state_dump ();
       native_proc_wait_graph ();
