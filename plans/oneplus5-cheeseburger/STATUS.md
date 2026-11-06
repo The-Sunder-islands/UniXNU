@@ -4655,6 +4655,44 @@ H127f boot:    59b4a4fbe70b3cad407a8e3afb847348f7fd3a7c19c3279c5cf6f9b3e3afbcec
 开始增长，说明 XNU 的 timer-deadline 路径接管成功；若中断风暴/系统挂起，说明
 `rtclock_intr` 在该晚期路径仍不安全，应回到 H127e 的 rearm-only 行为。
 
+### H127g：PPI 19 一相到底 + 自纠正重装（2026-11-06）
+
+H127e/H127f 上机后确认了两点：
+
+- H127e 截图里 `dispatch=1 rearm=16087` 与“10 ms 重装 = 100 Hz”吻合（16087 ≈ 160 s × 100），
+  说明**手动重装确实能把风暴压下去**，只是没有驱动 XNU 时钟（`tick=0`）；
+- H127f 的两次卡屏都是 `dispatch=0 clock19=0`：120 s 切换标志写在
+  `h103SlotTick()`（UFS 读路径）里，启动一旦在 dyld 停滞，回调不再发生，切换永远不触发。
+  所以“按墙钟 120 s 切换”的设计不成立。
+
+H127g 去掉延迟门控与 UFS 依赖，PPI 19 从**第一个中断**开始就：
+
+1. `rtclock_intr(0)`；
+2. 读 `CNTV_CTL`，若 ISTATUS 仍为 1（XNU 没武装下一个 deadline），写
+   `CNTV_TVAL = 192000`（10 ms）并累加 `armcpu_timer19_forced_count`；
+3. 27 保持原路径；不新增任何 GIC MMIO 读写。
+
+`NATIVE_IRQ` 用 `clock19=`/`forced=` 取代 `dispatch=`/`rearm=`：
+`forced` 很小说明 XNU 自己武装；按 ~100/s 增长说明走的是兜底 tick。
+
+```text
+H127g kernel:  59519748c1e79dbded8ba6d39695f5a49a361e92342549fe210c50ee997ed881
+H127g payload: 83b02325548dd7d610eec23f4b1af2046b6add0b0eb8d3897ff3d37d96c03703
+H127g boot:    8325ad4197b4d70a4fd7bf3d4788fafd981e79494a50822c757bddb80a5bb594
+```
+
+firmware 仍用可启动的 `fw-H103ea`。子模块 `drivers/ArmCpu` 提交 `3933470`，父仓库
+`d103962`。镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H127g.img`（已核对）、
+Mac `~/h103/boot-H127g.img`、仓库 `out/cheeseburger/boot/boot-H127g.img`。
+
+判读：
+
+- 启动速度回到 H124 水平、`tick` 开始增长 → 时钟接管成功，接着看 200 s 停点是否消失；
+- `forced` 按 ~100/s 增长但 `tick` 仍 0 → CNTV 被兜底重装，但 XNU 的 timer_call 没被驱动，
+  需要查 `rtclock_intr` 的上下文/参数；
+- 早期挂死 → `rtclock_intr` 在第一个中断就调用不安全，退回 H127e 行为（只重装）并改为
+  由内核线程轮询。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
