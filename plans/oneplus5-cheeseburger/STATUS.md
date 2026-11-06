@@ -4624,7 +4624,7 @@ H127e boot:    8cdf3648bdb493b679f6ac244fd38859e527fc2b6b4f5dd63b13e4b47fc8ba5e
 ```
 
 firmware 仍用可启动的 `fw-H103ea`。子模块 `drivers/ArmCpu` 提交 `0d06524`，父仓库
-H127e 代码提交见后续 commit；镜像 Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H127e.img`
+代码提交 `38b1b38`、文档提交 `32e6524`（均已推送）；镜像 Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H127e.img`
 （已核对）、Mac `~/h103/boot-H127e.img`、仓库 `out/cheeseburger/boot/boot-H127e.img`。
 
 ## 更新规则
