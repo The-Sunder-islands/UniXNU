@@ -4837,6 +4837,44 @@ Mac `~/h103/boot-H127i.img`、仓库 `out/cheeseburger/boot/boot-H127i.img`。
   下一步把 flush 改成真正的后台线程 + 更小窗口；
 - 超时照旧 → 是 UFS 窗口设备在高并发下的锁/队列问题（`readWindowBulk`），单独查。
 
+### H127i 结果：日志频率就是 I/O 超时的放大器（2026-11-06）
+
+日志 `h127i-log-20261106-234932.txt`（163 KB，`--slots 120` 合并）：
+
+| 指标 | H127h（`h103-log-secs=5`） | H127i（`h103-log-secs=30`） |
+| --- | --- | --- |
+| `disk4: I/O timeout` | 93–96 次 | **2 次** |
+| `err 60`（ETIMEDOUT） | 93+ | **2** |
+| `backboardd` 0xa 崩溃 | 多次 | 0（本次还没 exec） |
+
+即：**之前 SystemOS 读超时是日志 flush 频率过高、在窗口路径上抢锁造成的**；把 flush
+降到 30 秒一次后，存储错误回落到可忽略水平。
+
+本次启动的定时器依旧完全正常（只认带 `clock19=` 的行）：
+
+```text
+[156.4] NATIVE_IRQ: ... ctl=1 tval=5c33  t19=14403 t27=0 clock19=14403 forced=0 ... flags=0
+[217.0] NATIVE_IRQ: ... ctl=1 tval=15d2e t19=22266 t27=0 clock19=22266 forced=0 ... flags=b
+[523.9] NATIVE_IRQ: ... ctl=1 tval=3765  t19=24153 t27=0 clock19=24153 forced=0 ... flags=2b
+```
+
+`clock19 == t19`、`forced=0`、`ctl=1`，速率约 26/s；`uptime` 到 **820 s** 仍在运行，
+`SpringBoard`（pid 33）有 2 条线程可运行；期间 SpringBoard 崩过几次（518/522 s 的
+`Corpse allowed`）并被 launchd 重新拉起。`flags=0x2b` 表示 **SpringBoard 已 exec、
+backboardd 尚未 exec**（缺 `0x4`）。
+
+**日志内容的一个坑**：`slots_written: 4`，但每个槽是 msgbuf 的尾部快照，开机第一次
+flush 会把环形缓冲区里残留的**上一次启动文本**一起拷入，所以同一份合并日志会出现两种
+`NATIVE_IRQ` 格式（带 `clock19=` 的是本次，736–775 s 那批不带的是旧启动）。
+分析时只认带 `clock19=` 的行；彻底解决需要写槽时带 boot id（工具/写入侧改进）。
+
+结论与后续：
+
+- **把 `h103-log-secs=30` 定为新的日志基线**（保留诊断能力，I/O 干扰降 6 倍）；
+- 继续观察 `boot-H127i.img`：`err 60` 是否保持个位数、backboardd 是否 exec
+  （`flags` 出现 `0x4`）、若又崩是否仍为 `err 60/94`；
+- 日志不再是瓶颈后，主线回到显示：backboardd 为什么不查 `IOMobileFramebuffer`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
