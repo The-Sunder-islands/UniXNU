@@ -5259,6 +5259,55 @@ Mac `~/h103/boot-H132.img`、仓库 `out/cheeseburger/boot/boot-H132.img`。
 判读：`flags=60af` 确认 union；`NATIVE_TRAP … sub=0x…` 的镜像归属决定下一步
 （SpringBoard 自身断言 / libdispatch / XPC / dyld）。
 
+### H132 结果：SpringBoard 固定在同一个 PC 上 BRK（2026-11-07）
+
+`h132-log-20261107-025234.txt`。union 的硬证据在每条 IRQ 里：
+
+```text
+NATIVE_IRQ: … flags=60af      ← 0x2000 挂载成功 + 0x4000 文件可见
+NATIVE_FRAME: event=1 flags=600f client=0 xfer=0 frames=0
+```
+
+`NATIVE_TRAP` 是 H132 独有符号，29 条全部属于本次启动，按地址只有两种：
+
+```text
+NATIVE_TRAP: pid=… comm=SpringBoard     exc=6 code=0x1 sub=0x1aa1b32ec sig=5  （14 次同一地址）
+NATIVE_TRAP: pid=… comm=liveactivitiesd exc=6 code=0x1 sub=0x1cc6ca4f8 sig=5  （15 次同一地址）
+```
+
+`exc=6` = `EXC_BREAKPOINT`，`code=0x1` = `EXC_ARM_BREAKPOINT`，而
+`osfmk/arm64/sleh.c:1241` 用 `get_saved_state_pc(state)` 填 `codes[1]`，
+所以 `sub` 就是触发 PC。每次运行都落在同一地址 → 确定性断言（`brk #1`），
+不是随机内存错误。日志里同时间戳的 `libobjc-trampolines` 条目是上一轮残留：
+H132 的干净窗口里 ObjC 已正常。
+
+### H133：报出异常地址所属镜像（2026-11-07）
+
+`patches/xnu/zzzzzzzzzzzzzzzzz-h133-trap-image.patch`：
+
+- `handle_ux_exception()` 在 `exception == EXC_BREAKPOINT` 时调用
+  `native_report_trap_image(p, subcode)`；
+- 新函数从 `task_get_all_image_info_addr()` 取 dyld 的
+  `dyld_all_image_infos`（前三个字段 version/count/infoArray 自 iOS 4 稳定），
+  `copyin` 遍历每项 `{imageLoadAddress, imageFilePath, modDate}`，
+  取 `loadAddress <= addr` 中最大者，打印：
+
+```text
+NATIVE_TRAP_IMAGE: pid=… comm=… addr=0x… base=0x… off=0x… <path>
+```
+
+失败分支分别打印 `no-dyld-info` / `no-image-array` / `no-match`，纯只读，
+不改变任何行为。拿到 `<path>`+`off` 后即可定位到框架与函数。
+
+```text
+H133 kernel:  f26bd9b8f4ac83adbcef47729ae278cba192972746bbdaf9360b259bd855e421
+H133 payload: 0f18c022e4d9876e889b28d6ee514ea42557ef9630c0a9aa4bbb3d64761ffae2
+H133 boot:    44b356bf25e8f15f457ec9b993f857c82c51601e7646ef4e6380e4566b0ceebb
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H133.img`（已核对）、
+Mac `~/h103/boot-H133.img`、仓库 `out/cheeseburger/boot/boot-H133.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

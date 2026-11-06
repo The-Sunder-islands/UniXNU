@@ -1,0 +1,87 @@
+diff --git a/bsd/uxkern/ux_exception.c b/bsd/uxkern/ux_exception.c
+--- a/bsd/uxkern/ux_exception.c
++++ b/bsd/uxkern/ux_exception.c
+@@ -44,6 +44,9 @@
+ #include <sys/vmparam.h>        /* MAXSSIZ */
+ 
+ #include <sys/ux_exception.h>
++#include <kern/task.h>
++#include <libkern/libkern.h>
++#include <libkern/copyio.h>
+ 
+ /*
+  * Translate Mach exceptions to UNIX signals.
+@@ -108,6 +111,63 @@
+ }
+ 
+ /*
++ * H133: name the image that contains an exception address.  dyld publishes
++ * the per-task list in dyld_all_image_infos; the first three fields
++ * (version, count, infoArray) have been stable since iOS 4, and each
++ * dyld_image_info starts with {imageLoadAddress, imageFilePath, modDate}.
++ * This is read-only: a failure only prints why.
++ */
++static void
++native_report_trap_image(proc_t p, uint64_t addr)
++{
++	task_t task = proc_task(p);
++	mach_vm_address_t infos = task ? (mach_vm_address_t)task_get_all_image_info_addr(task) : 0;
++	uint32_t head[2] = { 0, 0 };
++	user_addr_t array = 0;
++	uint64_t best = 0, best_path = 0;
++	uint32_t count = 0, i = 0;
++
++	if (!infos || copyin((user_addr_t)infos, head, sizeof(head)) != 0 || !head[1]) {
++		printf("NATIVE_TRAP_IMAGE: pid=%d comm=%s addr=0x%llx no-dyld-info\n",
++		    proc_getpid(p), p->p_comm, (unsigned long long)addr);
++		return;
++	}
++	if (copyin((user_addr_t)infos + 2 * sizeof(user_addr_t), &array, sizeof(array)) != 0 ||
++	    !array) {
++		printf("NATIVE_TRAP_IMAGE: pid=%d comm=%s addr=0x%llx no-image-array\n",
++		    proc_getpid(p), p->p_comm, (unsigned long long)addr);
++		return;
++	}
++	count = head[1];
++	if (count > 2048) {
++		count = 2048;
++	}
++	for (i = 0; i < count; i++) {
++		user_addr_t row[3] = { 0, 0, 0 };
++		if (copyin(array + (user_addr_t)i * sizeof(row), row, sizeof(row)) != 0) {
++			continue;
++		}
++		if (row[0] && row[0] <= addr && row[0] > best) {
++			best = row[0];
++			best_path = row[1];
++		}
++	}
++	if (best && best_path) {
++		char path[160];
++		size_t done = 0;
++		if (copyinstr(best_path, path, sizeof(path), &done) != 0) {
++			path[0] = 0;
++		}
++		printf("NATIVE_TRAP_IMAGE: pid=%d comm=%s addr=0x%llx base=0x%llx off=0x%llx %s\n",
++		    proc_getpid(p), p->p_comm, (unsigned long long)addr,
++		    (unsigned long long)best, (unsigned long long)(addr - best), path);
++	} else {
++		printf("NATIVE_TRAP_IMAGE: pid=%d comm=%s addr=0x%llx no-match count=%u\n",
++		    proc_getpid(p), p->p_comm, (unsigned long long)addr, count);
++	}
++}
++
++/*
+  * Sends the corresponding UNIX signal to a thread that has triggered a Mach exception.
+  */
+ kern_return_t
+@@ -180,6 +240,9 @@
+ 		printf("NATIVE_TRAP: pid=%d comm=%s exc=%d code=0x%llx sub=0x%llx sig=%d\n",
+ 		    proc_getpid(p), p->p_comm, exception,
+ 		    (unsigned long long)code, (unsigned long long)subcode, ux_signal);
++		if (exception == EXC_BREAKPOINT) {
++			native_report_trap_image(p, (uint64_t)subcode);
++		}
+ 		ut->uu_exception = exception;
+ 		//ut->uu_code = code; // filled in by threadsignal
+ 		ut->uu_subcode = subcode;
