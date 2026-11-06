@@ -3732,6 +3732,44 @@ Mac `~/h103/boot-H116.img`、仓库 `out/cheeseburger/boot/boot-H116.img`。
 - 若在 `native_log_flush_hook` 里加锁失败，会出现 `NATIVE_UFS_LOCK: logWrite`
   或 `write_errors` 增长，同样说明写路径有问题而不是没触发。
 
+## H117 panic 落盘与 GIC 采样 A/B（2026-11-06）
+
+H116 的 `boot_id` 仍然不变。检查过符号链：`native_log_flush_hook` 已定义在
+内核里（`S fffffff0079b1108`），显示侧引用正常，所以不是弱绑定成 NULL。
+剩下两种可能：钩子没被调用，或调用后写盘失败。
+
+H117 加两件事：
+
+1. **panic 路径落盘**
+   新增 `patches/xnu/zzzzzzzzzzzz-h103-panic-flush.patch`：在
+   `panic_trap_to_debugger()` 入口调用 `native_panic_flush()`；后者先打印
+   `NATIVE_PANIC: flags=.. client=.. xfer=.. frames=..`，再做一次强制 flush。
+   panic 文本在 `ml_panic_trap_to_debugger()` 里才打印，所以这份记录至少能
+   证明"发生过 panic"以及 panic 前最后的现场。
+2. **GIC 采样开关**
+   `h114-gic=0/1`（默认 1）：关掉 H114 的 redistributor/ICC 读取。用于验证
+   "H113→H114 的改动是否导致崩溃"：同一颗内核两次启动即可对比。
+
+```text
+H117 kernel:       116d1581bb311e313e5ad87465d2544947724eb7ab949b35a6c3e35068b96b99
+H117 payload:      1030fd0b973ae873468a94bb7cc7e03970587e65a5d69402fdc00fe762905505
+H117 boot:         802a96fcb6a474a92a325d6bc22bbaa6c44483d608dfc40d8ec6af179ad16da0
+H117-nogic payload: 0d9ee465e4b7fe656f9cd6ebb277d9160b29d1a677b22a8c7a5ff2cccd318bdf
+H117-nogic boot:    22b5b806ebf8f6826e0f0fe42773b5f980762defe5114b5ee117ed5d9ed08042
+```
+
+两张镜像只差 `h114-gic=1/0`。镜像在 Windows
+`D:\Users\ls\Documents\OnePlus5_ios\`、Mac `~/h103/`、仓库
+`out/cheeseburger/boot/`。
+
+判读：
+
+- 带 GIC 采样黑屏、`nogic` 不黑 → 确认是 H114 的读取导致；
+- 两者都黑 → 与 H114 无关，看下一项；
+- 日志出现 `NATIVE_PANIC:`（或 `boot_id` 更新）→ 确实 panic，且拿到了
+  panic 前的现场；没有 `NATIVE_PANIC` 且 `boot_id` 仍不变 → 连 panic 钩子
+  都没机会执行，问题在写盘或更早的路径。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
