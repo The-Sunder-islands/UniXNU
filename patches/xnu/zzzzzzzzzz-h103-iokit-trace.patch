@@ -1,12 +1,15 @@
 diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
 --- a/iokit/Kernel/IOUserClient.cpp
 +++ b/iokit/Kernel/IOUserClient.cpp
-@@ -2694,6 +2694,39 @@ is_io_service_match_property_table_bin(
+@@ -2694,6 +2694,71 @@ is_io_service_match_property_table_bin(
  	return internal_io_service_match_property_table(service, matching, matchingCnt, matches);
  }
  
 +extern "C" void proc_selfname(char *, int);
 +extern "C" volatile uint32_t native_boot_flags;
++static unsigned native_iokit_match_logs;
++static unsigned native_iokit_open_logs;
++
 +static bool
 +native_match_name(const char *s, const char *needle)
 +{
@@ -18,30 +21,67 @@ diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
 +	}
 +	return false;
 +}
++
++/* H124: log the first calls of every IOKit entry point, not only backboardd's
++ * successful matches. The H103 trace only recorded backboardd's result in
++ * native_boot_flags, so "backboardd never asked" and "the call never reached
++ * the kernel" (bad master port, sandbox denial) were indistinguishable. */
++static void
++native_iokit_log(const char *op, const char *cls, const char *detail, int ok)
++{
++	if (strcmp(op, "match") == 0) {
++		if (native_iokit_match_logs++ >= 24) return;
++	} else if (native_iokit_open_logs++ >= 24) {
++		return;
++	}
++	char comm[17] = {};
++	proc_selfname(comm, sizeof(comm));
++	IOLog("NATIVE_IOKIT: op=%s comm=%s cls=%s d=%s ok=%d flags=%x\n",
++	    op, comm, cls ? cls : "-", detail ? detail : "-", ok, native_boot_flags);
++}
++
++static const char *
++native_dict_string(OSDictionary *dict, const char *key)
++{
++	OSString *s = OSDynamicCast(OSString, dict->getObject(key));
++	return s ? s->getCStringNoCopy() : NULL;
++}
++
 +static void
 +native_match_trace(OSDictionary *dict, bool success)
 +{
-+	char name[17] = {};
-+	proc_selfname(name, sizeof(name));
-+	if (strcmp(name, "backboardd") != 0) return;
-+	native_boot_flags |= 128;
++	char comm[17] = {};
++	proc_selfname(comm, sizeof(comm));
 +	bool mobile = false;
 +	const char *keys[] = { "IOClass", "IOProviderClass", "IONameMatch" };
 +	for (unsigned k = 0; k < sizeof(keys) / sizeof(keys[0]); ++k) {
-+		OSString *s = OSDynamicCast(OSString, dict->getObject(keys[k]));
-+		if (s && native_match_name(s->getCStringNoCopy(), "IOMobile")) mobile = true;
++		const char *s = native_dict_string(dict, keys[k]);
++		if (s && native_match_name(s, "IOMobile")) mobile = true;
 +	}
-+	if (mobile) {
-+		native_boot_flags &= ~(512U | 1024U);
-+		native_boot_flags |= success ? 512U : 1024U;
-+		/* H115: the first successful display match is a flush trigger. */
-+		if (success) native_boot_flags |= 0x1000U;
++	if (strcmp(comm, "backboardd") == 0) {
++		native_boot_flags |= 128;
++		if (mobile) {
++			native_boot_flags &= ~(512U | 1024U);
++			native_boot_flags |= success ? 512U : 1024U;
++			/* H115: the first successful display match is a flush trigger. */
++			if (success) native_boot_flags |= 0x1000U;
++		}
 +	}
++	native_iokit_log("match", native_dict_string(dict, "IOClass"),
++	    native_dict_string(dict, "IOProviderClass"), success ? 1 : 0);
 +}
  static kern_return_t
  internal_io_service_get_matching_services(
  	mach_port_t main_port,
-@@ -2715,6 +2746,7 @@ internal_io_service_get_matching_services(
+@@ -2705,6 +2705,7 @@ internal_io_service_get_matching_services(
+ 	OSDictionary *      dict;
+ 
+ 	if (main_port != main_device_port) {
++		native_iokit_log("match", NULL, "badmaster", 0);
+ 		return kIOReturnNotPrivileged;
+ 	}
+ 
+@@ -2715,6 +2716,7 @@ internal_io_service_get_matching_services(
  	if ((dict = OSDynamicCast( OSDictionary, obj))) {
  		IOTaskRegistryCompatibilityMatching(current_task(), dict);
  		*existing = IOUserIterator::withIterator(IOService::getMatchingServices( dict ));
@@ -49,7 +89,15 @@ diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
  		kr = kIOReturnSuccess;
  	} else {
  		kr = kIOReturnBadArgument;
-@@ -2798,6 +2830,7 @@ internal_io_service_get_matching_service(
+@@ -2787,6 +2789,7 @@ internal_io_service_get_matching_service(
+ 	OSDictionary *      dict;
+ 
+ 	if (main_port != main_device_port) {
++		native_iokit_log("match", NULL, "badmaster", 0);
+ 		return kIOReturnNotPrivileged;
+ 	}
+ 
+@@ -2798,6 +2801,7 @@ internal_io_service_get_matching_service(
  	if ((dict = OSDynamicCast( OSDictionary, obj))) {
  		IOTaskRegistryCompatibilityMatching(current_task(), dict);
  		*service = IOService::copyMatchingService( dict );
@@ -57,3 +105,21 @@ diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
  		kr = *service ? kIOReturnSuccess : kIOReturnNotFound;
  	} else {
  		kr = kIOReturnBadArgument;
+@@ -4343,7 +4347,10 @@ is_io_service_open_extended(
+ 	bool           disallowAccess = false;
+ 
+ 	CHECK( IOService, _service, service );
+ 
++	const char *native_cls = service->getMetaClass()->getClassName();
++	native_iokit_log("open", native_cls, NULL, 0);
++
+ 	if (!owningTask) {
+ 		return kIOReturnBadArgument;
+ 	}
+@@ -4356,5 +4363,6 @@ is_io_service_open_extended(
+ #if CONFIG_MACF
+ 	if (!native_sandbox_grant(service) && mac_iokit_check_open_service(kauth_cred_get(), service, connect_type) != 0) {
++		native_iokit_log("deny", native_cls, "macf", 0);
+ 		return kIOReturnNotPermitted;
+ 	}
+ #endif

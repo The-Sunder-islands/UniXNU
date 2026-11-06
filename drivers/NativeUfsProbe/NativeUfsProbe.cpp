@@ -125,6 +125,10 @@ extern "C" int native_legacy_test_pattern(void);
 // display-side thread states. The helper lives in the kernel because the
 // driver's public headers keep struct task/thread incomplete.
 extern "C" void native_proc_state_dump(void);
+// H124: the full per-process wait graph is only printed at the later stages;
+// the +2 s snapshot proved the ipc_mqueue_full block there is a startup
+// transient, so the extra ~70 lines are not worth the console time early on.
+extern "C" void native_proc_wait_graph(void);
 
 // H108: independent heartbeat. ios-sweet's log thread sleeps on tsleep, not
 // IOSleep; this port never woke from IOSleep, so this thread first proves
@@ -224,6 +228,9 @@ h105DumpTick (void)
          (unsigned long long) (elapsed / 19200),
          (native_boot_flags & 4) ? "" : " fallback");
   native_proc_state_dump ();
+  if (stage >= 2) {
+    native_proc_wait_graph ();
+  }
   return true;
 }
 
@@ -721,6 +728,7 @@ h103SlotTick (void)
       forcedDone = 1;
       IOLog ("NATIVE_TICK: forced dump at uptime 120 s flags=%x\n", native_boot_flags);
       native_proc_state_dump ();
+      native_proc_wait_graph ();
       if (gH103SlotMode) {
         h103FlushNow ();
       }
@@ -1394,8 +1402,17 @@ ufsSubmit (UfsQueue *q, unsigned direction, unsigned bytes,
     // H105: dump before the draw (a display open can block it), and stop
     // drawing once backboardd has exec'd, as H104j intended for the heartbeat.
     h105DumpTick ();
-    if (!(native_boot_flags & 4)) {
-      native_legacy_test_pattern ();
+    {
+      // H124: repaint whenever a gate bit changes instead of freezing the
+      // panel at its pre-backboardd colour. The old "stop drawing once
+      // backboardd exec'd" left the 2x2 green even after the white gate was
+      // reached, because the heartbeat thread never wakes without a timer.
+      static uint32_t paintedFlags;
+      uint32_t gate = native_boot_flags & 0xfff;
+      if (!(native_boot_flags & 4) || gate != paintedFlags) {
+        paintedFlags = gate;
+        native_legacy_test_pattern ();
+      }
     }
     if (!gH103Quiet) {
       IOLog ("NATIVE_UFS_PROGRESS: cmds=%llu last=%llx/%llu loops=%llu ticks=%llu "

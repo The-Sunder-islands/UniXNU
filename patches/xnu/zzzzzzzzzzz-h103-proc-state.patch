@@ -2,7 +2,7 @@ diff --git a/osfmk/kern/task.c b/osfmk/kern/task.c
 index 5dcf00e..3586f03 100644
 --- a/osfmk/kern/task.c
 +++ b/osfmk/kern/task.c
-@@ -10285,3 +10285,213 @@ task_best_name(task_t task, char *buf, size_t size)
+@@ -10285,3 +10285,159 @@ task_best_name(task_t task, char *buf, size_t size)
  	char *name = proc_best_name(task_get_proc_raw(task));
  	strlcpy(buf, name, size);
  }
@@ -17,60 +17,6 @@ index 5dcf00e..3586f03 100644
 +extern int ipc_mqueue_full;
 +typedef int (*native_proc_iterate_fn_t)(struct proc *, void *);
 +extern void proc_iterate(unsigned int, native_proc_iterate_fn_t, void *, native_proc_iterate_fn_t, void *);
-+
-+/* H108: one line per process, so the receiver of a full port queue shows up. */
-+struct native_proc_row {
-+	int pid;
-+	char comm[17];
-+	unsigned threads;
-+	unsigned runnable;
-+};
-+static struct native_proc_row native_proc_rows[160];
-+static unsigned native_proc_row_count;
-+
-+static int
-+native_proc_row_collect(struct proc *p, void *arg)
-+{
-+	unsigned n = native_proc_row_count;
-+	if (n >= sizeof(native_proc_rows) / sizeof(native_proc_rows[0])) {
-+		return 0;
-+	}
-+	struct task *t = proc_task(p);
-+	unsigned threads = 0, runnable = 0;
-+	if (t && task_lock_try(t)) {
-+		threads = t->thread_count;
-+		thread_t th;
-+		queue_iterate(&t->threads, th, thread_t, task_threads) {
-+			if ((th->state & (TH_WAIT | TH_UNINT)) == 0) {
-+				runnable++;
-+			}
-+		}
-+		task_unlock(t);
-+	}
-+	native_proc_rows[n].pid = proc_getpid(p);
-+	proc_name(native_proc_rows[n].pid, native_proc_rows[n].comm,
-+	    sizeof(native_proc_rows[n].comm));
-+	native_proc_rows[n].threads = threads;
-+	native_proc_rows[n].runnable = runnable;
-+	native_proc_row_count = n + 1;
-+	(void)arg;
-+	return 0;
-+}
-+
-+static void
-+native_proc_summary(void)
-+{
-+	native_proc_row_count = 0;
-+	/* H109: PROC_NOWAITTRANS (1<<2). proc_iterate() otherwise calls
-+	 * proc_transwait(p, 0), waiting forever for an exec transition; from the
-+	 * UFS read path that deadlocks against the exec that needs the read. */
-+	proc_iterate(1U | 4U, native_proc_row_collect, NULL, NULL, NULL);
-+	for (unsigned i = 0; i < native_proc_row_count; i++) {
-+		printf("NATIVE_PROC_SUM: pid=%d comm=%s threads=%u runnable=%u\n",
-+		    native_proc_rows[i].pid, native_proc_rows[i].comm,
-+		    native_proc_rows[i].threads, native_proc_rows[i].runnable);
-+	}
-+}
 +
 +/* H123: one line per process with the wait state of its main (lowest tid)
 + * thread, so the receiver of a full port queue shows up in the stall snapshot. */
@@ -136,7 +82,9 @@ index 5dcf00e..3586f03 100644
 +	return 0;
 +}
 +
-+static void
++/* H124: exported so the UFS driver can print it only at the later stages;
++ * the +2 s snapshot already proved the send-block there is transient. */
++void
 +native_proc_wait_graph(void)
 +{
 +	native_wait_row_count = 0;
@@ -212,7 +160,5 @@ index 5dcf00e..3586f03 100644
 +		}
 +		proc_rele(p);
 +	}
-+	native_proc_summary();
-+	native_proc_wait_graph();
 +	printf("NATIVE_PROC_DUMP: end\n");
 +}
