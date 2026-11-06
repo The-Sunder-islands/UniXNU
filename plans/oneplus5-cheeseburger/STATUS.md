@@ -4218,6 +4218,58 @@ args 与 H124 相同（不含 `armcpu-spi-ipi`，与 H125spi 互不影响）。
 - `first=..` 是这台机器上第一次真正取到的 INTID，可作为"中断到底有没有进来"的
   第一手证据。
 
+## H125b 废弃与 H125spi2（2026-11-06）
+
+**H125b 废弃**：该镜像连续三次停在同一位置，屏幕最后是成片的
+
+```text
+dyld[1]: 0x1D725C000->0x1D729FFFF init=5, max=5 __TEXT_STUBS
+dyld[1]: ... __TEXT / __DATA_CONST / __DATA / __LINKEDIT ...
+```
+
+这段输出**不是错误**：`patches/xnu/offline-owner-systemos-mount.patch` 会给 launchd
+注入 `DYLD_PRINT_SEGMENTS=1` / `DYLD_PRINT_LIBRARIES=1` /
+`DYLD_PRINT_TO_FILE=/dev/console`，dyld 因此把共享缓存的每个 region 权限打到
+console；平时被后续 `NATIVE_*` 顶掉，挂住时才留在屏幕上。
+
+同一时间 `boot-H124.img` 正常启动，所以**设备与 Data/preboot 状态没问题**，问题在
+H125b 内核。H125b 早期路径与 H124 的差异只有：`enableGic()` 里新增的 6 次 MMIO
+只读（`IGROUPR0/ISENABLER0/ISPENDR0×2/GICD_CTLR/GICD_IGROUPR1`）、风暴保护、
+以及 120 s 才调用的 `armcpu_enable_ppi19()`（卡点在 ~40 s，未执行到）。H118 已
+证明"在别的上下文读 GIC 寄存器会挂"，因此后续任何 PPI 19 实验只保留**一条**
+最小读，不再一次加一整套。**不再使用 boot-H125b.img。**
+
+**H125spi 结论：不确定，不能当否定**。`H125spi-log-20261106-163311.txt` 里
+
+```text
+[195.06] NATIVE_IRQ: timer=0 ipi=0 ... ipend=40280000
+[200.27] NATIVE_IRQ: timer=0 ipi=0 ...
+```
+
+`ipi=` 是**收到**的 IPI 数，日志里没有"发送过多少 IPI"的计数；`armcpu-spi-ipi=1`
+只改变 `signalCPU()` 的实现，如果内核一次都没调用，就不会有 SPI 发出。
+
+**H125spi2（当前候选，零构建）**：H124 内核不变，payload 的 args 追加
+`armcpu-spi-ipi=1 armcpu-self-ipi=1`。`armcpu-self-ipi` 会让 `initCPU` 尾部强制
+发一次自 IPI（走 SPI 1008+core），保证"一定发过一次"，`ipi=` 才有判读意义。
+
+```text
+H125spi2 kernel:  5f8350f1dffcb1e136d0c657f8cb81ff029981704b66bb2464e8f7d0e7e482c1 (H124)
+H125spi2 payload: 05fcf287404402b135a6f3507eea0e64f3c8b473b83237579fb366d0f0efa8a4
+H125spi2 boot:    83d37ffab0328799167a982dba0cac521f0cadb95ef6f7f5588cbb29c2ca687c
+```
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H125spi2.img`（已核对）、
+Mac `~/h103/boot-H125spi2.img`、仓库 `out/cheeseburger/boot/boot-H125spi2.img`。
+
+判读 `NATIVE_IRQ: ... ipi=N`：
+
+- `ipi > 0` → SPI 可写可投递，中断空间不是全锁死；下一步评估用
+  `arch_mem_timer`（TWRP `/proc/interrupts` 的 `GICv3 39`，SPI）做 tick 源；
+- `ipi = 0` → SPI 也归安全世界或路由写不进，SPI 线关闭；中断只剩
+  "PPI 19 交接/固件"两条路；
+- panic/卡死 → 记录屏幕尾部与 `armcpu_spi_unhandled`，回退 H124。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
