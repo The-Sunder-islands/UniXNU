@@ -135,6 +135,14 @@ extern "C" void native_proc_state_dump(void);
 // The heartbeat and the dump wakeup now come from a timer_call, which runs
 // from the timer interrupt and needs no thread timer at all.
 extern "C" void native_legacy_heartbeat_cell(void);
+// H115: display-side event counters and the first-frame content scan. The
+// client frame is scanned (nonblack count and bounding box) while the CPU copy
+// runs, so a black screen can be attributed to a black client frame.
+extern "C" volatile uint32_t native_legacy_client_calls;
+extern "C" volatile uint32_t native_legacy_transfer_calls;
+extern "C" volatile uint32_t native_legacy_frame_count;
+extern "C" volatile uint32_t native_legacy_frame_kind[32];
+extern "C" volatile uint64_t native_legacy_frame_stats[32][5];
 
 // H111: ArmCpu counts every INTID 27 (virtual timer) it takes before calling
 // rtclock_intr(). A zero count after minutes of uptime means the timer
@@ -698,6 +706,29 @@ h103SlotTick (void)
   if (!h107GateOpen ()) {
     return;
   }
+  // H115: flush on the first display-side event, so the record exists before
+  // backboardd replaces the console with its first frame (or before a crash).
+  static volatile uint32_t seenEvents;
+  uint32_t events = 0;
+  if (native_boot_flags & 4) {
+    events |= 1;      // backboardd exec
+  }
+  if (native_boot_flags & 0x1000) {
+    events |= 2;      // IOMobile match succeeded for backboardd
+  }
+  if (native_legacy_client_calls) {
+    events |= 4;      // display user client opened
+  }
+  if (native_legacy_transfer_calls) {
+    events |= 8;      // first client frame reached the scanout
+  }
+  bool force = (events & ~seenEvents) != 0;
+  if (force) {
+    seenEvents |= events;
+    IOLog ("NATIVE_FRAME: event=%x flags=%x client=%u xfer=%u frames=%u\n",
+           events, native_boot_flags, native_legacy_client_calls,
+           native_legacy_transfer_calls, native_legacy_frame_count);
+  }
   uint64_t interval = (gH103SlotMode == 2 ? 2u : gH103LogSecs) * 19200000ULL;
   uint64_t now = mach_absolute_time ();
   // H107: run any due dump before reading the message cursor, and force the
@@ -705,14 +736,14 @@ h103SlotTick (void)
   bool dumped = h105DumpTick ();
   if (!gH103LastSlotTicks) {
     gH103LastSlotTicks = now;
-    if (!dumped) {
+    if (!dumped && !force) {
       return;
     }
   }
   if (gH103SlotBusy) {
     return;
   }
-  if (!dumped && now - gH103LastSlotTicks < interval) {
+  if (!dumped && !force && now - gH103LastSlotTicks < interval) {
     return;
   }
   struct H103MsgBuf *m = msgbufp;
@@ -737,6 +768,23 @@ h103SlotTick (void)
     return;
   }
   gH103LastSlotTicks = now;
+  // H115: record what the client frame actually contained before the flush, so
+  // a black screen can be told from a lost display path.
+  {
+    static volatile uint32_t printedFrames;
+    uint32_t frames = native_legacy_frame_count;
+    if (frames && frames != printedFrames) {
+      printedFrames = frames;
+      uint32_t k = frames > 32 ? 31 : frames - 1;
+      IOLog ("NATIVE_FRAME: frames=%u kind=%u nonblack=%llu bbox=%llu,%llu-%llu,%llu\n",
+             frames, native_legacy_frame_kind[k],
+             (unsigned long long) native_legacy_frame_stats[k][0],
+             (unsigned long long) native_legacy_frame_stats[k][1],
+             (unsigned long long) native_legacy_frame_stats[k][2],
+             (unsigned long long) native_legacy_frame_stats[k][3],
+             (unsigned long long) native_legacy_frame_stats[k][4]);
+    }
+  }
   // H108: h103FlushNow owns the busy flag and the cursor update; the writer
   // leaves gH103LastSlotMsgX at the previous value until the delta is written.
   h103FlushNow ();
