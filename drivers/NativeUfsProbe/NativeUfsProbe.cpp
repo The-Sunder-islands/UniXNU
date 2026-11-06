@@ -615,6 +615,18 @@ h103FlushNow (void)
   gH103LastSlotMsgX = x;
 }
 
+// H116: called by the display archive from the client-open and frame-copy paths.
+// Those paths still run after the UFS read path has gone quiet, so a forced
+// flush here is the only way to persist the black-screen moment.
+extern "C" void
+native_log_flush_hook (void)
+{
+  if (gH103Probe == nullptr) {
+    return;
+  }
+  h103FlushNow ();
+}
+
 // The spawned threads never wake from IOSleep on this kernel. Run the slot
 // timer from the normal read paths only after fLock has been released; calling
 // it from ufsCommand's completion would deadlock on the non-recursive fLock.
