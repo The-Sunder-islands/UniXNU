@@ -3614,6 +3614,43 @@ h109-tick=1`）。
 | I=0、`ipi=0`、`timer=0` | 所有中断都没送，查 vector/ICC_SRE/DAIF |
 | `timer` 在涨 | 定时器正常，问题在 `rtclock_intr`/`timer_call` 接线 |
 
+## H114 PPI 27 的 redistributor 状态（2026-11-06）
+
+H113 读数：`timer=0 ipi=0 daif=200 pmr=f0 grp1=1 ctl=5 tval=ffff7d8e tick=0`。
+`ctl=5` = ENABLE + **ISTATUS**、IMASKED=0，说明虚拟定时器**一直在拉中断**；
+`daif` 的 I=0（IRQ 未屏蔽），`grp1=1`、`pmr=0xf0` 也正常；但定时器和 IPI
+的计数都是 0 → 一条中断都没进过 EL1，系统一直在协作式/轮询运行。
+
+断点只剩两处：GIC 没转发，或者异常被 EL2/EL3 截走。H114 补两行采样：
+
+```text
+NATIVE_IRQ: … el=.. vbar=.. h1=<ICC_HPPIR1> h0=<ICC_HPPIR0> rpr=..
+NATIVE_GIC: typer=<GICR_TYPER> isen=<ISENABLER0> igrp=<IGROUPR0> ipend=<ISPENDR0> ipri=<IPRIORITYR[27]>
+```
+
+`armcpu_probe_ppi27()` 由 ArmCpu 子模块 `f3633d2` 导出（记录 `wakeRedistributor`
+选中的本核 frame，读取上述五个寄存器）。
+
+```text
+H114 kernel:  d725bb5d81b9c7ebaf6042de2c0b3b4e1e97e01123e999b660d2476e019ee1e1
+H114 payload: 84359be3737a76739dba91f6049a2a3c0971ac1209f0281fb8221c004178577b
+H114 boot:    d340af9c06e34eb9e4293f7c7ea3daeb128537cc32197df8d615c1f6514d08c7
+```
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H114.img`（已核对）、
+Mac `~/h103/boot-H114.img`、仓库 `out/cheeseburger/boot/boot-H114.img`。
+
+判读：
+
+| 观察 | 结论 |
+| --- | --- |
+| `h1=27`（HPPIR1 报 27） | GIC 已在向本核报 27；若仍不进中断，是异常路由（EL2/EL3）或向量问题 |
+| `h1=3ff`（1023） | GIC 没转发，看 `isen`/`igrp`/`ipend` 的 bit27 |
+| `isen` bit27=0 | 该 PPI 在本核 frame 上没使能（redistributor 选错或写入丢失） |
+| `igrp` bit27=0 | 被分到 Group 0（FIQ），而 ArmCpu 只处理 Group 1（IRQ） |
+| `ipend` bit27=1 且 `h1=3ff` | 已挂起但被优先级/使能挡住 |
+| `ipri` ≥ 0xf0 | 优先级被 PMR 挡住 |
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
