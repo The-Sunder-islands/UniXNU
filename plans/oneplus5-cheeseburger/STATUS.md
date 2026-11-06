@@ -5210,6 +5210,55 @@ H131 boot:    17e50f6f10e4cf3e53291dd7ec78bc9f779e76670588c7d878ca15c7c106cb0b
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H131.img`（已核对）、
 Mac `~/h103/boot-H131.img`、仓库 `out/cheeseburger/boot/boot-H131.img`。
 
+### H131 结果：union 生效，ObjC 恢复，停点变成 SIGTRAP（2026-11-07）
+
+`h131-log-20261107-023749.txt`。**注意 header `uptime_s: 317`**：317 s 之后的条目是
+上一次启动残留的 msgbuf 尾巴（`slots_written=6`，delta 只保留尾部），不能算进本次。
+
+按时间戳过滤后的干净窗口（≤317 s）：
+
+| 指标 | H130 | **H131** |
+| --- | --- | --- |
+| `libobjc-trampolines` abort | 62 | **0** |
+| SpringBoard 退出 | 16，全是 `ns=8`（ObjC） | 13，全是 `ns=2 sig=5` |
+| liveactivitiesd | `ns=2 sig=5` | 仍 `ns=2 sig=5` |
+| PerfPowerService | `ns=2 sig=6` | 仍 `ns=2 sig=6` |
+
+日志里 323/328/330 s 那 3 条 trampolines 是 **H130 残留**，不是本次启动。
+即 `/usr/lib` 的 cryptex union 生效，`libobjc-trampolines.dylib` 能加载，
+**ObjC 运行时这一层已经过去**。
+
+新停点：SpringBoard 死于 **SIGTRAP**（`status=0x5`、`ns=2`=`OS_REASON_SIGNAL`），
+payload 里的 "exc handler" 来自 `bsd/kern/kern_sig.c:1813`
+`build_signal_reason(signum, "exc handler")`，由 `bsd/uxkern/ux_exception.c:180`
+的 `threadsignal(thread, ux_signal, code, TRUE)` 触发：某个进程执行了 `BRK`
+（`EXC_BREAKPOINT`），典型是 libdispatch 的 `_dispatch_assert_queue_fail`、
+XPC 的 `xpc_api_misuse` 或 dyld 的 `halt()`。
+
+### H132：记录 Mach 异常与 union 状态（2026-11-07）
+
+`patches/xnu/zzzzzzzzzzzzzzzz-h132-trap-diag.patch`：
+
+1. `handle_ux_exception()` 增加一行
+   `NATIVE_TRAP: pid=… comm=… exc=… code=… sub=… sig=…`；对
+   `EXC_BREAKPOINT`，`sub` 就是触发 PC，可按 dyld 共享缓存反查所属镜像；
+2. `native_cryptex_usrlib_prepare()` 把结果写进 `native_boot_flags`：
+   `0x2000` 挂载成功、`0x4000` 挂载后能看到 trampolines、`0x8000` 失败
+   （`bits 16-23` = errno）。这样即使早期日志被 delta 截断，
+   每条 `NATIVE_IRQ … flags=…` 仍带着证据（预期 `flags=60af`）。
+
+```text
+H132 kernel:  a0c1744ff12c81d4bcd07ad7be19f44cbf0598073cdbe55021a7376b5234b19e
+H132 payload: 94d8900a6a0e90e9d530014c7e12b75eab315c0d825bdc4b8bc9f126fd1ac6fa
+H132 boot:    a861d43c794af7c5938862b0171232955d61785f09f9c87d94bee231ccbd14ee
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H132.img`（已核对）、
+Mac `~/h103/boot-H132.img`、仓库 `out/cheeseburger/boot/boot-H132.img`。
+
+判读：`flags=60af` 确认 union；`NATIVE_TRAP … sub=0x…` 的镜像归属决定下一步
+（SpringBoard 自身断言 / libdispatch / XPC / dyld）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

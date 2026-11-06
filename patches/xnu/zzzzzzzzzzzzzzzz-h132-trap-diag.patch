@@ -1,0 +1,36 @@
+diff --git a/bsd/uxkern/ux_exception.c b/bsd/uxkern/ux_exception.c
+--- a/bsd/uxkern/ux_exception.c
++++ b/bsd/uxkern/ux_exception.c
+@@ -174,6 +174,12 @@
+ 
+ 	/* Send signal to thread */
+ 	if (ux_signal != 0) {
++		/* H132: the Mach exception that becomes a BSD signal.  For
++		 * EXC_BREAKPOINT subcode is the trapping PC, so the log names the
++		 * component that asserted. */
++		printf("NATIVE_TRAP: pid=%d comm=%s exc=%d code=0x%llx sub=0x%llx sig=%d\n",
++		    proc_getpid(p), p->p_comm, exception,
++		    (unsigned long long)code, (unsigned long long)subcode, ux_signal);
+ 		ut->uu_exception = exception;
+ 		//ut->uu_code = code; // filled in by threadsignal
+ 		ut->uu_subcode = subcode;
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -8098,6 +8098,16 @@
+ 	if (!after) {
+ 		vnode_put(probe);
+ 		probe = NULLVP;
++	}
++	/* H132: the early boot log is trimmed by the slot delta, so record the
++	 * result in native_boot_flags as well; every NATIVE_IRQ line prints it. */
++	if (error) {
++		native_boot_flags |= 0x8000U | ((uint32_t)(error & 0xff) << 16);
++	} else {
++		native_boot_flags |= 0x2000U;
++	}
++	if (!after) {
++		native_boot_flags |= 0x4000U;
+ 	}
+ 	printf("NATIVE_CRYPTEX_USRLIB: before=%d mount=%d result=%d after=%d\n",
+ 	    before, error, result, after);
