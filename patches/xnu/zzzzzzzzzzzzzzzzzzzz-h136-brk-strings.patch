@@ -1,0 +1,106 @@
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -603,7 +603,35 @@
+ 
+ 	return fault_code == FSC_SYNC_PARITY;
+ }
++
++/*
++ * H136: user BRK context.  The trap is about to become SIGTRAP, and the BSD
++ * exit-reason path no longer carries the register state, so stash it here and
++ * let bsd/uxkern/ux_exception.c read the message strings out of it.
++ */
++volatile uint64_t native_brk_regs[8];
++volatile uint64_t native_brk_pc;
++volatile uint64_t native_brk_lr;
++volatile uintptr_t native_brk_task;
+ 
++static void
++native_record_user_brk(arm_saved_state_t *state)
++{
++	for (unsigned i = 0; i < 8; i++) {
++		native_brk_regs[i] = get_saved_state_reg(state, i);
++	}
++	native_brk_pc = get_saved_state_pc(state);
++	native_brk_lr = get_saved_state_lr(state);
++	native_brk_task = (uintptr_t)current_task();
++	printf("NATIVE_BRK: pc=0x%llx lr=0x%llx x0=0x%llx x1=0x%llx x2=0x%llx "
++	    "x3=0x%llx x4=0x%llx x5=0x%llx x6=0x%llx x7=0x%llx\n",
++	    (unsigned long long)native_brk_pc, (unsigned long long)native_brk_lr,
++	    (unsigned long long)native_brk_regs[0], (unsigned long long)native_brk_regs[1],
++	    (unsigned long long)native_brk_regs[2], (unsigned long long)native_brk_regs[3],
++	    (unsigned long long)native_brk_regs[4], (unsigned long long)native_brk_regs[5],
++	    (unsigned long long)native_brk_regs[6], (unsigned long long)native_brk_regs[7]);
++}
++
+ void
+ sleh_synchronous(arm_context_t *context, uint32_t esr, vm_offset_t far, __unused bool did_initiate_panic_lockdown)
+ {
+@@ -848,6 +876,7 @@
+ 			handle_kernel_breakpoint(state, esr);
+ 			break;
+ 		} else {
++			native_record_user_brk(state);
+ 			handle_breakpoint(state, esr);
+ 			__builtin_unreachable();
+ 		}
+diff --git a/bsd/uxkern/ux_exception.c b/bsd/uxkern/ux_exception.c
+--- a/bsd/uxkern/ux_exception.c
++++ b/bsd/uxkern/ux_exception.c
+@@ -117,6 +117,47 @@
+  * dyld_image_info starts with {imageLoadAddress, imageFilePath, modDate}.
+  * This is read-only: a failure only prints why.
+  */
++extern volatile uint64_t native_brk_regs[8];
++extern volatile uint64_t native_brk_pc;
++extern volatile uint64_t native_brk_lr;
++extern volatile uintptr_t native_brk_task;
++
++/* H136: the trap site usually passes its message in x0..x7 before the BRK. */
++static void
++native_report_trap_strings(proc_t p, uint64_t addr)
++{
++	unsigned i, printed = 0;
++
++	if ((uintptr_t)proc_task(p) != native_brk_task || native_brk_pc != addr) {
++		return;
++	}
++	for (i = 0; i < 8 && printed < 3; i++) {
++		uint64_t v = native_brk_regs[i];
++		char text[161];
++		size_t n = 0, printable = 0;
++
++		if (v < 0x100000000ULL || v > 0x00007fffffffffffULL) {
++			continue;
++		}
++		if (copyin((user_addr_t)v, text, sizeof(text) - 1) != 0) {
++			continue;
++		}
++		text[sizeof(text) - 1] = 0;
++		while (n < sizeof(text) - 1 && text[n]) {
++			if (text[n] >= 32 && text[n] < 127) {
++				printable++;
++			}
++			n++;
++		}
++		if (n < 4 || printable != n) {
++			continue;
++		}
++		printf("NATIVE_TRAP_STR: pid=%d comm=%s x%u=\"%s\"\n",
++		    proc_getpid(p), p->p_comm, i, text);
++		printed++;
++	}
++}
++
+ static void
+ native_report_trap_image(proc_t p, uint64_t addr)
+ {
+@@ -290,6 +331,7 @@
+ 		    (unsigned long long)code, (unsigned long long)subcode, ux_signal);
+ 		if (exception == EXC_BREAKPOINT) {
+ 			native_report_trap_image(p, (uint64_t)subcode);
++			native_report_trap_strings(p, (uint64_t)subcode);
+ 		}
+ 		ut->uu_exception = exception;
+ 		//ut->uu_code = code; // filled in by threadsignal

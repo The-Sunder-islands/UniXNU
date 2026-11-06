@@ -5388,6 +5388,45 @@ H135 boot:    8e8fdec88adc714a83d03ab26e67a7ae59ffcc55c810870a6ad77dbe4c711ffb
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H135.img`（已核对）、
 Mac `~/h103/boot-H135.img`、仓库 `out/cheeseburger/boot/boot-H135.img`。
 
+### H135 结果：锁定到具体框架与偏移（2026-11-07）
+
+`h135-log-20261107-033238.txt`：
+
+```text
+SpringBoard     addr=0x1a2bff2ec base=0x1a2be1000 off=0x1e2ec
+                /System/Library/PrivateFrameworks/FrontBoardServices.framework/FrontBoardServices
+liveactivitiesd addr=0x1c51164f8 base=0x1c50f9000 off=0x1d4f8
+                /System/Library/PrivateFrameworks/SessionSyncEngine.framework/SessionSyncEngine
+```
+
+`min=0x100e1d000`、`max=0x22cb73000` 说明镜像数组这次读对了。
+两个偏移都落在各自镜像 `__TEXT` 约 120 KB 处，位置很靠前，更像构造函数 /
+`+load` / 静态初始化期间的断言。两个框架都只在 dyld 共享缓存里，OS 卷上没有实体文件。
+
+### H136：抓 BRK 寄存器并读出断言字符串（2026-11-07）
+
+`patches/xnu/zzzzzzzzzzzzzzzzzzzz-h136-brk-strings.patch`：
+
+1. `osfmk/arm64/sleh.c`：`ESR_EC_BRK_AARCH64` 的用户分支先
+   `native_record_user_brk(state)`，把 `pc/lr/x0..x7` 存进全局并打印
+   `NATIVE_BRK:`；`native_report` 侧用 `task` 指针与 `pc` 双重校验归属。
+2. `bsd/uxkern/ux_exception.c`：`NATIVE_TRAP` 之后对这些寄存器里落在用户地址
+   范围的指针做 `copyin`（160 字节上限、最多 3 个、仅打印可打印串），
+   输出 `NATIVE_TRAP_STR: pid=… comm=… xN="…"`。
+
+AArch64 的 `brk #1` 之前通常已经把断言文本放进 `x0/x1`（Swift `fatalError`、
+libdispatch `BUG IN CLIENT`、dyld `halt` 都是这个模式），所以这一步预期直接
+拿到断言原文。
+
+```text
+H136 kernel:  282f91894fb7527503d1a9df0783f9a8c892e291baaa57675d44fcb2a8fc5a39
+H136 payload: a978eb25e463bc3820ba3d0513b04eac37e334ebac3274e541c7922768fecd74
+H136 boot:    5f826d78860f7de30420af63139f993fffe74e2b10b77f7ec1dc4ed896da59e8
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H136.img`（已核对）、
+Mac `~/h103/boot-H136.img`、仓库 `out/cheeseburger/boot/boot-H136.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
