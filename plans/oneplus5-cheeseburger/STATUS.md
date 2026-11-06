@@ -4514,6 +4514,41 @@ Mac `~/h103/boot-H127b.img`、仓库 `out/cheeseburger/boot/boot-H127b.img`。
   下一步把 `rtclock_intr` 的调用时机/重装逻辑接对；
 - `t19=0`、`storm=0` → 19 仍不可投递，回到 H124 结论。
 
+## H127c：PPI 19 只计数、不驱动时钟（2026-11-06）
+
+H127b（19+27，19 送 `rtclock_intr`）上机后停在同一带：
+
+```text
+NATIVE_UFS_LOG: deferred snapshot to window read
+NATIVE_UFS_HB: enter
+NATIVE_UFS_IO: ...        <- 第一笔 UFS I/O 之后不动
+```
+
+对齐后的规律：**只要 PPI 19 被使能，就会在第一笔 I/O 前后停住**（H125、H127、H127b），
+只开 27 的 H124/H125b 不会。说明 19 的中断确实会到 EL1，但在那个时刻驱动
+`rtclock_intr(0)` 会把时钟/定时器子系统弄坏。
+
+H127c 只改一处：19 计数后直接 EOI，**不再调 `rtclock_intr`**；27 保持原路径；
+风暴保护保留（19 若是电平线，33 次后会被 `ICENABLER` 掉并记 `storm=19`，系统应能继续）。
+
+```text
+H127c kernel:  35351aef38f642fca8920914e12289fa9d568a355b7a0fa4acf143e8d64a1478
+H127c payload: 1e6292d6da32700971e770fcfa5b2545ed1225d0afb88aa1f3b1c88c5cc307da
+H127c boot:    fd1228cda3dcca37bb96f9db0d2df383daa38cdc53f0d514895e53b84184763b
+```
+
+firmware 仍用可启动的 `fw-H103ea`（`163917aa…`）。子模块 `drivers/ArmCpu` 提交
+`HEAD`（分支 `h118-gic-cache`）。
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H127c.img`（已核对）、
+Mac `~/h103/boot-H127c.img`、仓库 `out/cheeseburger/boot/boot-H127c.img`。
+
+判读：
+
+- 能越过第一笔 I/O、跑到 197 s 写出日志，且 `t19 > 0`（通常 `storm=19`）→ 19 确实送达；
+- 下一版把 19 在**时钟就绪之后**（例如 UFS 路径 120 s 处）再接进 `rtclock_intr`，
+  并确保重装 CNTV；
+- 若仍停在原位 → 使能 19 本身破坏了某条线，改为只读方案。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
