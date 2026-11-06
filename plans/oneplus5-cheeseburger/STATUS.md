@@ -4875,6 +4875,55 @@ flush 会把环形缓冲区里残留的**上一次启动文本**一起拷入，�
   （`flags` 出现 `0x4`）、若又崩是否仍为 `err 60/94`；
 - 日志不再是瓶颈后，主线回到显示：backboardd 为什么不查 `IOMobileFramebuffer`。
 
+### H127i-2：`memcpy` 数据异常 panic（2026-11-07）
+
+`h127i-2-log-20261107-000642.txt`（349 KB）里超时又回到 100+ 次，并最终 panic：
+
+```text
+panic(cpu 0 caller 0xfffffff007a7114): Kernel data abort
+  pc 0xfffffff007a88ed4 = memcpy + 100
+  esr 0x96000007  (translation fault, level 3, 写)
+  far 0xfffffff1a6362000
+```
+
+用 H127g 的 dSYM 符号化：`pc` 落在 `memcpy`（写方向），`far` 是未映射的内核地址。
+结合上下文里的 `dpage_pager_compressed: (private): err 94`、
+`descpfs_...`、AMFI `Verification failed with error 94`，判断为**读失败后的次生崩溃**：
+解压失败导致目标缓冲区无效或尺寸异常，随后 `memcpy` 写入未映射地址。
+
+该次启动的存储错误样本：
+
+```text
+disk4: I/O timeout
+_vnode_dev_read:907: disk4 *** got err 60 reading blknum 779768 (num read errs: 101..103)
+NATIVE_UFS_LOCK: window SystemOS blocked req=91078 block=3a1e50 count=96
+IOBlockStorageDriver: executeRequest: request failed to start!
+```
+
+要点：**SystemOS 的全部 I/O 都走我们发布的 window 设备**。`count=96` 的窗口读与
+`executeRequest: request failed to start!` 说明该设备在并发下会拒绝/阻塞请求，真实读写
+被拖到超时；`h103-log-secs=30` 只是把必然超时降为偶发，负载高时仍会回到 100+ 次。
+
+H127j 是零构建对照：沿用同一内核，只把 `h103-log-secs` 从 30 再提高到 60
+（flush 频率再降一半）：
+
+```text
+H127j kernel:  59519748c1e79dbded8ba6d39695f5a49a361e92342549fe210c50ee997ed881 (H127g/H127h/H127i 同一内核)
+H127j payload: 952ff3df9aab71e5c697e546429d7414c437a07a7b26f80050e54201652c2f38
+H127j boot:    a58e59319be4efe1a69ca8f44b2e39471f468433cc24e0c46aca6ba9dcee2cde
+```
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H127j.img`（已核对）、
+Mac `~/h103/boot-H127j.img`、仓库 `out/cheeseburger/boot/boot-H127j.img`。
+
+判读：
+
+- `err 60` 次数继续下降且不再 panic → 日志写入确实是主要竞争者，下一步做“后台线程 +
+  小块可丢弃队列”的写入器，并让 window 设备支持并发排队；
+- 仍然 100+ 次或仍 panic → 日志不是唯一来源，需要直接查 window 设备在高并发下的
+  队列/锁行为（`executeRequest` 被拒绝）；
+- 同时应给读失败路径加防护：`memcpy` 前校验目标缓冲区和长度，避免升级成内核 panic。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
