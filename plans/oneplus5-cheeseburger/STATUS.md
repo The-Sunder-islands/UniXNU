@@ -4693,6 +4693,37 @@ Mac `~/h103/boot-H127g.img`、仓库 `out/cheeseburger/boot/boot-H127g.img`。
 - 早期挂死 → `rtclock_intr` 在第一个中断就调用不安全，退回 H127e 行为（只重装）并改为
   由内核线程轮询。
 
+### H127h：去掉诊断 timer_call，验证 rtclock 是否安全（2026-11-06）
+
+H127g 上机卡在与 H127b 完全相同的位置（`NATIVE_UFS_IO` 之后、第一笔 I/O 处），
+而 H127c/H127e（不调 `rtclock_intr`）都能跑，因此问题落在 `rtclock_intr` 路径。
+
+查 `osfmk/arm64/sleh.c`：`sleh_irq()` 只做 prologue + `cdp->interrupt_handler(...)`
+（就是我们的 `ArmCpu::dispatch`），**不会**替我们调 `rtclock_intr`（那是 FIQ/PMI 路径），
+所以“由 CPU 驱动自己处理定时器”是正确用法，prologue 也已经由 sleh 完成。
+
+最可疑的是：启动参数里有 `h109-tick=1`，它会在**定时器上下文**里每秒 `IOLog` 一行；
+第一笔 UFS I/O 同时在大量打日志，两边争用 console 锁，很容易在中断上下文里死锁。
+
+H127h 不重建内核（沿用 H127g，`59519748…`），只在 payload 的 `unixnu.toml` 里把
+`h109-tick=1` 改成 `h109-tick=0`：
+
+```text
+H127h kernel:  59519748c1e79dbded8ba6d39695f5a49a361e92342549fe210c50ee997ed881 (H127g)
+H127h payload: 9645d21067767e28ba7a25fb30f808812c7ebca357d79417db4d868e7bc6c073
+H127h boot:    1aa05378fd5e9c1667a4223d43a72e40a605267c971ea4c06042f054a3547861
+```
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H127h.img`（已核对）、
+Mac `~/h103/boot-H127h.img`、仓库 `out/cheeseburger/boot/boot-H127h.img`。
+
+判读：
+
+- 能越过 `NATIVE_UFS_IO` 继续启动 → 诊断 `timer_call` 在中断里打日志导致死锁，
+  `rtclock_intr` 本身没问题；下一步把诊断日志改成只计数、由 UFS 路径打印；
+- 仍停在同一位置 → `rtclock_intr`（或其触发的其它 timer_call）在此上下文不安全，
+  退回 H127e 的 rearm-only 行为，`tick` 问题另行处理。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
