@@ -3852,6 +3852,48 @@ H119-icc boot:     24fc419614fd96e4a857820c3c84a12082ac455284c3b79398ca3e8967975
 - `igrp` bit27=0 → 被分到 Group 0（FIQ）；
 - `boot-H119-icc.img`（`h114-icc=1`）用于单独确认 ICC 读取是否也会崩。
 
+## H120 GIC 安全态/唤醒状态快照（2026-11-06）
+
+H119 默认镜像正常运行，GIC 读数：
+
+```text
+NATIVE_GIC: typer=1 isen=80000ff igrp=0 ipend=40280000 ipri=80
+```
+
+即 PPI 27 **已使能（bit27）且 pending**、优先级 0x80 能过 PMR 0xf0、
+`grp1=1`、`daif` 的 I/F 都为 0，唯一异常是 `igrp=0`（全部 Group 0）。
+另外 `boot-H119-icc.img` 与 H114 一样黑屏 → `ICC_HPPIR1/HPPIR0/RPR` 的读取
+本身也是崩溃源，必须停掉。
+
+H120：
+
+- 删除运行期 ICC 读取（`h114-icc` 代码移除）；
+- `ArmCpu::enableGic()` 在同一安全上下文里再缓存
+  `GICD_CTLR`（DS 位）、`GICD_TYPER`、`GICR_WAKER`、`ICC_IGRPEN0`，并重写一次
+  `IGROUPR0=0xffffffff` 后回读，用于区分"只读/写丢失"与"单安全态 RAZ"；
+- `NATIVE_GIC2: dctl=.. gtyper=.. waker=.. grp0=.. igrp2=..`。
+
+```text
+H120 kernel:  c5a1117db41607a3bade49b58458af88dfcf65baadbd81df6dd6fa1d03b5bcec
+H120 payload: 0363f9ed8051994d46c8585962092828f6e31ff713543d67a75f2c536b381caf
+H120 boot:    01a7156450af8b0cf2bd15873a67abc534c348b7b6f13201115bd98e291d630f
+```
+
+子模块 `drivers/ArmCpu` 提交 `21a9487`（分支 `h118-gic-cache`，已推送）。
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H120.img`（已核对）、
+Mac `~/h103/boot-H120.img`、仓库 `out/cheeseburger/boot/boot-H120.img`。
+
+判读：
+
+- `dctl` 的 bit6（DS）=1 → `igrp=0` 只是 RAZ，中断本来都是 Group 1，
+  问题在 CPU 接口/redistributor 唤醒或亲和；
+- DS=0 且 `igrp2` 仍为 0 → IGROUPR0 写不进去（secure-only），说明映射的是
+  非安全态不可写的 frame；
+- `waker` 的 ProcessorSleep/ChildrenAsleep 位若未清零 → redistributor 没真正
+  唤醒；
+- `grp0`=0 且 `igrp=0` 若确为 Group 0 → 需要打开 IGRPEN0 并处理 FIQ，
+  工作量大，暂不做。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
