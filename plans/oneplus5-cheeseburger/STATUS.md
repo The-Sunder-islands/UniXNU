@@ -4009,6 +4009,83 @@ Mac `~/h103/boot-H123.img`、仓库 `out/cheeseburger/boot/boot-H123.img`。
 回到启动顺序（launchd/SpringBoard 依赖）；backboardd 不在 `NATIVE_WAIT` 里 →
 停滞仍在 exec 之前。
 
+## H123 结果与 H124（2026-11-06）
+
+H123 日志：`/home/ls/UniXNU/h123-log-20261106-141018.txt`（67 个进程，
+`NATIVE_PROC_DUMP: trigger stage=1 flags=f`，时间 206 s）。`cont`/`wait`
+用 dSYM 符号化：
+
+```text
+0xfffffff0072761f0 ipc_mqueue_receive_continue
+0xfffffff0072d8908 semaphore_wait_continue
+0xfffffff0076c8004 workq_unpark_continue
+0xfffffff007719e38 _sleep_continue
+0xfffffff007749a54 ulock_wait_continue
+0xfffffff007ae0320 ipc_mqueue_full
+```
+
+判读：
+
+- 11 个进程的主线程停在 `ipc_mqueue_full`（backboardd、lockdownd、nfcd、
+  sharingd、imagent、misd、audioaccessoryd、containermanagerd、cfprefsd、
+  MobileGestaltHelper），backboardd 当时只有 1 条线程（tid 359）；
+- **但满队列只是瞬时状态**：H122 在 428 s 的同类 dump 里 backboardd 已有
+  2 条线程且停在 `workq_unpark_continue`（空闲），同一时刻系统还在继续
+  `NATIVE_EXEC`（435 s 的 pid 89）；
+- 23 个进程（xpcproxy 桩）停在 `vm_fault` 的 `PAGE_ASSERT_WAIT`（页忙等待，
+  且 event 地址按创建顺序递增 = vm_page 数组 / 内核栈），只有 driverkitd
+  有可运行线程 —— 这是 launchd 批量 spawn 时的 VM 压力，不是永久死锁；
+- 因此 H107 的"满队列接收方不出队"不是 UI 的 gate。
+
+**真正的 gate（新证据）**：`native_boot_flags` 的 bit 0x80 表示
+"backboardd 调用过任意 IOService matching"，在 204 s / 206 s / 432 s 的
+所有采样里都 **未置位**，同时 `client=0 xfer=0 frames=0`。即 backboardd
+从未向 IOKit 查询过任何服务，也就没有打开 Legacy display，§44.10 的
+"headless" 结论得到直接证据。
+
+**顺带发现的诊断 bug**：UFS 完成路径在 `native_boot_flags & 4`
+（backboardd exec）之后停止重画 2×2 面板（H104j 的原意是避免和 backboardd
+抢屏），而心跳线程走 `IOSleep`、`IOTimerEventSource` 都依赖定时器中断，
+没有中断时都不会再触发。于是面板永远停在"只有 SpringBoard"时的绿色，
+即使 `flags=f`（两者都已 exec、本应白）。**"左上一直绿"是旧颜色，
+backboardd 其实早已 exec。**
+
+H124（本轮）：
+
+1. 扩展 `zzzzzzzzzz-h103-iokit-trace.patch`：记录前 24 次
+   `op=match/open/deny`，带 `comm`、`IOClass`、`IOProviderClass`，
+   并把 `main_port != main_device_port` 单独记成 `d=badmaster`，第一次把
+   "没调用"与"调用没到内核（master port/sandbox）"区分开；
+2. 2×2 面板在 gate 位变化时重画一次（先白，再按 ikColor 反映 matching
+   结果），不再冻结在旧颜色；
+3. `native_proc_state_dump()` 去掉重复的全进程 summary；完整等待图改为
+   由驱动在 stage≥2（+12 s / +60 s）和 120 s 强制 dump 时调用，+2 s 只保留
+   5 个关键进程的线程明细，给 IOKit 日志留出日志窗口。
+
+```text
+H124 kernel:  5f8350f1dffcb1e136d0c657f8cb81ff029981704b66bb2464e8f7d0e7e482c1
+H124 payload: a2ede5dd40a811f2ac92fa2ad3329c91ecefdc56a0d87fc7b79240cf11ad39e8
+H124 boot:    9384572844ce56b06da5e1badca231d60dde7ab86ba75a20620825aa9a14f747
+```
+
+NativeUfsProbe archive 用 `scripts/build-arm-driver.py NativeUfsProbe`
+（`SDKROOT=$(xcrun --sdk iphoneos --show-sdk-path)`）重建并通过 -Werror；
+boot image 布局与 H122/H123 相同（81147904 B）。args 不变：
+`cpus=2 h103-slot=1 h103-load-iogpu=0 h103-log-secs=5 h109-tick=1 h114-gic=1`。
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H124.img`（已核对）、
+Mac `~/h103/boot-H124.img`、仓库 `out/cheeseburger/boot/boot-H124.img`。
+
+判读：先看左上是否变白（gate 已到），再看
+`NATIVE_IOKIT: op=match comm=... cls=... d=- ok=1`：
+
+- 有 `comm=backboardd` 的 match → 看它要的 `cls`，把 Legacy 服务按该类
+  发布/匹配即可；
+- 只有 `d=badmaster` → 用户态拿不到 IOKit master port（bootstrap/sandbox），
+  要修的是 MASTER 通道，而不是 display provider；
+- 完全没有 backboardd 的 IOKit 行、但别的进程有 → backboardd 在查询前就
+  决定了 headless，下一步追它的 MobileGestalt/launchd 输入。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
