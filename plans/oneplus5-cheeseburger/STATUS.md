@@ -4627,6 +4627,34 @@ firmware 仍用可启动的 `fw-H103ea`。子模块 `drivers/ArmCpu` 提交 `0d0
 代码提交 `38b1b38`、文档提交 `32e6524`（均已推送）；镜像 Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H127e.img`
 （已核对）、Mac `~/h103/boot-H127e.img`、仓库 `out/cheeseburger/boot/boot-H127e.img`。
 
+H127e 上机结果：日志 `/home/ls/UniXNU/h127e-log-20261106-213856.txt` 的环形区只保留
+到 151.9 s（在 120 s 切换点附近），显示切换前 `dispatch=0 rearm=0`；屏幕后续采样
+显示 `dispatch=1 rearm=16087`，并可辨认出 `CNTV_CTL=1`（ENABLE=1、ISTATUS=0）。这证明
+H127e 的重装分支确实运行，且至少采样时 timer status 已清；但日志文件缺少切换后的
+周期样本，无法计算长期速率，也无法确认是否最终稳定在 ~100 Hz。`tick=0` 是预期的，
+因为 H127e 刻意没有调用 `rtclock_intr`。
+
+### H127f：PPI 19 晚期调用 rtclock，不手动覆盖 deadline
+
+H127e 的“只重装”测试没有发现 CNTV_TVAL 写入失败，因此 H127f 保留 120 s 延迟切换，
+但将 PPI 19 分支改为调用 `rtclock_intr(0)`，**移除手动 `CNTV_TVAL` 写入**，让 XNU 自己
+设置下一个 deadline。`NATIVE_IRQ` 的 `rearm=` 改为 `clock19=`（rtclock 调用计数），
+切换行改为 `NATIVE_TIMER_CLOCK`。
+
+```text
+H127f kernel:  7332e4ec1c98b9fef45476d7f9e8f2e427996d5e061931c135d572f085809403
+H127f payload: 2d2c43ef66e976f1dad333c765c1e7c0b923dd15e1fd169d435cad427f4cc497
+H127f boot:    59b4a4fbe70b3cad407a8e3afb847348f7fd3a7c19c3279c5cf6f9b3e3afbcec
+```
+
+子模块 `drivers/ArmCpu` 提交 `3ad455d`（分支 `h118-gic-cache`，已推送）；父仓库源码提交
+见本节文档提交。镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H127f.img`
+（已核对）、Mac `~/h103/boot-H127f.img`、仓库 `out/cheeseburger/boot/boot-H127f.img`。
+
+判读：`dispatch=1` 后若 `clock19` 与 `t19` 同步增长、`tval` 不再长期过期且 `tick`
+开始增长，说明 XNU 的 timer-deadline 路径接管成功；若中断风暴/系统挂起，说明
+`rtclock_intr` 在该晚期路径仍不安全，应回到 H127e 的 rearm-only 行为。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
