@@ -1,7 +1,7 @@
 diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
 --- a/iokit/Kernel/IOUserClient.cpp
 +++ b/iokit/Kernel/IOUserClient.cpp
-@@ -2694,6 +2694,37 @@ is_io_service_match_property_table_bin(
+@@ -2694,6 +2694,39 @@ is_io_service_match_property_table_bin(
  	return internal_io_service_match_property_table(service, matching, matchingCnt, matches);
  }
  
@@ -34,6 +34,8 @@ diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
 +	if (mobile) {
 +		native_boot_flags &= ~(512U | 1024U);
 +		native_boot_flags |= success ? 512U : 1024U;
++		/* H115: the first successful display match is a flush trigger. */
++		if (success) native_boot_flags |= 0x1000U;
 +	}
 +}
  static kern_return_t
