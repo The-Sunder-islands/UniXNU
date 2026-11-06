@@ -5577,6 +5577,44 @@ Mac `~/h103/boot-H139.img`、仓库 `out/cheeseburger/boot/boot-H139.img`。
 判读：`NATIVE_IRQ … flags=` 里是否出现 `2`/`4` 位决定服务是否可匹配；
 `NATIVE_IOKIT_DICT … IOPropertyMatch.{…}` 决定 backboardd 在等什么。
 
+### H139 结果：探针 service=0，backboardd 在等 `backlight-control`（2026-11-07）
+
+`h139-log-20261107-042511.txt`：
+
+```text
+NATIVE_IOMFB_PROBE: name=IOMobileFramebuffer       match=1 service=0 class=- flags=6000
+NATIVE_IOMFB_PROBE: name=IOMobileFramebufferLegacy match=1 service=0 class=- flags=6000
+NATIVE_IOKIT_DICT: comm=backboardd IOPropertyMatch.{backlight-control}=(non-string)
+NATIVE_IOKIT_DICT: comm=backboardd IONameMatch=aop-smart-cover
+NATIVE_IOKIT_DICT: comm=backboardd IOProviderClass=IOPlatformExpertDevice
+NATIVE_IOKIT_DICT: comm=backboardd IOProviderClass=IOAccessoryManager
+```
+
+- 探针这次打出来了（周期性 + `flags=6000` 持久化有效），但 `service=0`；
+- 注意 `IOService::serviceMatching(name)` 在 XNU 里是把 **`IOProviderClass = name`**
+  写进字典（`iokit/Kernel/IOService.cpp:6704`），所以 `service=0` 不能直接等同于
+  “服务不存在”，需要对照组；
+- 真正的新线索是 `IOPropertyMatch.{backlight-control}`：backboardd 注册通知在等
+  一个带 `backlight-control` 属性的服务。我们的 Legacy display 没发布它，
+  通知永不触发，显示初始化也就一直没开始——这正好解释“从不查
+  IOMobileFramebuffer”。
+
+### H140：发布 backlight-control + 对照组 + 值类型（2026-11-07）
+
+1. `drivers/NativeMobileDisplay/NativeLegacyDisplay.cpp` 的 `registerService()`
+   在 `IOService::registerService()` 之前 `setProperty("backlight-control",
+   kOSBooleanTrue)`，让 backboardd 的 `IOPropertyMatch` 通知能够命中；
+2. 探针增加对照组 `"IOPlatformExpertDevice"`（backboardd 自己匹配 ok=1 的对象），
+   结果置 `native_boot_flags` 的 `0x80000`：
+   - 对照组命中、`IOMobileFramebuffer` 不命中 → 探针语义有效；
+   - 两者都不命中 → `serviceMatching` 语义不是“按类名找服务”，探针结论作废；
+3. IOKit 字典打印追加值的类名（`OSBoolean`/`OSNumber`/`OSData`），
+   便于在类型不对时立即改用正确类型。
+
+判读：backboardd 的 `backlight-control` 通知触发后，应出现对显示服务的
+`op=match comm=backboardd …` 或 `open`（`NATIVE_LEGACY: client enter`），
+`NATIVE_FRAME … client=` 变为非 0。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
