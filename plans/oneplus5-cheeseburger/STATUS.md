@@ -3651,6 +3651,47 @@ Mac `~/h103/boot-H114.img`、仓库 `out/cheeseburger/boot/boot-H114.img`。
 | `ipend` bit27=1 且 `h1=3ff` | 已挂起但被优先级/使能挡住 |
 | `ipri` ≥ 0xf0 | 优先级被 PMR 挡住 |
 
+## H115 显示事件即时落盘与帧内容（2026-11-06）
+
+H114 上机到 backboardd 查询 `IOMobileFramebuffer` 之后直接黑屏，拉出来的
+`h103log.bin` 仍是 H113 的 `boot_id`（一次成功 flush 都没有）。照片里的
+`NATIVE_IOKIT_MATCH` 只对 backboardd 打印，说明它确实在查显示服务；黑屏
+可能发生在"第一次落盘之前"（backboardd 用第一帧覆盖控制台，或该路径崩溃）。
+
+H115 改动：
+
+- `zzzzzzzzzz-h103-iokit-trace.patch`：backboardd 成功匹配 `IOMobile*` 时置
+  `native_boot_flags |= 0x1000`；
+- `NativeUfsProbe` 增加**事件驱动 flush**：首次出现
+  `flags&4`（backboardd exec）、`flags&0x1000`（显示匹配成功）、
+  `native_legacy_client_calls`（显示 user client 打开）、
+  `native_legacy_transfer_calls`（第一帧拷贝）时立即 flush 一次，绕过 5 秒
+  间隔；
+- 每次 flush 前打印客户端帧的扫描结果
+  `NATIVE_FRAME: frames=.. kind=.. nonblack=.. bbox=..`，
+  `nonblack=0` 即"帧内容是黑的"；
+- `panic_screen` 暂不做：`patch-xnu-entry-probe.py --panic-screen` 使用基础
+  内核的固定 cave 地址，已 prelink 的 `kernel.macho` 需要另行推导。
+
+```text
+H115 kernel:  a8fa2828e728e3c255457073b3f86d14585f661a268151d99cc630dd93b154f5
+H115 payload: 555f873a2ac9e8507cc27a561eb2a1cfad8b9fc8cb52e5968ae5da7b162b25ea
+H115 boot:    5c5b118dea383609738a8d78ce2229e546b072875497d9f4200041145685d389
+```
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H115.img`（已核对）、
+Mac `~/h103/boot-H115.img`、仓库 `out/cheeseburger/boot/boot-H115.img`。
+args 与 H114 相同（`cpus=2 h103-slot=1 h103-load-iogpu=0 h103-log-secs=5
+h109-tick=1`）。
+
+判读（黑屏后拉日志）：
+
+- `NATIVE_FRAME: event=2/4/8 …` → 相应事件已发生并落盘；
+- `NATIVE_FRAME: frames>=1 … nonblack=0` → 客户端帧是黑的（CA 无 GPU），
+  黑屏属"正常但黑"；
+- `nonblack>0` 但屏幕黑 → 帧有内容，问题在扫描/背光；
+- 没有 `NATIVE_FRAME` → 事件之前就停了，看最后一条 `NATIVE_IRQ` 与 exec。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
