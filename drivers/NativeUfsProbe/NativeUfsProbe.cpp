@@ -160,6 +160,7 @@ extern "C" volatile uint64_t armcpu_timer27_interrupts;
 extern "C" volatile uint32_t armcpu_irq_storm_id;
 extern "C" volatile uint64_t armcpu_irq_storm_count;
 extern "C" volatile uint32_t armcpu_timer_dispatch;
+extern "C" volatile uint64_t armcpu_timer_rearm_count;
 extern "C" volatile uint64_t armcpu_ipi_interrupts;
 // H114: ArmCpu export that reads the boot CPU's redistributor PPI 27 state.
 extern "C" void armcpu_probe_ppi27 (void);
@@ -695,7 +696,7 @@ h103SlotTick (void)
       __asm__ volatile ("mrs %0, daif" : "=r" (daif));
       __asm__ volatile ("mrs %0, icc_pmr_el1" : "=r" (pmr));
       __asm__ volatile ("mrs %0, icc_igrpen1_el1" : "=r" (grp1));
-      IOLog ("NATIVE_IRQ: timer=%llu ipi=%llu daif=%llx pmr=%llx grp1=%llx ctl=%llx tval=%llx t19=%llu t27=%llu storm=%llx sn=%llu flags=%x tick=%u\n",
+      IOLog ("NATIVE_IRQ: timer=%llu ipi=%llu daif=%llx pmr=%llx grp1=%llx ctl=%llx tval=%llx t19=%llu t27=%llu dispatch=%u rearm=%llu storm=%llx sn=%llu flags=%x tick=%u\n",
              (unsigned long long) armcpu_timer_interrupts,
              (unsigned long long) armcpu_ipi_interrupts,
              (unsigned long long) (daif & 0x3ffULL),
@@ -704,6 +705,8 @@ h103SlotTick (void)
              (unsigned long long) ctl, (unsigned long long) tval,
              (unsigned long long) armcpu_timer19_interrupts,
              (unsigned long long) armcpu_timer27_interrupts,
+             armcpu_timer_dispatch,
+             (unsigned long long) armcpu_timer_rearm_count,
              (unsigned long long) armcpu_irq_storm_id,
              (unsigned long long) armcpu_irq_storm_count,
              native_boot_flags, gH109Ticks);
@@ -737,11 +740,14 @@ h103SlotTick (void)
     if (!forcedDone && gH103StartTicks &&
         mach_absolute_time () - gH103StartTicks >= 120 * 19200000ULL) {
       forcedDone = 1;
-      // H127d: from here on PPI 19 drives rtclock_intr and re-arms CNTV.
+      // H127e: from here on PPI 19 only re-arms CNTV. Keep a durable state
+      // field in every NATIVE_IRQ sample because this ring can overwrite the
+      // one-shot transition line long before the log is pulled.
       armcpu_timer_dispatch = 1;
-      IOLog ("NATIVE_TIMER_DISPATCH: on t19=%llu t27=%llu\n",
+      IOLog ("NATIVE_TIMER_REARM: on t19=%llu t27=%llu rearm=%llu\n",
              (unsigned long long) armcpu_timer19_interrupts,
-             (unsigned long long) armcpu_timer27_interrupts);
+             (unsigned long long) armcpu_timer27_interrupts,
+             (unsigned long long) armcpu_timer_rearm_count);
       IOLog ("NATIVE_TICK: forced dump at uptime 120 s flags=%x\n", native_boot_flags);
       native_proc_state_dump ();
       native_proc_wait_graph ();
