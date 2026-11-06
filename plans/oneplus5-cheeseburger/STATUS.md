@@ -4477,6 +4477,43 @@ Mac `~/h103/boot-H127.img`、仓库 `out/cheeseburger/boot/boot-H127.img`。
 - 出现 bit18/26/29 → NS 还能收到这些，可作备选；
 - `seen=0` 且 `storm=` 有值 → 某条线在风暴，被保护关掉，看 `storm=` 的 ID。
 
+## H127b：最小改动——只多使能 PPI 19（2026-11-06）
+
+H127（使能全部 PPI 16–31）两次都确定性卡在
+`NATIVE_LEGACY: IOSurface status=0 found=0` 之后，比 H124 的正常停点早得多。
+把它和 H125（19+27+分组/DS 写）、H125b（27 + 6 次额外 MMIO 读）对齐后唯一的共同点：
+**只有"只开 27、没有任何额外 GIC 读"的 H124 能启动**；那 6 次额外读是 H125b 加的
+（`IGROUPR0/ISENABLER0/ISPENDR0/GICD_CTLR/GICD_IGROUPR1`），H118 已记录过从别的上下文
+读 GIC 会挂。
+
+H127b 因此回到 **H122/H124 的 `ArmCpu.cpp` 原样**，只做三件事：
+
+1. `kSgiPpiEnable = 0xffff | (1<<19) | (1<<27)`（只多一个 19）；
+2. 分发器：19 与 27 都调 `rtclock_intr(0)`，分别计数 `t19`/`t27`；
+3. 最小风暴保护：单次 drain > 32 就 `ICENABLER` 掉该 INTID 并记录 `storm=`;
+4. **不加**任何额外 GIC 读/写（无 `IGROUPR0` 写、无 DS 写、无 `pend/dgrp` 读）。
+
+`NativeUfsProbe` 回到 H124 版本，只在 `NATIVE_IRQ` 里追加
+`t19=.. t27=.. storm=.. sn=..`。
+
+```text
+H127b kernel:  f0750abd6a67afe0166172062252ffa7824e6583d45262396e4dc20b2a8a511c
+H127b payload: 2ae45a80826a59d13183d21d008a9268a4faaca0acfc89d6f2c026dc1f261ff2
+H127b boot:    b303462f89bb8a2a6abe8427f0a3531105259af1bc1608241520dd8f91c7f54c
+```
+
+firmware 继续用可启动的 `fw-H103ea`（`163917aa…`）。子模块 `drivers/ArmCpu` 提交
+`4ca3706`（分支 `h118-gic-cache`，已推送），父仓库 `148d073`。
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H127b.img`（已核对）、
+Mac `~/h103/boot-H127b.img`、仓库 `out/cheeseburger/boot/boot-H127b.img`。
+
+判读 `NATIVE_IRQ`：
+
+- `t19 > 0` → 定时器就是 PPI 19，抢占/超时恢复；
+- `storm=19`（或 27）→ 该线确实到达但电平未消（没被重新装载），风暴保护关掉了它，
+  下一步把 `rtclock_intr` 的调用时机/重装逻辑接对；
+- `t19=0`、`storm=0` → 19 仍不可投递，回到 H124 结论。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
