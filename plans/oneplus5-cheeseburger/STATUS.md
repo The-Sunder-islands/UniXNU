@@ -4342,6 +4342,48 @@ payload 用 H124 的（内核未改），只换 firmware 字段。
   → 变化发生在我们能控制的 UEFI/DarwinBoot 链里，可以定位到具体驱动；
 - 三处都一样且都是 Group 0 → 同上，属交接问题。
 
+## H126b：把 GIC 快照钉在屏幕上（2026-11-06）
+
+H126 上机后 `boot-H126-gic.img` 在 UEFI 阶段没有留下可读的 `UNIXNU-GIC` 行
+（早于菜单/内存图被滚掉），并且这次还撞上 DarwinBoot 的 256 MB 窗口分配失败：
+
+```text
+NO WINDOW 10000000 BIG RUN FCC C0000 @ 180000
+DARWINBOOT: boot refused: ...; firmware retained
+```
+
+`WINDOW_SIZE = SIZE_256MB`（`DarwinBoot.c:20`），而这次最大的连续 conventional
+run 只有 `0xFCC0000`（252.5 MB），差 4 MB → `EFI_OUT_OF_RESOURCES`，内核没启动，
+所以也拿不到 `-exit` 那一行。
+
+另外对比发现：本次重建的 firmware 与 `fw-H103ea.img.gz-dtb` 解压后
+（都是 6,291,456 B）有 **1,000,022 字节不同**，说明 H103ea 不是用当前这棵树/同一
+构建模式产出的（很可能是 DEBUG 构建）。因此重建固件不能当作"只多了打印"的等价物，
+`boot-H124.img` 里的旧固件仍是唯一能稳定进系统的固件。
+
+H126b 改动：
+
+1. `ArmGicV3Dxe`：打印 GIC 快照后 `gBS->Stall (10 秒)`，给拍照留出窗口；
+2. `CheeseburgerBootMemoryDxe`：注册 1 秒周期事件，反复打印同一组
+   `UNIXNU-GIC-loop`，保证屏幕最后一行永远是它；
+3. `drivers/DarwinBoot`：`WINDOW_SIZE` 临时改为 `SIZE_128MB + SIZE_64MB`（192 MB），
+   绕开 252.5 MB < 256 MB 的窗口失败（**这是诊断用改动，最终要回到 `SIZE_256MB`
+   或修好固件内存图**）。
+
+```text
+H126b firmware: 6e697c5bc64bd35d38e1b680820f049aa04348bf44341f1ccf23b466e61f4940
+H126b boot:     78de391f7ed571656f2013142e12158655e8f169c6e47a39d4e91d281eb25872
+```
+
+edk2-msm8998 提交 `21f5243`（分支 `unixnu-cheeseburger`，已推 `fork`）；
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H126b-gic.img`（已核对）、
+Mac `~/h103/boot-H126b-gic.img`、仓库 `out/cheeseburger/boot/boot-H126b-gic.img`。
+
+判读：屏幕底部的 `UNIXNU-GIC-loop:`（以及更早的 `UNIXNU-GIC:` / `-entry`）：
+
+- 三处都 `DS=0`、`IGROUPR0=00000000` → 安全世界/ABL 在进 UEFI 前就这样交接；
+- 若最早 `UNIXNU-GIC:` 是 `DS=1` 或 `IGROUPR0=ffffffff`、后面变了 → 变化在 UEFI 链里。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
