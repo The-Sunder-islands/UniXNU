@@ -2,7 +2,7 @@ diff --git a/osfmk/kern/task.c b/osfmk/kern/task.c
 index 5dcf00e..3586f03 100644
 --- a/osfmk/kern/task.c
 +++ b/osfmk/kern/task.c
-@@ -10285,3 +10285,130 @@ task_best_name(task_t task, char *buf, size_t size)
+@@ -10285,3 +10285,213 @@ task_best_name(task_t task, char *buf, size_t size)
  	char *name = proc_best_name(task_get_proc_raw(task));
  	strlcpy(buf, name, size);
  }
@@ -72,6 +72,88 @@ index 5dcf00e..3586f03 100644
 +	}
 +}
 +
++/* H123: one line per process with the wait state of its main (lowest tid)
++ * thread, so the receiver of a full port queue shows up in the stall snapshot. */
++struct native_wait_row {
++	int pid;
++	char comm[17];
++	unsigned threads;
++	unsigned runnable;
++	unsigned sendblock;
++	uint64_t tid;
++	int state;
++	uint64_t wait;
++	void *cont;
++};
++static struct native_wait_row native_wait_rows[160];
++static unsigned native_wait_row_count;
++
++static int
++native_wait_row_collect(struct proc *p, void *arg)
++{
++	unsigned n = native_wait_row_count;
++	if (n >= sizeof(native_wait_rows) / sizeof(native_wait_rows[0])) {
++		return 0;
++	}
++	struct task *t = proc_task(p);
++	unsigned threads = 0, runnable = 0, sendblock = 0;
++	uint64_t best_tid = 0;
++	int best_state = 0;
++	uint64_t best_wait = 0;
++	void *best_cont = 0;
++	if (t && task_lock_try(t)) {
++		threads = t->thread_count;
++		thread_t th;
++		queue_iterate(&t->threads, th, thread_t, task_threads) {
++			uint64_t tid = thread_tid(th);
++			if ((th->state & (TH_WAIT | TH_UNINT)) == 0) {
++				runnable++;
++			}
++			if ((uint64_t)th->wait_event == (uint64_t)(uintptr_t)&ipc_mqueue_full) {
++				sendblock++;
++			}
++			if (best_tid == 0 || tid < best_tid) {
++				best_tid = tid;
++				best_state = th->state;
++				best_wait = (uint64_t)th->wait_event;
++				best_cont = (void *)th->continuation;
++			}
++		}
++		task_unlock(t);
++	}
++	native_wait_rows[n].pid = proc_getpid(p);
++	proc_name(native_wait_rows[n].pid, native_wait_rows[n].comm,
++	    sizeof(native_wait_rows[n].comm));
++	native_wait_rows[n].threads = threads;
++	native_wait_rows[n].runnable = runnable;
++	native_wait_rows[n].sendblock = sendblock;
++	native_wait_rows[n].tid = best_tid;
++	native_wait_rows[n].state = best_state;
++	native_wait_rows[n].wait = best_wait;
++	native_wait_rows[n].cont = best_cont;
++	native_wait_row_count = n + 1;
++	(void)arg;
++	return 0;
++}
++
++static void
++native_proc_wait_graph(void)
++{
++	native_wait_row_count = 0;
++	/* PROC_ALLPROCLIST | PROC_NOWAITTRANS, same as native_proc_summary(). */
++	proc_iterate(1U | 4U, native_wait_row_collect, NULL, NULL, NULL);
++	for (unsigned i = 0; i < native_wait_row_count; i++) {
++		printf("NATIVE_WAIT: pid=%d comm=%s threads=%u run=%u sb=%u tid=%llu st=%x wait=%llx cont=%p\n",
++		    native_wait_rows[i].pid, native_wait_rows[i].comm,
++		    native_wait_rows[i].threads, native_wait_rows[i].runnable,
++		    native_wait_rows[i].sendblock,
++		    (unsigned long long)native_wait_rows[i].tid,
++		    native_wait_rows[i].state,
++		    (unsigned long long)native_wait_rows[i].wait,
++		    native_wait_rows[i].cont);
++	}
++}
++
 +void
 +native_proc_state_dump(void)
 +{
@@ -131,5 +213,6 @@ index 5dcf00e..3586f03 100644
 +		proc_rele(p);
 +	}
 +	native_proc_summary();
++	native_proc_wait_graph();
 +	printf("NATIVE_PROC_DUMP: end\n");
 +}
