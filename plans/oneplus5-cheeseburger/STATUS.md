@@ -5154,6 +5154,62 @@ Mac `~/h103/boot-H130.img`、仓库 `out/cheeseburger/boot/boot-H130.img`。
 若是显示/BackBoard 断言，修的是 `IOMobileFramebufferLegacy::start()` 的 provider
 判定；若是无关的缺类/缺服务，直接按描述定位。
 
+### H130 结果：SpringBoard 死于缺 libobjc-trampolines（2026-11-07）
+
+`h130-log-20261107-021306.txt`（573 KB，51–775 s，`err 60` 仍为 0）：
+
+98 条 `NATIVE_EXIT_DESC` 中有 **62 条完全相同**：
+
+```text
+couldn't dlopen libobjc-trampolines.dylib:
+dlopen(/usr/lib/libobjc-trampolines.dylib, 0x0106):
+tried: '/usr/lib/libobjc-trampolines.dylib' (no such file, not in dyld cache)
+```
+
+受影响：SpringBoard 16、powerd 16、contextstored 15、sharingd 7、assistantd 4、
+imagent 3、mobiletimerd 1，全部 `ns=8`（`OS_REASON_OBJC`）、`status=0x6`
+（SIGABRT）。**ObjC 运行时装不上 trampolines，所有 ObjC 进程一起 abort**，
+这才是 SpringBoard 0.6 秒就死的直接原因；backboardd 只是被拖着没机会做显示初始化。
+次级崩溃：PerfPowerService `ns=2 sig=6`、liveactivitiesd/mobileactivationd `ns=2 sig=5`。
+
+#### 根因：`/usr/lib` 缺 cryptex 那一层
+
+在 Mac 上挂载原始 DMG 逐项核对：
+
+| 来源 | `/usr/lib` |
+| --- | --- |
+| `044-76040-038.dmg`（OS 卷，6.1 GB） | 19 项：dyld、libRPAC、libz、asan…，**无** `libobjc-trampolines.dylib` |
+| `044-76034-038.dmg`（SystemCryptex，3.3 GB） | 9 项：`libobjc-trampolines.dylib`、`libffi-trampolines.dylib`、`libstdc++.6.0.9.dylib`、`libglInterpose`、`libLogRedirect`、`libCoreLSKD`、符号链接与 `swift/` |
+
+**两边零重叠**：cryptex 的 `/usr/lib` 只做补充，不会覆盖 OS 卷的 `dyld` 等文件。
+当前内核只把 cryptex 挂在 `/private/preboot/Cryptexes/OS`
+（`/System/Cryptexes/OS` 是指向它的符号链接），**没有 union**，所以 `/usr/lib`
+只解析到 OS 卷。
+
+### H131：只 union `/usr/lib`（2026-11-07）
+
+`patches/xnu/zzzzzzzzzzzzzzz-h131-usrlib-union.patch`：
+
+- 在 `native_owner_cache_prepare()`（SystemOS 挂载）之后新增
+  `native_cryptex_usrlib_prepare()`；
+- 用仓库已有的同一套机制：
+  `mount("bindfs", "/usr/lib", MNT_RDONLY|MNT_UNION, "/private/preboot/Cryptexes/OS/usr/lib")`；
+- 挂载前后各做一次 `vnode_lookup("/usr/lib/libobjc-trampolines.dylib")`；
+- 失败只记录、不 panic。
+
+预期日志：`NATIVE_CRYPTEX_USRLIB: before=2 mount=0 result=0 after=0`
+（ENOENT → 成功）。若 union 层本身有问题，回退 `boot-H130.img`；也可以退一步改成
+内核里对 `/usr/lib/*` 的单点重定向。
+
+```text
+H131 kernel:  98ccafd6a2743d2fbafc4d76b46f65325865c252c080b911410657e2dbcb7d7c
+H131 payload: 00147955814bf095c13e2fb51c238a6c028cf712eeede819441f05116e4d8101
+H131 boot:    17e50f6f10e4cf3e53291dd7ec78bc9f779e76670588c7d878ca15c7c106cb0b
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H131.img`（已核对）、
+Mac `~/h103/boot-H131.img`、仓库 `out/cheeseburger/boot/boot-H131.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

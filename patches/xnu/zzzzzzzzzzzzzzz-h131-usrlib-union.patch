@@ -1,0 +1,78 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -8051,6 +8051,58 @@
+ 	printf("NATIVE_PREBOOT: status=%d stage=%d\n", error, native_preboot_overlay_stage);
+ 	return error;
+ }
++
++/*
++ * H131: the OS image carries only 19 entries in /usr/lib; the SystemOS
++ * cryptex carries the 9 it lacks (libobjc-trampolines, libffi-trampolines,
++ * libstdc++, libglInterpose, libLogRedirect, libCoreLSKD).  Without the
++ * union, Objective-C cannot install its trampolines and every ObjC process
++ * aborts with "couldn't dlopen libobjc-trampolines.dylib".  The two
++ * listings do not overlap, so the union only adds files: /usr/lib/dyld and
++ * the rest of the OS volume stay authoritative.
++ */
++static int
++native_cryptex_usrlib_prepare(proc_t p, user_addr_t scratch)
++{
++	const char *source = "/private/preboot/Cryptexes/OS/usr/lib";
++	const char *point = "/usr/lib";
++	const char *wanted = "/usr/lib/libobjc-trampolines.dylib";
++	vnode_t probe = NULLVP;
++	struct mount_args request = {.type = scratch, .path = scratch + 0x40,
++	    .flags = MNT_RDONLY | MNT_UNION, .data = scratch + 0x100};
++	int32_t result = 0;
++	int before = 0, after = 0, error = 0;
++
++	before = vnode_lookup(wanted, 0, &probe, vfs_context_current());
++	if (!before) {
++		vnode_put(probe);
++		probe = NULLVP;
++	}
++
++	error = vnode_lookup(source, 0, &probe, vfs_context_current());
++	if (error) goto done;
++	vnode_put(probe);
++	probe = NULLVP;
++
++	if ((error = copyout("bindfs", request.type, 7)) ||
++	    (error = copyout(point, request.path, strlen(point) + 1)) ||
++	    (error = copyout(source, request.data, strlen(source) + 1))) goto done;
++
++	native_bindfs_boot_mount = 1;
++	error = mount(p, &request, &result);
++	native_bindfs_boot_mount = 0;
++done:
++	if (probe) vnode_put(probe);
++	probe = NULLVP;
++	after = vnode_lookup(wanted, 0, &probe, vfs_context_current());
++	if (!after) {
++		vnode_put(probe);
++		probe = NULLVP;
++	}
++	printf("NATIVE_CRYPTEX_USRLIB: before=%d mount=%d result=%d after=%d\n",
++	    before, error, result, after);
++	return error;
++}
+ #endif
+ 
+ 
+@@ -8392,6 +8444,15 @@
+ 	int cache_error = native_owner_cache_prepare(p, (user_addr_t)scratch_addr, &init_envp);
+ 	boot_progress_stage("SystemOS mount returned");
+ 	if (cache_error) panic("offline owner SystemOS mount failed: %d", cache_error);
++#endif
++#if defined(XNU_OWNER_PREBOOT_LAYOUT) && XNU_OWNER_PREBOOT_LAYOUT
++	/* H131: add the cryptex-only /usr/lib entries the OS image lacks. */
++	boot_progress_stage("cryptex usrlib union enter");
++	int usrlib_error = native_cryptex_usrlib_prepare(p, (user_addr_t)scratch_addr);
++	boot_progress_stage("cryptex usrlib union returned");
++	if (usrlib_error) {
++		printf("NATIVE_CRYPTEX_USRLIB: union not applied: %d\n", usrlib_error);
++	}
+ #endif
+ #if CONFIG_MEMORYSTATUS
+ 	(void) memorystatus_init_at_boot_snapshot();
