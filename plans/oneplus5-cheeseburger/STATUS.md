@@ -5615,6 +5615,31 @@ NATIVE_IOKIT_DICT: comm=backboardd IOProviderClass=IOAccessoryManager
 `op=match comm=backboardd …` 或 `open`（`NATIVE_LEGACY: client enter`），
 `NATIVE_FRAME … client=` 变为非 0。
 
+### H140：发布 backlight-control、对照探针与值类型（2026-11-07）
+
+1. `drivers/NativeMobileDisplay/NativeLegacyDisplay.cpp` 的 `registerService()`
+   在 `IOService::registerService()` 之前发布
+   `setProperty("backlight-control", kOSBooleanTrue)`，让 backboardd 的
+   `IOPropertyMatch.{backlight-control}` 通知能够命中；
+2. `drivers/NativeUfsProbe/NativeUfsProbe.cpp` 探针增加对照组
+   `"IOPlatformExpertDevice"`（backboardd 自己匹配 ok=1 的对象），结果置
+   `native_boot_flags` 的 `0x80000`；
+3. `patches/xnu/zzzzzzzzzzzzzzzzzzzzzzzz-h140-typed-dict.patch`：字典打印追加
+   值的类名（`OSBoolean`/`OSNumber`/`OSData`），类型不对时可立即修正。
+
+注意：修改 `NativeLegacyDisplay.cpp` 后必须重新生成 owned Legacy 归档
+（`scripts/build-op5-legacy-display.py`），否则内核链接会以
+`Rebuild the owned Legacy archive after changing …` 拒绝。
+
+```text
+H140 kernel:  ea9c82af4acce862568b9eb68e045d1e277a998de1b6ec7908288b4ace2e91be
+H140 payload: 53d9a719d6016341b0d64be6cab3f020f07515f114fffd1aaf949b5980b21b45
+H140 boot:    dcf631ed37e44a6712cbbe2e1ea6c0a08a4c3932944904f70456d1149aeb5758
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H140.img`（已核对）、
+Mac `~/h103/boot-H140.img`、仓库 `out/cheeseburger/boot/boot-H140.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

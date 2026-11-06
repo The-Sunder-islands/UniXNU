@@ -1614,9 +1614,13 @@ h103ProbeIomfb (void)
   // H139: the verdict also goes into native_boot_flags, which every NATIVE_IRQ
   // line prints.  A one-shot IOLog lands in the dyld-cache flood and is
   // routinely trimmed by the slot delta, which is what happened in H138.
-  const uint32_t bits[2] = { 0x20000U, 0x40000U };
-  const char *names[2] = { "IOMobileFramebuffer", "IOMobileFramebufferLegacy" };
-  for (unsigned i = 0; i < 2; i++) {
+  // 0x80000 is a control: backboardd itself matches IOPlatformExpertDevice
+  // with ok=1, so this separates "our service is not matchable" from
+  // "this API does not match by class name at all".
+  const uint32_t bits[3] = { 0x20000U, 0x40000U, 0x80000U };
+  const char *names[3] = { "IOMobileFramebuffer", "IOMobileFramebufferLegacy",
+                           "IOPlatformExpertDevice" };
+  for (unsigned i = 0; i < 3; i++) {
     OSDictionary *matching = IOService::serviceMatching (names[i]);
     IOService *service = matching ? IOService::copyMatchingService (matching) : nullptr;
     if (service) {

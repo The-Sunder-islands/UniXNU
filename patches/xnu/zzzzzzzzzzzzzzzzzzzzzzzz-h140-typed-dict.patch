@@ -1,0 +1,16 @@
+diff --git a/iokit/Kernel/IOUserClient.cpp b/iokit/Kernel/IOUserClient.cpp
+--- a/iokit/Kernel/IOUserClient.cpp
++++ b/iokit/Kernel/IOUserClient.cpp
+@@ -2780,9 +2780,10 @@
+ 				}
+ 				OSObject *val = dict->getObject(key);
+ 				OSString *vs = OSDynamicCast(OSString, val);
+-				IOLog("NATIVE_IOKIT_DICT: comm=%s count=%u %s=%s\n", comm,
++				IOLog("NATIVE_IOKIT_DICT: comm=%s count=%u %s=%s (%s)\n", comm,
+ 				    dict->getCount(), key->getCStringNoCopy(),
+-				    vs ? vs->getCStringNoCopy() : (val ? "(non-string)" : "(null)"));
++				    vs ? vs->getCStringNoCopy() : (val ? "(non-string)" : "(null)"),
++				    val ? val->getMetaClass()->getClassName() : "-");
+ 				/* H139: IOPropertyMatch and friends carry a nested dictionary; one
+ 				 * level is enough to see what the client is waiting for. */
+ 				OSDictionary *nested = OSDynamicCast(OSDictionary, val);
