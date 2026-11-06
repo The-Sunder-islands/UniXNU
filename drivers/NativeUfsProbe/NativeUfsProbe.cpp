@@ -158,7 +158,9 @@ static int gH109Chan;
 static volatile uint32_t gH109Ticks;
 static timer_call_t gH109TimerCall;
 // H117: h114-gic=0 keeps the H114 redistributor/ICC reads out of the A/B run.
+// H118: the GIC values are cached at init; h114-icc gates only the ICC reads.
 static volatile uint32_t gH114GicProbe = 1;
+static volatile uint32_t gH114IccProbe = 0;
 // H110: h109-tick=0 keeps the timer_call off so the same kernel can be booted
 // with and without the interrupt heartbeat.
 static volatile uint32_t gH110TickEnabled = 1;
@@ -689,14 +691,22 @@ h103SlotTick (void)
              (unsigned long long) ctl, (unsigned long long) tval,
              native_boot_flags, gH109Ticks);
       if (gH114GicProbe) {
-        // H114: is the GIC signalling this CPU (HPPIR1) and where is the vector?
+        IOLog ("NATIVE_GIC: typer=%llx isen=%llx igrp=%llx ipend=%llx ipri=%llx\n",
+               (unsigned long long) armcpu_ppi_probe[0],
+               (unsigned long long) armcpu_ppi_probe[1],
+               (unsigned long long) armcpu_ppi_probe[2],
+               (unsigned long long) armcpu_ppi_probe[3],
+               (unsigned long long) armcpu_ppi_probe[4]);
+      }
+      if (gH114IccProbe) {
+        // H118: the ICC reads are the second suspect for the H114 crash, so they
+        // stay behind their own switch (off by default).
         uint64_t el = 0, vbar = 0, h1 = 0, h0 = 0, rpr = 0;
         __asm__ volatile ("mrs %0, CurrentEL" : "=r" (el));
         __asm__ volatile ("mrs %0, vbar_el1" : "=r" (vbar));
         __asm__ volatile ("mrs %0, icc_hppir1_el1" : "=r" (h1));
         __asm__ volatile ("mrs %0, icc_hppir0_el1" : "=r" (h0));
         __asm__ volatile ("mrs %0, icc_rpr_el1" : "=r" (rpr));
-        armcpu_probe_ppi27 ();
         IOLog ("NATIVE_IRQ2: el=%llu vbar=%llx h1=%llx h0=%llx rpr=%llx flags=%x\n",
                (unsigned long long) ((el >> 2) & 3ULL),
                (unsigned long long) vbar,
@@ -705,12 +715,6 @@ h103SlotTick (void)
                (unsigned long long) (rpr & 0xffULL),
                native_boot_flags);
       }
-      IOLog ("NATIVE_GIC: typer=%llx isen=%llx igrp=%llx ipend=%llx ipri=%llx\n",
-             (unsigned long long) armcpu_ppi_probe[0],
-             (unsigned long long) armcpu_ppi_probe[1],
-             (unsigned long long) armcpu_ppi_probe[2],
-             (unsigned long long) armcpu_ppi_probe[3],
-             (unsigned long long) armcpu_ppi_probe[4]);
     }
   }
   // H112: one forced dump + flush 120 s after the UFS start, independent of
@@ -2937,6 +2941,9 @@ NativeUfsProbe::start (IOService *provider)
   uint32_t gicProbe = 1;
   PE_parse_boot_argn ("h114-gic", &gicProbe, sizeof gicProbe);
   gH114GicProbe = gicProbe ? 1 : 0;
+  uint32_t iccProbe = 0;
+  PE_parse_boot_argn ("h114-icc", &iccProbe, sizeof iccProbe);
+  gH114IccProbe = iccProbe ? 1 : 0;
   if (!gH110TickEnabled) {
     IOLog ("NATIVE_TICK: timer disabled\n");
   } else {
