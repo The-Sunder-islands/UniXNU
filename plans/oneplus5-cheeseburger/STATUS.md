@@ -4086,6 +4086,59 @@ Mac `~/h103/boot-H124.img`、仓库 `out/cheeseburger/boot/boot-H124.img`。
 - 完全没有 backboardd 的 IOKit 行、但别的进程有 → backboardd 在查询前就
   决定了 headless，下一步追它的 MobileGestalt/launchd 输入。
 
+## H125 定时器 PPI 对照（27 vs 19）（2026-11-06）
+
+TWRP 对照（`/tmp/twrp-gic-probe.out`、`/tmp/twrp-gic-probe2.out`）：
+
+```text
+[0.000000] Architected cp15 and mmio timer(s) running at 19.20MHz (virt/virt).
+3: ... GICv3 19 Edge arch_timer     (CPU0 30370→30504，1 s 内)
+5: ... GICv3 39 Level arch_mem_timer (未用)
+```
+
+- `(virt/virt)` = Linux 用的是**虚拟定时器**；它注册的 PPI 是 **GICv3 hwirq 19**；
+- 原厂 DT（`msm8998.dtsi` 805 行）：`timer { interrupts = <GIC_PPI 1>,<2>,<3>,<0> }`，
+  GIC 驱动对 PPI `+16` → **INTID 17/18/19/16**，Linux 实际用 **19**；
+- DT `intc` 的 `reg`/`redistributor-stride` 与我们的 ADT 一致（`17a00000/10000`、
+  `17b00000/100000`、stride `20000`）；
+- TWRP 内核没有 `/dev/mem`，`mknod /dev/mem c 1 1` 后 `toybox devmem` 仍被
+  `CONFIG_STRICT_DEVMEM` 挡住，所以 GICR 寄存器没读到（这一步不影响上面的结论）。
+
+因此"XNU 用 PPI 27、SoC 的定时器在 19"成为首要假设；XNU 里 27/30 pending
+与 Linux 用 19 的矛盾用同一次上机区分。
+
+H125 改动（`drivers/ArmCpu/ArmCpu.cpp`）：
+
+- `kSgiPpiEnable = 0xffff | (1<<19) | (1<<27)`，两者都使能；
+- 分发器对 19 和 27 都调 `rtclock_intr(0)`，并分别计数
+  `armcpu_timer19_interrupts` / `armcpu_timer27_interrupts`；
+- 新增写-读测试：`IGROUPR0` 写 `(1<<19)|(1<<27)`、`ISENABLER0` 清/置 19、
+  再取一次 `ISPENDR0`、尝试 `GICD_CTLR |= 1<<6`（DS）、读 `GICD_IGROUPR1`；
+- `NativeUfsProbe` 的 `NATIVE_IRQ` 增加 `t19=`/`t27=`，并新增一行：
+
+```text
+NATIVE_GIC4: grp1927=.. isen19_off=.. isen19_on=.. pend2=.. dctl_ds=.. dgrp1=..
+```
+
+```text
+H125 kernel:  01457a274e1602a9b4b742df2229cbe83620480f9304c4c17ddc654fcf519a3a
+H125 payload: c5e0550f8f4ef986607887cde8736a97b5ece3bd3745d63320b6d4527c8d3a23
+H125 boot:    dde2b6adce82bd30bd0144daa5ed54107f184f5e0826c4b3588432c861e51371
+```
+
+子模块 `drivers/ArmCpu` 提交 `01d2902`（分支 `h118-gic-cache`，已推送）。
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H125.img`（已核对）、
+Mac `~/h103/boot-H125.img`、仓库 `out/cheeseburger/boot/boot-H125.img`。
+args 不变（`cpus=2 h103-slot=1 h103-load-iogpu=0 h103-log-secs=5 h109-tick=1 h114-gic=1`）。
+
+判读：
+
+- `t19 > 0` → 这台 SoC 的定时器就是 INTID 19；把 27 去掉、保留 19 即可，
+  定时器/抢占/超时全部恢复，不需要改固件；
+- `t27 > 0` → 27 才是定时器，回到 Group/帧问题（看 `grp1927` 与 `dctl_ds`）；
+- 两者都是 0 → 看 `grp1927`（19 能否进 Group 1）、`dctl_ds`（NS 能否置 DS）、
+  `pend2`（19 是否 pending），再决定帧布局或固件路线。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
