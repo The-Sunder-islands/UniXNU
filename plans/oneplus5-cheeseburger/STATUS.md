@@ -3960,6 +3960,55 @@ Mac `~/h103/boot-H122.img`、仓库 `out/cheeseburger/boot/boot-H122.img`。
 - 若连 `ISENABLER0` 也写不动 → 我们映射/选错了 redistributor 帧，需要
   重新核对 DT 描述与 stride。
 
+## H123 全进程等待图（2026-11-06）
+
+H122 已确认 PPI 27/30 被安全世界固定为 Group 0、非安全态改不了，定时器/中断
+这条线转固件侧（`edk2-msm8998`，DS=0 时需要安全世界把 PPI 划成 Group 1 NS），
+内核侧不再加 GIC 采样。本轮把主线拉回"绿不变白"：不再碰 GIC，改为在停滞瞬间
+dump **全进程等待图**，定位 H107 看到的 `IPC_MQUEUE_FULL` 接收方。
+
+改动只在 `patches/xnu/zzzzzzzzzzz-h103-proc-state.patch`（`osfmk/kern/task.c`）：
+
+- 保留原有 5 个进程（loader/backboardd/driverkitd/SpringBoard/launchd）的逐线程明细；
+- 新增 `native_proc_wait_graph()`，用 `proc_iterate(PROC_ALLPROCLIST|PROC_NOWAITTRANS)`
+  遍历全部进程，每个进程输出一行：
+
+```text
+NATIVE_WAIT: pid=55 comm=backboardd threads=2 run=0 sb=1 tid=358 st=1 wait=... cont=...
+```
+
+`run` 是非等待线程数，`sb` 是 `wait_event == &ipc_mqueue_full` 的线程数；
+`tid/st/wait/cont` 取最小 tid（主线程）的那条线程。打印在收集完成后进行，
+不持 proc 锁；约 70–100 行、~10 KB，单次 flush 上限（32 块 = 128 KiB）足够。
+
+```text
+H123 kernel:  deba005d217433dc753014544d9018936e47c7857f8e5f64dd3848dcf1830858
+H123 payload: 8ecad3d1ea75bb1fba64ca398268b9b213a62e7b133088a914077944baf82d76
+H123 boot:    389edf630a52bc3e2995f63f4fdde2b3068d0d463277488ff9b23f7cc2aaa99c
+H123 patch:   5073a29dfcebfd9991b8ddfcc638bca6b22bdeefd9ed967fa5174cd3235522f1
+```
+
+构建于 Mac `~/UniXNU`（`h123-build.log`，rc=0，`.cache/xnu-work` 先重置），
+预链接 `~/prelink-h105.sh`；固件沿用 `fw-H103ea.img.gz-dtb`（`163917aa…`），
+payload 由 `payload-H122.img` 只替换 `EFI/UniXNU/Payloads/kernel.macho`，
+boot image 布局与 H122 逐字节一致（`ANDROID!`，page 2048，hdr 1，同 size 81147904）。
+args 不变：`cpus=2 h103-slot=1 h103-load-iogpu=0 h103-log-secs=5 h109-tick=1 h114-gic=1`。
+
+镜像：Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H123.img`（已核对）、
+Mac `~/h103/boot-H123.img`、仓库 `out/cheeseburger/boot/boot-H123.img`。
+
+判读（`cont`/`wait` 用 `atos` 对 dSYM 符号化）：
+
+- `ipc_mqueue_receive_continue` → 等消息（空闲）；
+- `wait = &ipc_mqueue_full` → 发送方被满队列挡住；
+- `ulock_wait_continue` / `semaphore_wait_continue` / `workq_unpark_continue` /
+  `_sleep_continue` / `clock_delay_until` → 其它等待。
+
+分支：有 `sb>0` 且某进程 `run=0`、主线程停在 receive/其它等待 → 该进程就是接收方，
+继续查它为何不出队；所有进程都在 receive/空闲且无人 `sb` → 停滞不是满队列，
+回到启动顺序（launchd/SpringBoard 依赖）；backboardd 不在 `NATIVE_WAIT` 里 →
+停滞仍在 exec 之前。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
