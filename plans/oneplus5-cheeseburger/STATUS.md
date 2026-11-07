@@ -6239,6 +6239,42 @@ Mac `~/h103/boot-H154.img`、仓库 `out/cheeseburger/boot/boot-H154.img`。
 判读：若仍在“禁用抢占”上下文 panic，屏幕会显示**原始** panic 文本（需拍照）；
 若抢占正常，日志里会有 `NATIVE_PANIC_STR` 且槽会更新。
 
+### H154 结果：panic 钩子不再自伤，露出真正的 data abort（2026-11-07）
+
+屏幕（`h154` 启动）：
+
+```text
+shared_region: … vm_shared_region_start_address() failed
+NATIVE_UFS_ALIVE: winFlight=0 ufsFlight=0 cmds=1731 …
+panic(cpu 0 caller 0xfffffff007a17f08): Kernel data abort. at pc 0xfffffff007b25a08,
+  lr 0xfffffff007b25a08
+  esr: 0x96000006  far: 0x0000000000000008
+  x0=0 x1=0 x2=0xfffffff007734e20 x3=0xfffffff9c3f520 …
+```
+
+- H154 生效：不再出现“禁用抢占取 mutex”的二次 panic，露出了原始 data abort；
+- `far=0x8`、`x0=0` → 空指针 +8 解引用；
+- `pc` 落在 `__common`(BSS) 区（`kernel.macho` 的 `__text` 到 `0x…a89384` 为止），
+  说明预链接后的地址布局与 dSYM 不一致，无法可靠符号化；
+- 持久日志仍**没有更新**（`boot_id`/`slots_written` 与 H151 相同）：panic 时
+  `h103FlushNow()` 很可能因为心跳线程正持有 `fLock` 而超时失败，所以连
+  `NATIVE_PANIC_STR` 也没落盘。
+
+### H155：日志间隔 60 s → 10 s（2026-11-07，仅改 payload）
+
+既然 panic 时刻的 flush 不可靠，就让日志“平时就几乎是最新的”：把
+`h103-log-secs=60` 改为 `h103-log-secs=10`，这样即使 panic flush 失败，最多也只丢
+最后 10 秒。内核不变，仅重打 payload。
+
+```text
+H155 kernel:  61142f9389944234b91a3a947e6973eedc0e11dade6deb1fb4df32c5cf5f3388（沿用 H154）
+H155 payload: c23e8bbcf3b3cd2d42452ace6c68f137e7e6f8efd6ef39af0b097335ec610567
+H155 boot:    39c9f94e5c043e368ad670a41bde0cd36e5aea3123a30c3dec9ff0d21232626c
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H155.img`（已核对）、
+Mac `~/h103/boot-H155.img`、仓库 `out/cheeseburger/boot/boot-H155.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
