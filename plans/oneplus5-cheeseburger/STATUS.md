@@ -5821,6 +5821,48 @@ H144 boot:    a3c11ee6cc04202e0b7d9d8b86b89b15b4282d6a2ebaf474261bc17ad08ad007
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H144.img`（已核对）、
 Mac `~/h103/boot-H144.img`、仓库 `out/cheeseburger/boot/boot-H144.img`。
 
+### H144 结果：卡在 IOSurface 前置条件（2026-11-07）
+
+`h144-log-20261107-113810.txt`：`flags=310860af`，解码后
+
+| 位 | 状态 |
+| --- | --- |
+| `0x10000000` 早期 probe 暂存显示对象 | ✅ |
+| `0x20000000` late probe 取到该对象 | ✅ |
+| `0x01000000` late probe 入口 | ✅ |
+| `0x40000000` IOSurface 找到 | ❌ |
+| `0x80000000` GOP 参数通过 | ❌ |
+
+即 late probe 卡在：
+
+```c
+native_legacy_surface_status = OSKextLoadKextWithIdentifier("com.apple.iokit.IOSurface");
+surface = waitForMatchingService(nameMatching("IOCoreSurfaceRoot"), 5 s);
+native_legacy_surface_found = surface != nullptr;
+```
+
+旧日志里的 `IOSurface status=0 found=1` 是更早启动的残留。
+
+### H145：把 IOSurface 这一步的三个结果分开打点（2026-11-07）
+
+| 位 | 含义 |
+| --- | --- |
+| `0x00010000` | IOSurface kext 加载返回 0 |
+| `0x00200000` | `IOCoreSurfaceRoot` 5 秒内匹配到 |
+| `0x00400000` | `PE_current_console(&video)` 成功 |
+
+判读：缺 `0x10000` → kext 没加载成功；有 `0x10000` 缺 `0x200000` → 5 秒内没匹配到
+（时序）；两者都有缺 `0x400000` → 控制台参数取不到。
+
+```text
+H145 kernel:  6ef804f591997f7f14aa70ef56d87fad7811fad3f4deb2a226052b97db46281e
+H145 payload: b97c766fa1d75a20d4b232a990b86483ddb349376ce93c55c01943edbf242b33
+H145 boot:    fb9ee488756eab69f7b982e294690b7b5156f5c9784b705f6e1f5322430d1e99
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H145.img`（已核对）、
+Mac `~/h103/boot-H145.img`、仓库 `out/cheeseburger/boot/boot-H145.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
