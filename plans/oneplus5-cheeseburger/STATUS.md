@@ -7791,6 +7791,72 @@ H181b boot:    65988f937f22bbdbe7f3862bbea163957e10c4fa968e4ed48d773778361379e8
 若 `ext=1/2` → `/private/var/ngpu/addons` 没建出来（安装失败）；若 `ext=3/2` →
 mount 后看不到封印层；`info≠0` 且 `ext≥3` → union 可见但插件路径仍不对。
 
+### H181b 结果：addon 代码根本没被执行（2026-11-08）
+
+`H181b-log-20261108-003028.txt`（build=H181b，41–680 s）：
+
+- `61.78  NATIVE_H82_DATA: status=0 stage=4 ro=0` → `native_owner_data_prepare()`
+  成功，紧接着的 `native_gpu_addon_prepare()` 确实被调用；
+- 但整份日志里**没有** `NATIVE_GPU_ADDON` 行；
+- 与 H181a 对比，61.04–61.78 s 的几十行（root auth、PMRD、disk6、spec_open…）
+  时间戳逐微秒完全相同。如果新增的 printf 执行过，这条时间线不可能不变。
+
+结论：`native_gpu_addon_prepare()` 在第一行就返回了，即
+`PE_parse_boot_argn("sheng-gpu-addon", &enabled, 4)` 拿到值不等于 1。
+也就是说 H181/H181a 的“插件路径不可见”其实是 **addon 从未安装**。
+
+### 根因：command line 末尾的数值参数被当成字符串
+
+`pexpert/gen/bootargs.c` 的 `getval()`：
+
+```c
+intval = *s++ - '0';
+switch (*s) {
+default:
+    if (!issep(*s)) { return STR; }   /* isargsep 只认空格和 tab */
+}
+```
+
+我们的 args 末尾是 `… _offline-accelerator-plugin=NilMetal sheng-gpu-addon=1`，
+`=1` 后面直接是字符串结束符 `'\0'`，不是分隔符 → `getval()` 返回 `STR`，
+于是走 `argstrcpy2()` 把 ASCII `"1"` 写进 `uint32_t enabled`，`enabled = 0x31 = 49`，
+`enabled != 1`，addon 安装与三个 union mount 全部跳过。
+
+`_offline-accelerator-plugin=NilMetal` 之所以正常，是因为它是字符串参数（下划线
+强制字符串拷贝），且字符串参数不依赖结尾分隔符。此前所有位于末尾的参数都是字符串，
+所以这个坑一直没暴露。
+
+### H182：把数值参数移到字符串参数之前（2026-11-08）
+
+payload 的 args 末尾改为：
+
+```text
+... offline-accelerator=1 sheng-gpu-addon=1 _offline-accelerator-plugin=NilMetal
+```
+
+`sheng-gpu-addon=1` 后面是空格 → 走 NUM；字符串参数放最后不受影响。
+内核保留 H181b 的 `NATIVE_GPU_ADDON` 诊断日志，只把 build 标记改为 H182。
+
+```text
+H182 kernel:  97f019808ce16bfb4ad0bf9dc53db40d1c7ba0d52162ba26222acd1d79b2a94d
+H182 payload: d4c5e29d4effda069843721a9adf7efa975e8927d5723136194a1753cb4f37bb
+H182 boot:    6b09328db56339723699a1f86bd291c5111199c8b6953612537a6dc503491ab7
+```
+
+判读（预期）：
+
+```text
+NATIVE_GPU_ADDON: plugin=NilMetal info=0 files=3 written=3 same=0 failed=0 error=0 ext=4/2 daemons=1/2 wallpaper=1/2
+```
+
+- `files/written=3`：addon 三个文件写进 Data；
+- `info=0`：`/System/Library/Extensions/NilMetal.bundle/Info.plist` 在 union 后可见；
+- `ext=4/2`：union 成功且封印层可见，2 是 `NativeAdrenoMetal.bundle` 自检路径（我们叫
+  NilMetal），属预期；
+- `daemons=1/2`、`wallpaper=1/2`：这两个 overlay 的源目录本就不存在，属预期。
+
+之后看 CA 是否继续读 `MetalPluginClassName`、是否出现 `frames>0` / `selector=3/4/5`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
