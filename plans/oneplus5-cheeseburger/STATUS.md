@@ -5991,6 +5991,40 @@ Mac `~/h103/boot-H148.img`、仓库 `out/cheeseburger/boot/boot-H148.img`。
 判读：不再 panic；`NATIVE_META: serialize skipped for …` 指出被序列化的类；
 `flags` 应出现 `0x4000000`；`NATIVE_IOMFB_PROBE` 的 `IOMobileFramebuffer` 应为非 0。
 
+### H148 结果：序列化 panic 消失，改成 preemption 断言（2026-11-07）
+
+`h148-log-20261107-123426.txt`：
+
+```text
+panic(cpu 0 caller 0xfffffff0079dec44):
+  Attempt to take mutex 0xfffffff00762cc40 with preemption disabled (1) @lock_rtx.c:194
+```
+
+位置与 H147 相同（`IOCPUInterruptController: not registry member` →
+`IOSurface wait attempt=1` → `nx_mount` → panic）。原因是我在 H148 里给
+`OSMetaClass::serialize()` 加的 `printf`：该回调在 IOKit 注册表/匹配锁内、
+**preemption 已禁用**，而 `printf` 会去取 msgbuf 的 mutex。
+
+即：诊断代码又一次在错误上下文里做 I/O（与 H128 的教训同类）。
+
+### H149：把这段日志延迟到线程上下文（2026-11-07）
+
+`patches/xnu/zzzzzzzzzzzzzzzzzzzzzzzzzzzz-h149-meta-deferred.patch`：
+
+- `OSMetaClass::serialize()` 只做无锁写：
+  `native_meta_serialize_count++`，首次记录 `native_meta_serialize_class`；
+- `drivers/NativeUfsProbe`：心跳（线程上下文）检测计数变化后打印一次
+  `NATIVE_META: serialize skipped n=… first=<class>`。
+
+```text
+H149 kernel:  b2958744e345c1a6841664728a2d57830dd82d202d7558ac6774e57067ca4309
+H149 payload: 82ca9e3964996de1cd6bb875b1cb5d2cfadf1481ed0593f7b10d947468ed2260
+H149 boot:    23e04aef97c96d6638b4803b6a464f09c4dfd5053fa107f8cb7066bfb4c118d2
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H149.img`（已核对）、
+Mac `~/h103/boot-H149.img`、仓库 `out/cheeseburger/boot/boot-H149.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

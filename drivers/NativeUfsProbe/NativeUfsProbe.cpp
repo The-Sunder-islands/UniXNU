@@ -97,6 +97,9 @@ static void h103TimerCallFunc (timer_call_param_t, timer_call_param_t);
 // display archive.
 extern "C" kern_return_t OSKextLoadKextWithIdentifier (const char *);
 extern "C" volatile uint32_t native_boot_flags;
+extern "C" volatile unsigned native_meta_serialize_count;
+extern "C" volatile const char *native_meta_serialize_class;
+static void h103ReportMetaSerialize (void);
 static volatile int gH103LoadIogpu;
 static volatile int gH103IogpuTried;
 static volatile uint32_t gH103IogpuRc = 0xffffffffU;
@@ -679,6 +682,21 @@ native_panic_flush (void)
 // never run from a block-storage completion: it allocates, copies the message
 // buffer, writes to the persistent log and can print process dumps, all of
 // which took tens of seconds while NativeUfsWindow's request lock was held.
+// H149: OSMetaClass::serialize runs with preemption disabled, so the count is
+// recorded there and printed here, in thread context.
+static void
+h103ReportMetaSerialize (void)
+{
+  static volatile unsigned seen;
+  unsigned n = native_meta_serialize_count;
+  if (n == seen) {
+    return;
+  }
+  seen = n;
+  const char *cls = const_cast<const char *> (native_meta_serialize_class);
+  IOLog ("NATIVE_META: serialize skipped n=%u first=%s\n", n, cls ? cls : "-");
+}
+
 static void
 h103SlotTick (void)
 {
@@ -775,6 +793,7 @@ h103SlotTick (void)
   if (!gH103SlotMode) {
     return;
   }
+  h103ReportMetaSerialize ();
   h103ProbeIomfb ();
   h103MaybeLoadIogpu ();
   h103MaybePublishIogpu ();
