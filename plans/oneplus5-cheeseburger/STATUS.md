@@ -6663,6 +6663,72 @@ payload 仍为 `offline-legacy-unit-scale=3`、`h103-log-secs=60`。
 - `client io … selector=3/4/5/6` 出现 → CA 已进入 swap；不出现 → 卡在
   renderer/accelerator（对应 `IOAcceleratorES ok=0`）。
 
+### H163 结果：尺寸来源确认，卡在客户端返回策略（2026-11-07）
+
+`h163-log-20261107-170521.txt`。注意：报告 header 里没有 `slot_boot`/`slot_build`
+字段，说明这次用的仍是旧版抓取脚本，slot 仍然混了两次 boot 的内容（最早的
+51.8 s、60/65 s 那段与 H162 日志逐微秒相同，且没有 H163 新增的 `dims` 行；
+真正的 H163 显示启动在 544.6 s）。**下一份日志请用本仓库/ Mac 上已更新的
+`scripts/h103-log-pull.py` 抓取**，header 里应出现 `slot_boot=…`。
+
+H163 新增日志的结论（这些行只有 H163 内核才会打印）：
+
+```text
+NATIVE_LEGACY: dims 1080x1920 canvas=0:0,0:0 dotpitch=0:0
+client io pid=55 selector=8  status=0          out=438,780   (1080x1920)
+client io pid=87 selector=8  status=0          out=438,780
+client io pid=87 selector=28 status=e00002f0   (GetDotPitch, not found)
+client io pid=55 selector=29 status=e00002c7   struct=8      (GetDisplayArea)
+client io pid=55 selector=57 status=e00002c7
+client io pid=55 selector=79 status=e00002c7   struct=1580 / 44  (GetBlock)
+client io pid=55 selector=6  status=0          in=0,80000003
+```
+
+- **`FBSDisplayMode` 的 1242×2208 不是 IOMFB 给的**：`GetDisplaySize` 明确返回
+  1080×1920，1242×2208（=1080×1920×1.15）是 MobileGestalt/UIKit 对
+  “1080×1920 面板”的 iPhone 6/8 Plus 级下采样结果；
+- backboardd **从未调用 3/4/5**（SwapBegin/SetLayer/SwapEnd），只在 816 s 调了
+  一次 `6`（swap id 0）；`NATIVE_FRAME … frames=0`；
+- `IOAcceleratorES` 匹配 `ok=0` 88 次、`AGXAccelerator` 2 次、`AppleCLCD` 1 次；
+- 存储：`NATIVE_UFS_LOCK` 113、`err 60` 46、`logWrite timeout` 1（与 H162 同量级）；
+- 仍无 `FBSDisplayMode`，SpringBoard 17 次全部是
+  `"failed to find the main CADisplay"`。
+
+对照参考实现（`ios-sweet/xnu/patches/0046-sweet-iosurface-iomfb.patch` 的
+`IOMobileFramebufferUserClient::externalMethod`）：它只实现
+`3/4/5/6/7/8/18/28/72`，**其余选择器一律返回成功并清零输出**
+（`default: break;` 后把 `scalarOutput` 和 `structureOutput` 全部置 0）。
+我们这一族对 `29/57/79`（以及 `74`）返回 `kIOReturnUnsupported`，是当前唯一
+可指认的行为差异；而 ios-sweet 在同样没有 GPU 的机器上 CADisplay 是存在的
+（0052n/0053s）。
+
+### H164：按参考客户端返回策略答复未实现选择器（2026-11-07）
+
+1. `drivers/NativeMobileDisplay/LegacyDisplayProbe.cpp` 的客户端 interposer：
+   原方法返回 `kIOReturnUnsupported` 时，清零 `scalarOutput` 与
+   `structureOutput`（无 descriptor 时）并改为 `kIOReturnSuccess`，每个客户端
+   最多打印 24 行 `NATIVE_LEGACY: client fixup pid=… selector=… unsupported->0`。
+   原方法本身不改动。
+2. 显示 nub 发布真实面板几何：
+   `canvas-width=1080`、`canvas-height=1920`、`dot-pitch=401`
+   （5.5" 1080×1920 面板，`sqrt(1080²+1920²)/5.5 = 401 ppi`）；
+   这样 `GetDotPitch(28)` 由 `kIOReturnNotFound` 变为成功，框架也能读到 canvas。
+3. 构建标记 `NATIVE_BUILD: H164`（slot 戳里的 `build=` 同步）。
+
+```text
+H164 kernel:  c5f529dc2a88dd6dc1a01fbc43b5e218ab529f91db51b6c911bae9a5de34d12e
+H164 payload: 562d103511a4fe8eac32ea09efbe45109432daadfe641fa2647ac1c50c0a2378
+H164 boot:    b63de91347dd2230e68c817327b38f99ef75d302c5393654eba3c61b9c0c10d9
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H164.img`（已核对）、
+Mac `~/h103/boot-H164.img`、仓库 `out/cheeseburger/boot/boot-H164.img`。
+
+判读：`client fixup … selector=29/57/74/79` 应出现；若 backboardd 由此建立
+display，应看到 `selector=3/4/5`（swap）或 CADisplay 断言消失；若仍在
+`IOAcceleratorES ok=0` 循环，则下一步按 H104k 的结论补一个可匹配的
+`IOAcceleratorES` 服务（窄 personality，不再重犯 H142 的全局匹配）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
