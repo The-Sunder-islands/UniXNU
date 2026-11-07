@@ -6351,6 +6351,60 @@ Mac `~/h103/boot-H157.img`、仓库 `out/cheeseburger/boot/boot-H157.img`。
 判读：只要这次启动跑过 UFS 启动后 1 秒，日志 header 的 `boot_id`/`slots_written`
 就应该变化，并出现 `NATIVE_BUILD: H157` 与崩溃前最后 1~2 秒的内容。
 
+### H157 结果：确认崩溃点，地址落在内核 BSS（2026-11-07）
+
+H157 的屏幕首次显示 `logSecs=10`（说明新内核确实运行），崩溃与之前一致：
+
+```text
+panic(cpu 0 caller 0xfffffff007a1f028): Kernel data abort.
+  at pc 0xfffffff007b25a08, lr 0xfffffff007b25a08
+  esr: 0x96000006  far: 0x0000000000000008
+```
+
+用 H157 的 `kernel.macho` 逐段解析：
+
+```
+0xfffffff007b25a08 -> __DATA,__common 段内（offset 0x45a08）
+```
+
+即保存的 pc/lr 指向内核**未初始化数据段**，配合 `far=0x8`、`x0=0`，更像是
+“跳进了一个未初始化的函数指针/vtable”后取数崩溃，而不是普通空指针调用。
+崩溃发生得太早（心跳第一拍 1 秒之前或附近），所以日志仍然来不及落盘。
+
+时间线对照（STATUS 历史）：
+
+- H130–H135：显示是**手工** `probe/attach/start/registerService`，系统能跑到
+  userland，SpringBoard 因缺 CADisplay 崩溃，**内核没有 data abort**；
+- H142 起：显示改为 **KernelConfigTable personality**，内核在 launchd 阶段 data abort。
+
+H142 让 `nub->registerService()` 触发 IOKit 用**所有** `IOProviderClass =
+IOPlatformDevice` 的 personality 去试配 GOP nub，其中包含 force-load 的 Apple
+家族（`IOMobileGraphicsFamily`、`AppleARMPlatform` 等）；某个驱动被实例化后在
+其 `start/probe` 里把 provider 当作 `AppleARMIODevice` 使用（`NULL + 8`），
+随后通过未初始化 vtable 调用而崩溃。日志中的
+`Couldn't alloc class "AppleARMFabricTrace"` 是同一批匹配里被跳过的另一条。
+
+### H158：移除 display personality，恢复手工启动（因果验证，2026-11-07）
+
+1. `patches/xnu/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-h158-drop-personality.patch`：
+   把 H142 加入的 `NativeLegacyDisplay` personality 用 `#if 0` 关掉；
+2. `drivers/NativeMobileDisplay/LegacyDisplayProbe.cpp`：恢复 H141 的手工路径
+   （`display->probe/attach/start`，并保留 `activeLegacyDisplay`），不再
+   `nub->registerService()`；
+3. 其余（日志节拍、UFS 拒绝、trust cache、panic 钩子、OSMetaClass）全部保留。
+
+```text
+H158 kernel:  60cf5f50378377bb432351bec051e687099c6fe9b8e6d11955a8a9ec00856fb0
+H158 payload: 3e81cd7fa1669c3ec8801a798362e1a1c6859d8548fac978759aee31d81ec22c
+H158 boot:    b4c4c8276b6995cd905b2efba670b83dad193a9a0472ab5f93048b193f237e59
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H158.img`（已核对）、
+Mac `~/h103/boot-H158.img`、仓库 `out/cheeseburger/boot/boot-H158.img`。
+
+判读：若内核 data abort 消失、系统回到“SpringBoard 因缺 CADisplay 崩溃”的状态，
+即确认 personality 是触发源；下一步再设计不会触发全局匹配的显示发布方式。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

@@ -1,0 +1,26 @@
+diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
+--- a/iokit/KernelConfigTables.cpp
++++ b/iokit/KernelConfigTables.cpp
+@@ -113,17 +113,10 @@
+     "     'IOProbeScore'    = 1000:32;"
+     "   }"
+ #endif
+-#if defined(XNU_NATIVE_LEGACY_DISPLAY) && XNU_NATIVE_LEGACY_DISPLAY
+-    /* H142: the GOP framebuffer is published as a matched driver, not a
+-     * hand-started object.  IOServiceGetMatchingServices only returns
+-     * kIOServiceMatchedState services, so a hand-started IOMobileFramebuffer
+-     * is invisible to backboardd.  ios-sweet (AppleCLCD) and sagit
+-     * (QcomDisplay) both publish their display through a personality. */
+-    "   ,{"
+-    "     'IOClass'         = NativeLegacyDisplay;"
+-    "     'IOProviderClass' = IOPlatformDevice;"
+-    "     'IONameMatch'     = 'NativeGOPFramebuffer';"
+-    "     'IOProbeScore'    = 1000:32;"
+-    "   }"
++#if 0 /* H158: disabled.  Registering the display as an IOPlatformDevice
++       * personality made IOKit match every Apple IOPlatformDevice driver against
++       * our GOP nub; one of them is instantiated against a provider it does not
++       * expect and the kernel takes a data abort in launchd.  The probe starts
++       * the framebuffer by hand again until a narrower publication exists. */
+ #endif
+     ")";
