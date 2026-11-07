@@ -6857,6 +6857,53 @@ Mac `~/h103/boot-H166.img`、仓库 `out/cheeseburger/boot/boot-H166.img`。
 另：H164 的 panic 在 H165 上没有复现，待用 `boot-H164.img` 再启动一次留档，
 以区分“产物损坏”与“启动期竞态”。
 
+### H166 结果：预链接路径健康，但槽尾仍掺旧内容（2026-11-07）
+
+`h166-log-20261107-183846.txt`：
+
+```text
+P11 PMGR: prelink fn=1 sect=76000 parse=1 kexts=38 load=0
+NATIVE_BUILD: H166 boot=278eafa7
+header: slot_boot=278eafa7 slot_build=H166 slot_seq_max=18
+```
+
+H165 的打点结论明确：静态构造已执行、`__PRELINK_INFO` 段存在、XML 解析成功、
+38 个 kext 全部登记、`OSKextLoadKextWithIdentifier(ApplePMGR)` 成功。
+另有用户复测：H164 仍稳定出现 vnguard-first + PMGR panic，**H164 那张产物损坏**
+（与源码无关）。
+
+但报告仍混旧内容：`NATIVE_UFS_LOG: setup` 出现 3 次（34.8 s 本次、59.4/64.7 s
+另一套），其中 59.3 s 的 `NATIVE_UFS_HB: slotMode=1 hbTimer=0 loadIogpu=1`
+**缺 `logSecs=`**——该格式只存在于 H155 之前的内核，而 `kernel-H166.macho` 里只有
+一种 `slotMode=%d logSecs=%u …` 格式串。
+
+根因不在消息环回卷（H166 已修），而在槽本身：`h103SlotWrite()` 只写 `blocks`
+块（1–32），32 块槽区**未写的部分仍是上一次 boot 的槽内容**；当 payload 塞满写入区
+时没有 NUL 填充可供截断，pull 工具按 32 块读整槽就把旧文本接在了后面。
+
+### H167：槽自带精确长度（2026-11-07）
+
+1. `drivers/NativeUfsProbe/NativeUfsProbe.cpp`：槽开头改为固定 128 字节的
+   `SHLOGS v2 boot=… seq=… build=H167 uptime=… bytes=<payload 长度>`，
+   payload 从偏移 128 开始；`bytes` 记录本次实际拷贝的字节数（不再是槽容量）。
+2. `scripts/h103-log-pull.py`：识别 `v2` 时只解码 `body[128:128+bytes]`；
+   `v1`/无戳的旧槽维持原逻辑。
+3. 构建顺序补充：内核布局变化时先重跑 `scripts/build-sheng-pmgr.py`
+   （H164 用的是 11 月 4 日的旧归档），本次已重建。
+4. 构建标记 `NATIVE_BUILD: H167`。
+
+```text
+H167 kernel:  c427dbb9a1e12932dfece45b9786cdb1bd5022687d331378e7867ea1e3f75863
+H167 payload: a22b354329c47e57ea6e0fe95f9b585f4e21f047e3d5a06fa7bb5e46ca31584b
+H167 boot:    712d104f9ea7f5c6858d0e08f13c2319d5232103671951f62474fa5d645feaf1
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H167.img`（已核对）、
+Mac `~/h103/boot-H167.img`、仓库 `out/cheeseburger/boot/boot-H167.img`。
+
+判读：报告里每一行都应属于本次 boot（不再出现缺 `logSecs=` 的心跳行、也不会出现
+与 slot 戳 uptime 不一致的正文），`NATIVE_BUILD: H167 boot=…` 与 slot 戳一致。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

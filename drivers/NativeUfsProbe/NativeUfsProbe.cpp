@@ -59,7 +59,7 @@ static uint32_t gH103SlotCursor;
 // boot wrote it.  The header alone is not enough: it is written after the
 // slot, and a late header write failure leaves a stale slots_written behind,
 // which made earlier logs mix slots from several boots.
-#define H103_BUILD "H166"
+#define H103_BUILD "H167"
 static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
@@ -2107,17 +2107,25 @@ NativeUfsProbe::h103SlotWrite (void)
   const uint32_t bodyBytes = blocks * 4096U;
   const uint32_t uptime = gH103StartTicks ?
       static_cast<uint32_t> ((mach_absolute_time () - gH103StartTicks) / 19200000ULL) : 0;
-  int stampLen = snprintf (reinterpret_cast<char *> (body), 128,
-      "SHLOGS v1 boot=%llx seq=%u build=%s uptime=%u bytes=%u\n",
+  // H167: only `blocks` blocks of the 32-block slot are written, so the rest
+  // of the slot still holds an older boot's text and the reader used to append
+  // it to this record.  Use a fixed 128-byte stamp line that records the exact
+  // payload length and put the payload right behind it, so a v2 reader can
+  // slice precisely and never look at the un-written remainder.
+  const uint32_t stampBytes = 128;
+  uint32_t payloadCap = bodyBytes > stampBytes ? bodyBytes - stampBytes : 0;
+  uint32_t n = payloadCap ? h103CopyMsgbufTail (body + stampBytes, payloadCap) : 0;
+  char stamp[128];
+  int stampLen = snprintf (stamp, sizeof stamp,
+      "SHLOGS v2 boot=%llx seq=%u build=%s uptime=%u bytes=%u",
       (unsigned long long) gH103BootId, (unsigned) gH103SlotCursor, H103_BUILD,
-      (unsigned) uptime, (unsigned) bodyBytes);
-  if (stampLen < 0) {
+      (unsigned) uptime, (unsigned) n);
+  if (stampLen < 0 || static_cast<uint32_t> (stampLen) >= stampBytes) {
     stampLen = 0;
   }
-  if (static_cast<uint32_t> (stampLen) >= bodyBytes) {
-    stampLen = 0;
-  }
-  uint32_t n = h103CopyMsgbufTail (body + stampLen, bodyBytes - stampLen);
+  memset (body, ' ', stampBytes);
+  memcpy (body, stamp, static_cast<size_t> (stampLen));
+  body[stampBytes - 1] = '\n';
   uint32_t slot = gH103SlotCursor % slotCount;
   bool ok = logWrite (257U + slot * 32U, blocks, body);
   if (!ok) {

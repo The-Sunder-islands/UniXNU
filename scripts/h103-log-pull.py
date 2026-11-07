@@ -37,7 +37,11 @@ HDR = struct.Struct("<8sIIQQ" + "I" * 14 + "32s" + "I" * 5)
 # after its slot, so a failed header write leaves slots_written stale; without
 # the stamp the merge then mixes slots written by different boots.
 SLOT_STAMP = re.compile(
-    r"^SHLOGS v1 boot=([0-9a-f]+) seq=(\d+) build=(\S+) uptime=(\d+) bytes=(\d+)$")
+    r"^SHLOGS v([12]) boot=([0-9a-f]+) seq=(\d+) build=(\S+) uptime=(\d+) bytes=(\d+)$")
+# H167: v2 keeps the payload at a fixed offset and records its exact length, so
+# the un-written remainder of the 32-block slot (which still holds an older
+# boot's text) is never decoded.
+SLOT_V2_PAYLOAD_OFFSET = 128
 
 
 def resolve_adb(explicit: str | None) -> str:
@@ -184,12 +188,18 @@ def _slot_stamp(body: bytes):
     match = SLOT_STAMP.match(text)
     if not match:
         return None
-    return {"boot": match.group(1), "seq": int(match.group(2)),
-            "build": match.group(3), "uptime": int(match.group(4))}
+    return {"version": int(match.group(1)), "boot": match.group(2),
+            "seq": int(match.group(3)), "build": match.group(4),
+            "uptime": int(match.group(5)), "bytes": int(match.group(6))}
 
 
 def _slot_text(body: bytes) -> str:
     """Slot payload without the stamp line and without the NUL padding."""
+    stamp = _slot_stamp(body)
+    if stamp and stamp["version"] == 2:
+        start = SLOT_V2_PAYLOAD_OFFSET
+        payload = body[start:start + stamp["bytes"]]
+        return payload.decode("utf-8", "replace").split("\0" * 8, 1)[0]
     text = body.decode("utf-8", "replace")
     text = text.split("\0" * 8, 1)[0]
     first, sep, rest = text.partition("\n")
