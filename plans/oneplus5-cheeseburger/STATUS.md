@@ -5786,6 +5786,41 @@ H143 boot:    49c5d6669b29f3502e6caccbbc5147ae5d7a173f219426a746bbffecc079e048
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H143.img`（已核对）、
 Mac `~/h103/boot-H143.img`、仓库 `out/cheeseburger/boot/boot-H143.img`。
 
+### H143 结果：late probe 进了，但没到注册 nub（2026-11-07）
+
+`h143-log-20261107-112526.txt`：`flags=10860af`（537 s、601 s 一致），解码：
+
+| 位 | 状态 |
+| --- | --- |
+| `0x01000000` late probe 入口 | ✅ |
+| `0x0002000000` nub 注册 | ❌ |
+| `0x04000000` personality 实例化 | ❌ |
+| `0x08000000` 显示服务注册 | ❌ |
+
+显示模块确实运行了，但卡在 late probe 内部、尚未走到 `nub->registerService()`。
+
+### H144：给 late probe 的三个前置条件打点（2026-11-07）
+
+| 位 | 位置 | 含义 |
+| --- | --- | --- |
+| `0x10000000` | 早期 probe 暂存 `pendingLegacyDisplay` | 显示对象已暂存 |
+| `0x20000000` | late probe 取到非空 `display` | 通过 pending 门槛 |
+| `0x40000000` | `native_legacy_surface_found` | IOSurface 找到 |
+| `0x80000000` | `PE_current_console` 校验通过、进入 nub 分支 | GOP 参数合法 |
+
+判读：缺 `0x10000000` → 早期 probe 没存对象；有 `0x10000000` 无 `0x20000000`
+→ late probe 先到或被清空；有 `0x20000000` 无 `0x40000000` → IOSurface 没等到；
+有 `0x40000000` 无 `0x80000000` → GOP 参数校验没过。
+
+```text
+H144 kernel:  1bea41cd1b2947a8bc860010917b46a0b90700c3a44cc0061f769d8a9798c9e6
+H144 payload: 9c1f745807c88724bf266203eb7a4750cdc6089d3d59b6f0ccc8dea99d05ebd6
+H144 boot:    a3c11ee6cc04202e0b7d9d8b86b89b15b4282d6a2ebaf474261bc17ad08ad007
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H144.img`（已核对）、
+Mac `~/h103/boot-H144.img`、仓库 `out/cheeseburger/boot/boot-H144.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
