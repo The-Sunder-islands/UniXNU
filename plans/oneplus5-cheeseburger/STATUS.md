@@ -6512,6 +6512,47 @@ Mac `~/h103/boot-H160.img`、仓库 `out/cheeseburger/boot/boot-H160.img`。
 说明 scale 就是这一关；若像素尺寸仍是 1242×2208，则尺寸另有来源（MobileGestalt /
 getDisplaySize），下一轮再查。
 
+### H160 结果：unit-scale=3 未改变 mode（2026-11-07）
+
+`h160-log-20261107-153920.txt`（`boot_id 10800627368`，533 s）：
+
+```text
+x0="FBSDisplayMode cannot be configured as requested :
+    <FBSDisplayMode: 0x302fa6350; infxinf@0x (1242x2208/0) 60Hz p3 SDR>"
+```
+
+`unit-scale=3` 对 mode 没有影响，仍是 `(1242x2208/0)`。两种可能：策略没通过它
+的前置条件（**静默返回**，无日志），或 `FBSDisplayMode` 的 scale 不从 `/chosen` 读。
+
+另外，该日志里 `NATIVE_UFS_LOCK` 又大量出现（窗口内 276 次、`err 60` 131 次），
+H159 更是 462 次 / 205 次；H128–H135 时是 0。与 H155（`h103-log-secs` 60→10）、
+H157（门未开时每 1 秒刷盘）的日志写入量增加一致；`readWindowBulk()` 的锁上限
+仍是硬编码 2 s（小于 5.2 s 的命令超时）。
+
+### H161：打印 unit-scale 的执行结果（2026-11-07，只加日志）
+
+`drivers/NativeMobileDisplay/LegacyDisplayProbe.cpp` 的
+`native_legacy_gop_mapping_observed()` 中，unit-scale 策略的每个退出点都加日志：
+
+```text
+NATIVE_LEGACY: unit-scale rejected enabled=3 phase=4 used=0 console=1 geom=1 phys=1 w=.. h=..
+NATIVE_LEGACY: unit-scale publish failed chosen=.. scale_added=.. rot_added=..
+NATIVE_LEGACY: unit-scale readback missing scale=.. rotation=..
+NATIVE_LEGACY: unit-scale status=0 requested=3 chosen=3 rot=0
+```
+
+判读：`status=0 chosen=3` 说明 `/chosen` 里确实写入了 `display-scale=3`，而 mode 仍为 0
+则说明 scale 来自 MobileGestalt；若是 `rejected`，日志会指出具体是哪一条前置条件。
+
+```text
+H161 kernel:  b50d6343f31ef7e3478fc9ca2e37ada91b5c847ad938368a7e79f6b0b391487d
+H161 payload: 12a02fa34429a798812c71da42db34c3b523a8c1f2e91f6380acbecc38e7db71
+H161 boot:    d7b934bc1c314c525977ed7681b4d14355a2d2e10ee7f174a29febbc4bb05ecd
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H161.img`（已核对）、
+Mac `~/h103/boot-H161.img`、仓库 `out/cheeseburger/boot/boot-H161.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
