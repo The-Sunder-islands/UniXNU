@@ -7900,6 +7900,47 @@ H183 boot:    01d72c8f1b38477f0043c79ce1bcafbbea67c022955abc66a8a60e1809761722
 `files=3, written=3` → addon 落地；`ext=4/2` → union 生效（2 是
 `NativeAdrenoMetal` 自检路径，属预期）；`files=3` 且 `ext=2/...` → mount 失败。
 
+### H183 结果：心跳通道定位到真正的失败点（2026-11-08）
+
+心跳行给出了确定答案：
+
+```text
+NATIVE_UFS_ALIVE: ... addon=3/0/0/3/2/1 owner=4/0 ext=1/2 dm=1/2 wp=1/2
+```
+
+按 `addon=<files>/<written>/<same>/<failed>/<error>/<calls>` 展开：
+
+- `calls=1`：`native_gpu_addon_prepare()` 被调用；
+- `files=3`：**boot-arg 门禁通过了**，addon 安装流程真的开始执行（H182 把
+  `sheng-gpu-addon=1` 移到字符串参数之前是有效的）；
+- `written=0 same=0 failed=3 error=2 (ENOENT)`：三个文件全部写失败；
+- `owner=4/0`：Data volume 正常挂载（stage 4、status 0）；
+- `ext=1/2 dm=1/2 wp=1/2`：三个 union mount 都停在 stage 1（源目录
+  `vnode_lookup` 失败），status 2 = `ENOENT`。
+
+根因：Data volume 里**没有 `/private/var/ngpu` 目录**，而
+`native_gpu_addon_parents()` 的循环从
+`sizeof("/private/var/ngpu/") - 1` 开始，只创建 `ngpu` **下面**的目录，从不创建
+`ngpu` 本身；于是写文件 ENOENT，`/private/var/ngpu/addons` 也不存在，union mount
+的源目录查找同样 ENOENT。
+
+### H184：连同 /private/var/ngpu 一起创建（2026-11-08）
+
+`zzy-native-gpu-addon-mount.patch` 的父目录循环起点改为
+`sizeof("/private/var/") - 1`，即把 `/private/var/ngpu` 也纳入创建；注释同步说明
+这次 H183 心跳的失败码。诊断（probe/汇总 printf、calls 计数、心跳字段）保留。
+
+```text
+H184 kernel:  f307023e766f8ee102214185c4cb59214e0abcde0a33da13d2b926c76cbe0fff
+H184 payload: 9cf47e31110e70f711dfd3262d5d465fc09c719952b552d7ba47efb805a14cf3
+H184 boot:    8f9ee990ce9f35795d2f1133ef264c7a14e781e18773db8b2965c4efb047179c
+```
+
+判读：预期心跳变为
+`addon=3/3/0/0/0/1 … ext=4/2 dm=1/2 wp=1/2`（`ext` 的 status 2 是
+`NativeAdrenoMetal.bundle` 自检路径，属预期）。若 `ext=3/...` 则 mount 本身被拒，
+需要看 bindfs 的返回码。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
