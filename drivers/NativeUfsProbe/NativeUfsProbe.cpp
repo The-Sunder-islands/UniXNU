@@ -59,7 +59,7 @@ static uint32_t gH103SlotCursor;
 // boot wrote it.  The header alone is not enough: it is written after the
 // slot, and a late header write failure leaves a stale slots_written behind,
 // which made earlier logs mix slots from several boots.
-#define H103_BUILD "H179"
+#define H103_BUILD "H180"
 static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
@@ -264,6 +264,37 @@ h105DumpTick (void)
 // in AppleM2ScalerCSCDriver), so the property is injected from here instead:
 // the heartbeat thread retries until the accelerator service appears, which is
 // always before backboardd reads the property.
+// H180: describe the service we are looking at: its real metaclass name, the
+// registry name, whether it satisfies the Apple plugin's class match, and the
+// retain count (so a later "no service" can be told apart from "wrong class").
+static void
+h103NoteAcceleratorService (const char *tag, IOService *service)
+{
+  if (!service) {
+    IOLog ("NATIVE_UFS_ACCEL: %s none\n", tag);
+    return;
+  }
+  const OSMetaClass *mc = service->getMetaClass ();
+  const char *name = service->getName ();
+  IOLog ("NATIVE_UFS_ACCEL: %s class=%s name=%s agx=%d refs=%d\n",
+         tag, mc ? mc->getClassName () : "-", name ? name : "-",
+         service->metaCast ("AGXAccelerator") ? 1 : 0, service->getRetainCount ());
+}
+
+static void
+h103ProbeAcceleratorService (void)
+{
+  static unsigned beats;
+  if ((beats++ % 10) != 0) {
+    return;
+  }
+  OSDictionary *matching = IOService::serviceMatching ("IOAcceleratorES");
+  IOService *service = matching ? IOService::copyMatchingService (matching) : nullptr;
+  h103NoteAcceleratorService ("probe", service);
+  OSSafeReleaseNULL (service);
+  OSSafeReleaseNULL (matching);
+}
+
 static void
 h103MaybeSetAcceleratorPlugin (void)
 {
@@ -291,6 +322,7 @@ h103MaybeSetAcceleratorPlugin (void)
     OSSafeReleaseNULL (matching);
     return;
   }
+  h103NoteAcceleratorService ("inject", service);
   bool set = service->setProperty ("MetalPluginName", plugin);
   IOLog ("NATIVE_UFS_ACCEL: service=%p MetalPluginName=%s source=%s set=%u\n",
          service, plugin, fromArg ? "arg" : "default", set ? 1 : 0);
@@ -311,6 +343,7 @@ heartbeatThread (void *, wait_result_t)
     // flush in h103SlotTick() can persist the crash window.
     IOSleep (h107GateOpen () ? 10000 : 1000);
     h103MaybeSetAcceleratorPlugin ();
+    h103ProbeAcceleratorService ();
     beat++;
     if (beat == 1 || (beat % 10) == 0) {
     IOLog ("NATIVE_UFS_ALIVE: winFlight=%llu ufsFlight=%llu cmds=%llu "

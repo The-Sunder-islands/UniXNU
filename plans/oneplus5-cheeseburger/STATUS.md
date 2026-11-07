@@ -7574,6 +7574,55 @@ Mac `~/h103/boot-H179.img`、仓库 `out/cheeseburger/boot/boot-H179.img`。
 重点看 `op=match comm=backboardd d=AGXAccelerator ok=?`、`open request type=?`、
 `frames=?`。
 
+### H179 结果：日志空洞修复，AGX 仍然 ok=0（2026-11-07）
+
+`h179-log-20261107-231807.txt`：
+
+```text
+40.074  NATIVE_UFS_LOG: base cursor=54630 size=131072
+41.316  NATIVE_UFS_ACCEL: service=0xfffffff7a2d002e0 MetalPluginName=AGXMetalA10 source=arg set=1
+60.368  Got boot device … / 60.9–62.3 三个卷 mount-complete     （空洞已修复）
+257.004 NATIVE_DISPLAY_OPEN: … backboardd … match=1
+257.489 op=match comm=backboardd d=IOAcceleratorES ok=1
+257.537 NATIVE_A540_ACCEL: read key=MetalPluginName
+370.847 op=match comm=backboardd d=AGXAccelerator ok=0
+463.925 op=match comm=backboardd d=IOAcceleratorES ok=0
+```
+
+1. 多槽拆分生效，mount/display probe 不再丢；
+2. 但注入发生在 **41.3 s**，早于我们自己的 accelerator 发布（display probe 约 60 s），
+   匹配到的 `0xfffffff7a2d002e0` 可能不是我们的实例；
+3. 尽管 H176 已把类更名为 `AGXAccelerator`，Apple 插件的类匹配仍 `ok=0`；
+4. 463.9 s 起 `IOAcceleratorES ok=0`，说明该服务此时已不在（或不再可匹配）。
+
+### H180：UFS 侧自检 accelerator 服务身份（2026-11-07，只加日志）
+
+`drivers/NativeUfsProbe/NativeUfsProbe.cpp`：
+
+1. 新增 `h103NoteAcceleratorService(tag, service)`，打印
+   `class=<metaclass 名> name=<实例名> agx=<metaCast("AGXAccelerator")> refs=<retain>`；
+2. 注入时先打印 `inject` 一行（确认 `MetalPluginName` 到底设到了哪个实例）；
+3. 心跳每 10 拍调用 `h103ProbeAcceleratorService()` 打印一次 `probe`
+   （约 10 s，门开后约 100 s），用于观察实例何时消失；
+4. 构建标记 `H180`。
+
+```text
+H180 kernel:  c060e74ffaf4f6d272f225ee3e6373d4bbc44f92157d1b4992bbd4be63271842
+H180 payload: 490e823a39ff8a7302adef0a7a6aa8de07285348af0915ddb69fb686009b79d9
+H180 boot:    6417abe4ad2f0656e360d7ba6b524081ff63b9427130be740c06d689d192f259
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H180.img`（已核对）、
+Mac `~/h103/boot-H180.img`、仓库 `out/cheeseburger/boot/boot-H180.img`。
+手机在 TWRP，`adb reboot bootloader` → `fastboot boot` 启动（未写分区）。
+
+判读：
+
+- `inject class=… name=…` 若是 `IOGPU`/别的类，说明属性设错了对象；
+- 若 `class=AGXAccelerator agx=1` 而 Apple 仍 `ok=0`，问题在插件的匹配字典
+  （可能还要求 `IONameMatch` 或某个属性）；
+- 若 `probe none` 在 460 s 左右出现，说明实例被释放，需要在发布后持有引用。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
