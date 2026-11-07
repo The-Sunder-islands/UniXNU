@@ -7623,6 +7623,64 @@ Mac `~/h103/boot-H180.img`、仓库 `out/cheeseburger/boot/boot-H180.img`。
   （可能还要求 `IONameMatch` 或某个属性）；
 - 若 `probe none` 在 460 s 左右出现，说明实例被释放，需要在发布后持有引用。
 
+### H180 结果：服务身份正确，但 Apple 插件仍不匹配（2026-11-07）
+
+`h180-log-20261107-233519.txt`：
+
+```text
+41.498  NATIVE_UFS_ACCEL: inject class=AGXAccelerator name=AGXAccelerator agx=1 refs=4
+41.540  service=0xfffffff9e6704880 MetalPluginName=AGXMetalA10 source=arg set=1
+41.58–192  probe class=AGXAccelerator name=AGXAccelerator agx=1 refs=4   （每 ~10 秒）
+258.7  op=match … d=IOAcceleratorES ok=1 / read MetalPluginName + MetalPluginClassName
+370.8  op=match … d=AGXAccelerator ok=0
+371.4  op=match … d=AGXAccelerator ok=0
+```
+
+- 注入确实打在我们自己的实例上（class/name=`AGXAccelerator`、`metaCast=1`、refs=4 稳定存活）；
+- 内核侧 `serviceMatching("IOAcceleratorES")` 每次都能找到它；
+- 但 Apple 插件按 `IOProviderClass=AGXAccelerator` 的匹配始终 `ok=0`——同一个对象用
+  `IOAcceleratorES` 能匹配、用 `AGXAccelerator` 不能。不是服务身份问题，而是该用户态
+  发现路径与我们不兼容。继续在这条路上补属性收益很低。
+
+### H181：路线 B —— 最小 nil Metal 插件（2026-11-07）
+
+按 `NativeAdrenoMetalPlugin.mm` 注释描述的语义：插件不注册设备（返回 nil）时，
+CoreAnimation 会继续使用原来的软件渲染。
+
+1. 新增 `drivers/NativeMetal/NativeNilMetalPlugin.mm`：principal class
+   `NativeNilMetalDevice : _MTLDevice`，`initWithAcceleratorPort:` 直接 `return nil`；
+2. 新增 `scripts/build-nil-metal-plugin.py`：编译为 bundle、ad-hoc 签名，输出
+   `build/adreno-metal-plugin/NilMetal.bundle` 与 `trust.json`（`cdhashes` 列表）；
+3. 新增 `scripts/make-nil-gpu-addon.py`：把 bundle 打成 `NGPUADD2` GPU addon；
+4. 新增 `scripts/add-owner-trust-hash.py`：在没有 IPSW 的机器上，把插件 CDHash 加进
+   payload 现有的 trust bundle（owner 模块重建，两个 Apple 模块原样保留）；
+5. payload 增加 `Payloads/kernel.macho.gpuaddon`（2600 B）与新的
+   `Payloads/kernel.macho.trustcache`（61408 B）；args 改为
+   `_offline-accelerator-plugin=NilMetal sheng-gpu-addon=1`；
+6. 内核侧 `sheng-gpu-addon=1` 会把 `/private/var/ngpu/addons` union 到
+   `/System/Library/Extensions`，CA 会加载 `NilMetal.bundle` 并拿到 nil 设备。
+
+```text
+H181 kernel:      c90532add5b930ead26c7bbb31bf2a25380af4847649e5adb7cb8d4aaf11ddc0
+H181 payload:     3df7c688edd87ba5c3b8f978f42988d33dc052c25b9124d3e7c5874f1a049e0e
+H181 boot:        b9bb2d918807b07c49b724311eb4e4271e696652bc6a7fe54888b18f4ce82e64
+插件 CDHash:      262afd9e55b5020f4d5edbdd6376287c7e3fde9f
+GPU addon:        5e6bc5990e944058787e5c77185642ebf4d979a859c7974b34207d8cda73bf46
+trust bundle:     baeaf9e2a5e47fcf69581ab17bf0e593d0d9bab330f3d848b95cf30ce2757118
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H181.img`（已核对）、
+Mac `~/h103/boot-H181.img`、仓库 `out/cheeseburger/boot/boot-H181.img`。
+手机在 TWRP，`adb reboot bootloader` → `fastboot boot` 启动（未写分区）。
+
+判读：
+
+- `NATIVE_GPU_ADDON*`（`sheng-gpu-addon` 的挂载状态）与
+  `NATIVE_UFS_ACCEL: MetalPluginName=NilMetal`；
+- 若插件按预期返回 nil → CA 回退软件渲染，出现 `frames>0` / `selector=3/4/5`；
+- 若加载失败（AMFI/签名）→ 日志会出现对应拒绝；若仍无帧 → 软件渲染路径也不可用，
+  转 Turnip 主线。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

@@ -18,7 +18,13 @@ offsets = struct.unpack_from('<2I', original, 4)
 originals = [original[offsets[0]:offsets[1]], original[offsets[1]:]]
 trust = json.loads((ROOT / 'build/adreno-metal-plugin/trust.json').read_text())
 # DarwinBoot's ValidTrustCaches (and the kernel's binary search) need the hashes of a module in strictly ascending order.
-hashes = sorted([bytes.fromhex(trust['cdhash']), bytes.fromhex(trust['daemon_cdhash']), bytes.fromhex(trust['turnip_cdhash'])])
+# H181: a plugin with no daemon/turnip binaries ships a plain cdhashes list.
+if 'cdhashes' in trust:
+    hash_list = [bytes.fromhex(h) for h in trust['cdhashes']]
+else:
+    hash_list = [bytes.fromhex(trust['cdhash']), bytes.fromhex(trust['daemon_cdhash']),
+                 bytes.fromhex(trust['turnip_cdhash'])]
+hashes = sorted(hash_list)
 if len(set(hashes)) != len(hashes):
     raise SystemExit('Duplicate CDHash')
 cdhash = hashes[0]
