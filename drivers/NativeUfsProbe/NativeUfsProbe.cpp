@@ -3019,7 +3019,7 @@ NativeUfsProbe::start (IOService *provider)
   PE_parse_boot_argn ("h103-load-iogpu", &loadIogpu, sizeof loadIogpu);
   gH103LoadIogpu = loadIogpu ? 1 : 0;
   gH103StartTicks = mach_absolute_time ();
-  IOLog ("NATIVE_BUILD: H148\n");
+  IOLog ("NATIVE_BUILD: H150\n");
   IOLog ("NATIVE_UFS_HB: slotMode=%d logSecs=%u hbTimer=%d loadIogpu=%d\n",
          gH103SlotMode, gH103LogSecs, gH103HbTimerOn, gH103LoadIogpu);
   thread_t heartbeat = nullptr;

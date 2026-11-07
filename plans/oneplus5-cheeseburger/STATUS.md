@@ -6025,6 +6025,50 @@ H149 boot:    23e04aef97c96d6638b4803b6a464f09c4dfd5053fa107f8cb7066bfb4c118d2
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H149.img`（已核对）、
 Mac `~/h103/boot-H149.img`、仓库 `out/cheeseburger/boot/boot-H149.img`。
 
+### H149 结果：换成 trust cache 的 NULL 解引用（2026-11-07）
+
+屏幕：
+
+```text
+NATIVE_TRUSTCACHE: not ready img4=0 amfi=0          ← H137 的早退生效
+NATIVE_TRUSTCACHE_LOAD_START: rt=… amfi=0 version=0
+panic(cpu 0 caller …): Kernel data abort. at pc 0x…739554
+  esr: 0x96000005  far: 0x0000000000000118
+```
+
+`amfi=0` 又撞上启动期 kext 注册顺序竞态。H137 让 `trust_cache_runtime_init()`
+早退是对的，但紧随其后的 `load_static_trust_cache()` 只判了
+`trust_cache_rt`、没判 `amfi`：
+
+```c
+	if (amfi->TrustCache.version < 1) {   // amfi == NULL → NULL+0x118
+```
+
+`far=0x118` 正是 `offsetof(amfi->TrustCache.version)`。
+
+### H150：给 load_static_trust_cache 补同样的保护（2026-11-07）
+
+`patches/xnu/zzzzzzzzzzzzzzzzzzzzzzzzzzzzz-h150-trustcache-null.patch`：
+
+```c
+	if (amfi == NULL || !trust_cache_ready) {
+		printf("NATIVE_TRUSTCACHE: static cache skipped amfi=%p ready=%d\n",
+		    amfi, trust_cache_ready ? 1 : 0);
+		return;
+	}
+```
+
+另外把 UFS 探针的构建标记更新为 `NATIVE_BUILD: H150`。
+
+```text
+H150 kernel:  030b4d0866498d2bb15a5ce85f9aca1f29837f37474ac518d201dc11d5bf5ab0
+H150 payload: b1bcc321ccb3676153c2a0419820067ca8adeccc9fa5cf69e82ad1518b2f0a72
+H150 boot:    aeb060190eb570a7d52e6b126067997c55447dfbcbd8149fc95faf6761ee4f54
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H150.img`（已核对）、
+Mac `~/h103/boot-H150.img`、仓库 `out/cheeseburger/boot/boot-H150.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

@@ -1,0 +1,19 @@
+diff --git a/bsd/kern/kern_trustcache.c b/bsd/kern/kern_trustcache.c
+--- a/bsd/kern/kern_trustcache.c
++++ b/bsd/kern/kern_trustcache.c
+@@ -1025,6 +1025,15 @@
+ 		panic("NATIVE_TRUSTCACHE: runtime is NULL");
+ 	}
+ 
++	/* H150: trust_cache_runtime_init() returns early when AMFI/Image4 are
++	 * not registered yet (kext-order race); this follow-on call still
++	 * dereferenced amfi and took a data abort at NULL+0x118. */
++	if (amfi == NULL || !trust_cache_ready) {
++		printf("NATIVE_TRUSTCACHE: static cache skipped amfi=%p ready=%d\n",
++		    amfi, trust_cache_ready ? 1 : 0);
++		return;
++	}
++
+ 	if (amfi->TrustCache.version < 1) {
+ 		/* AMFI change hasn't landed in the build */
+ 		panic("NATIVE_TRUSTCACHE: AMFI interface version %u", amfi->TrustCache.version);
