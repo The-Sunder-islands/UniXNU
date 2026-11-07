@@ -55,6 +55,12 @@ static volatile uint64_t gH103RootLast;
 static uint64_t gH103HeartbeatStart;
 static volatile int gH103SkipPattern;
 static uint32_t gH103SlotCursor;
+// H163: every slot carries this text stamp so the pull tool can tell which
+// boot wrote it.  The header alone is not enough: it is written after the
+// slot, and a late header write failure leaves a stale slots_written behind,
+// which made earlier logs mix slots from several boots.
+#define H103_BUILD "H163"
+static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
 static volatile int gH103SlotBusy;
@@ -2075,7 +2081,20 @@ NativeUfsProbe::h103SlotWrite (void)
   if (blocks < 1U) {
     blocks = 1U;
   }
-  uint32_t n = h103CopyMsgbufTail (body, blocks * 4096U);
+  const uint32_t bodyBytes = blocks * 4096U;
+  const uint32_t uptime = gH103StartTicks ?
+      static_cast<uint32_t> ((mach_absolute_time () - gH103StartTicks) / 19200000ULL) : 0;
+  int stampLen = snprintf (reinterpret_cast<char *> (body), 128,
+      "SHLOGS v1 boot=%llx seq=%u build=%s uptime=%u bytes=%u\n",
+      (unsigned long long) gH103BootId, (unsigned) gH103SlotCursor, H103_BUILD,
+      (unsigned) uptime, (unsigned) bodyBytes);
+  if (stampLen < 0) {
+    stampLen = 0;
+  }
+  if (static_cast<uint32_t> (stampLen) >= bodyBytes) {
+    stampLen = 0;
+  }
+  uint32_t n = h103CopyMsgbufTail (body + stampLen, bodyBytes - stampLen);
   uint32_t slot = gH103SlotCursor % slotCount;
   bool ok = logWrite (257U + slot * 32U, blocks, body);
   if (!ok) {
@@ -3085,7 +3104,13 @@ NativeUfsProbe::start (IOService *provider)
   PE_parse_boot_argn ("h103-load-iogpu", &loadIogpu, sizeof loadIogpu);
   gH103LoadIogpu = loadIogpu ? 1 : 0;
   gH103StartTicks = mach_absolute_time ();
-  IOLog ("NATIVE_BUILD: H162\n");
+  // H163: the first start wins.  A mountroot retry starts the probe twice in
+  // one boot (seen at 59 s and 64 s); the stamp must not change with it.
+  if (!gH103BootId) {
+    gH103BootId = h103LogTicks ();
+  }
+  IOLog ("NATIVE_BUILD: %s boot=%llx\n", H103_BUILD,
+         (unsigned long long) gH103BootId);
   IOLog ("NATIVE_UFS_HB: slotMode=%d logSecs=%u hbTimer=%d loadIogpu=%d\n",
          gH103SlotMode, gH103LogSecs, gH103HbTimerOn, gH103LoadIogpu);
   thread_t heartbeat = nullptr;

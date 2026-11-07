@@ -20,6 +20,7 @@ import argparse
 import datetime as _dt
 import os
 import pathlib
+import re
 import shutil
 import struct
 import subprocess
@@ -32,6 +33,11 @@ MAGIC = b"SHLOG001"
 DEFAULT_PART = "/dev/block/by-name/userdata_ios"
 ALT_PART = "/dev/block/bootdevice/by-name/userdata_ios"
 HDR = struct.Struct("<8sIIQQ" + "I" * 14 + "32s" + "I" * 5)
+# H163: every slot starts with this text stamp. The 32 MiB header is written
+# after its slot, so a failed header write leaves slots_written stale; without
+# the stamp the merge then mixes slots written by different boots.
+SLOT_STAMP = re.compile(
+    r"^SHLOGS v1 boot=([0-9a-f]+) seq=(\d+) build=(\S+) uptime=(\d+) bytes=(\d+)$")
 
 
 def resolve_adb(explicit: str | None) -> str:
@@ -168,30 +174,88 @@ def _split_records(text: str):
     return records
 
 
+def _slot_stamp(body: bytes):
+    """Decode the H163 per-slot stamp, or None for slots written before it."""
+    head = body.split(b"\n", 1)[0]
+    try:
+        text = head.decode("ascii").strip()
+    except UnicodeDecodeError:
+        return None
+    match = SLOT_STAMP.match(text)
+    if not match:
+        return None
+    return {"boot": match.group(1), "seq": int(match.group(2)),
+            "build": match.group(3), "uptime": int(match.group(4))}
+
+
+def _slot_text(body: bytes) -> str:
+    """Slot payload without the stamp line and without the NUL padding."""
+    text = body.decode("utf-8", "replace")
+    text = text.split("\0" * 8, 1)[0]
+    first, sep, rest = text.partition("\n")
+    if sep and SLOT_STAMP.match(first.strip().lstrip("\0")):
+        text = rest
+    return text
+
+
+def _slot_bodies(window: bytes, header: dict) -> list[bytes]:
+    slot_blocks = header["slot_blocks"] or 32
+    slot_count = header["slot_count"] or 0
+    if not slot_count:
+        return []
+    slot_bytes = slot_blocks * BLOCK
+    bodies = []
+    for index in range(slot_count):
+        start = (header["slot_first"] + index * slot_blocks) * BLOCK
+        bodies.append(window[start:start + slot_bytes])
+    return bodies
+
+
+def select_slots(window: bytes, header: dict, count: int) -> list[int]:
+    """Slot indices in write order, restricted to one boot when stamped.
+
+    The anchor is the slot the header names as newest. Slots from other boots
+    (left in the ring by an earlier run) are dropped; without stamps the old
+    header-relative window is used unchanged.
+    """
+    slot_count = header["slot_count"] or 0
+    slots_written = header["slots_written"] or 0
+    if not slot_count or not slots_written:
+        return []
+    bodies = _slot_bodies(window, header)
+    stamps = [_slot_stamp(body) for body in bodies]
+    anchor = (slots_written - 1) % slot_count
+    if stamps[anchor]:
+        boot = stamps[anchor]["boot"]
+        chosen = sorted((stamps[i]["seq"], i) for i in range(slot_count)
+                        if stamps[i] and stamps[i]["boot"] == boot)
+        if not chosen:
+            return []
+        header["slot_boot"] = boot
+        header["slot_build"] = stamps[anchor]["build"]
+        header["slot_seq_max"] = chosen[-1][0]
+        keep = max(1, min(count, len(chosen)))
+        return [index for _, index in chosen[-keep:]]
+    keep = max(1, min(count, slot_count, slots_written))
+    return [(slots_written - 1 - offset) % slot_count
+            for offset in range(keep - 1, -1, -1)]
+
+
 def merge_slots(window: bytes, header: dict, count: int) -> str:
     """Reconstruct a longer history from the last `count` delta slots.
 
     Every slot is a tail snapshot of the kernel message ring, so consecutive
     slots overlap heavily; records are deduplicated by (timestamp, text).
     """
-    slot_blocks = header["slot_blocks"] or 32
     slot_count = header["slot_count"] or 0
     slots_written = header["slots_written"] or 0
     if not slot_count or not slots_written:
         return ""
-    count = max(1, min(count, slot_count, slots_written))
-    slot_bytes = slot_blocks * BLOCK
+    bodies = _slot_bodies(window, header)
     merged = {}
     order = []
-    for offset in range(count - 1, -1, -1):
-        index = (slots_written - 1 - offset) % slot_count
-        start = (header["slot_first"] + index * slot_blocks) * BLOCK
-        body = window[start:start + slot_bytes]
-        text = body.decode("utf-8", "replace")
-        # Slots are padded with uninitialized bytes past the delta; keep only
-        # the printable prefix up to the first long NUL run.
-        text = text.split("\0" * 8, 1)[0]
-        for ts, payload in _split_records(text):
+    for index in select_slots(window, header, count):
+        for ts, payload in _split_records(_slot_text(bodies[index])):
             key = (ts, payload)
             if key in merged:
                 continue
@@ -245,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
         if test_at >= 0:
             text = decode_test(window[test_at:])
             report = args.output or pathlib.Path(
-                "h103-log-" + time.strftime("%Y%m%d-%H%M%S") + ".txt")
+                "log-" + time.strftime("%Y%m%d-%H%M%S") + ".txt")
             report.write_text("H103 write self-test\n" + text + "\n", encoding="utf-8")
             print(f"H103 write self-test block present at window +{test_at}:")
             print(text)
@@ -256,18 +320,19 @@ def main(argv: list[str] | None = None) -> int:
     slot_count = header["slot_count"]
     slots_written = header["slots_written"]
     if slots_written and slot_count:
-        slot = (slots_written - 1) % slot_count
+        order = select_slots(window, header, 1)
+        slot = order[-1] if order else (slots_written - 1) % slot_count
         slot_blocks = header["slot_blocks"]
         slot_offset = (header["slot_first"] + slot * slot_blocks) * BLOCK
         msg_bytes = min(header["msg_bytes"], slot_blocks * BLOCK)
-        body = window[slot_offset:slot_offset + msg_bytes]
-        text = body.decode("utf-8", "replace").rstrip("\0 \n")
+        body = window[slot_offset:slot_offset + slot_blocks * BLOCK]
+        text = _slot_text(body).rstrip("\0 \n")
         if args.slots > 1:
             merged = merge_slots(window, header, args.slots)
             if merged:
                 text = merged
         report = args.output or pathlib.Path(
-            "h103-log-" + time.strftime("%Y%m%d-%H%M%S") + ".txt")
+            "log-" + time.strftime("%Y%m%d-%H%M%S") + ".txt")
         write_report(header, text, report)
         print(f"partition bytes: {size if size is not None else 'from file'}")
         print(f"window: first_lba={header['first_lba']} blocks={header['window_blocks']} "
@@ -284,7 +349,7 @@ def main(argv: list[str] | None = None) -> int:
                    header["msg_first"] * BLOCK + msg_bytes]
     text = body.decode("utf-8", "replace").rstrip("\0 \n")
     report = args.output or pathlib.Path(
-        "h103-log-" + time.strftime("%Y%m%d-%H%M%S") + ".txt")
+        "log-" + time.strftime("%Y%m%d-%H%M%S") + ".txt")
     write_report(header, text, report)
 
     print(f"partition bytes: {size if size is not None else 'from file'}")

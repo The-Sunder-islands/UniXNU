@@ -6588,6 +6588,81 @@ Mac `~/h103/boot-H162.img`、仓库 `out/cheeseburger/boot/boot-H162.img`。
 判读：`NATIVE_UFS_LOCK` / `err 60` 应回到 H128–H135 的零水平；随后日志正文才会更新，
 届时 H161 的 `unit-scale …` 行会随早期启动一起落盘。
 
+### H162 结果：日志通路恢复，卡点前移到 CADisplay（2026-11-07）
+
+`h162-log-20261107-161530.txt`（内容到 901 s）：
+
+1. **H162 的三条修改生效**：`NATIVE_UFS_LOCK` 103 次、`err 60` 41 次
+   （H160 为 276/131，时长 533 s），`logWrite timeout` 只剩 1 次；
+2. **H161 的 unit-scale 日志终于落盘**：
+   `NATIVE_LEGACY: unit-scale status=0 requested=3 chosen=3 rot=0`，
+   确认 `/chosen/display-scale=3` 写入成功；
+3. **FBSDisplayMode 断言消失**，SpringBoard 改为
+   `x0="failed to find the main CADisplay"`（17 次）；
+4. backboardd 打开显示后（`client enter pid=55`）的调用序列：
+
+```text
+client io  pid=55 selector=8  status=0          (GetDisplaySize)
+client io  pid=55 selector=29 status=e00002c7   (GetDisplayArea, unsupported)
+client io  pid=55 selector=74 status=e00002c7   (SupportedFrameInfo)
+client io  pid=55 selector=79 status=e00002c7   (GetBlock)
+client io  pid=87 selector=28 status=e00002f0   (GetDotPitch, not found)
+NATIVE_FRAME: event=5 … frames=0
+```
+
+   随后每 ~0.1 秒重复 `op=match comm=backboardd d=IOAcceleratorES ok=0`。
+
+#### 与 H136 同一断言的关系
+
+`failed to find the main CADisplay` 首次出现在 H136；当时的处置链是
+H139（backlight-control 通知）→ H141/H142（只有 `kIOServiceMatchedState`
+的服务可见，改用 personality）→ H158（personality 触发 data abort，改回手工
+`probe/attach/start`）→ H159（backboardd 实际打开，`match=1`）。
+本轮 `match=1`、`client enter pid=55 comm=backboardd` 都在，**旧的可见性原因
+已经排除**。新证据指向下一道墙，与 H104k 上游对照、ios-sweet 0052n/0053s
+记录一致：backboardd 打开显示后卡在 accelerator/renderer 选择
+（`IOAcceleratorES` 永远 `ok=0`，`frames=0`），窗口服务器不发布 display，
+SpringBoard 因此拿不到 CADisplay。
+
+### H163：日志身份、客户端 I/O 与尺寸来源（2026-11-07，只加诊断）
+
+1. `drivers/NativeUfsProbe/NativeUfsProbe.cpp`：每个 slot 正文前加文本戳
+
+```text
+SHLOGS v1 boot=<本次boot固定id> seq=<序号> build=H163 uptime=<秒> bytes=<块字节>
+```
+
+   并以本次 boot 的 `h103LogTicks()` 生成一次 id（mountroot 重试导致的二次
+   start 不再改变它）；`NATIVE_BUILD` 行改为 `%s boot=%llx`。
+2. `scripts/h103-log-pull.py`：读取每个 slot 的戳，按 boot id 分组，只合并
+   **锚点 slot（header 指向的最新 slot）所属 boot** 的 slot；无戳的旧镜像
+   仍走原来的 header 相对窗口。这样 header 滞后时不会再混入旧 boot 内容。
+3. `drivers/NativeMobileDisplay/LegacyDisplayProbe.cpp`：客户端 interposer 对
+   `3/4/5/6/7/8/28/29/57/72/74/79/83` 每个选择器前 5 次打印完整
+   `in/out/ni/no/struct`，其余仍按原来的前 16 条；用于确认 `GetDisplaySize`
+   的真实返回值以及 backboardd 是否调用 swap。
+4. `drivers/NativeMobileDisplay/NativeLegacyDisplay.cpp`：`startHardware` 打印
+   `dims WxH canvas=<有无>:W,H dotpitch=<有无>:P`，确认框架能读到的几何来源。
+
+```text
+H163 kernel:  4b9660c83086e920c8e288758234a238d259588f03e888459aea141e14cf5fbe
+H163 payload: fcf160fad3b54866514e31de58647e9b1d3585224db6cdc3d02b09ce8b059e96
+H163 boot:    c6fa9a2815c865b142d2e7a42773d18d47bfe2861e5aac5a738569666106810f
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H163.img`（已核对）、
+Mac `~/h103/boot-H163.img`、仓库 `out/cheeseburger/boot/boot-H163.img`。
+payload 仍为 `offline-legacy-unit-scale=3`、`h103-log-secs=60`。
+
+判读：
+
+- 日志头部出现 `slot_boot=… slot_build=H163 slot_seq_max=…`，且不再混入
+  `logSecs=` 缺失等旧内核的行；
+- `client io … selector=8` 的输出若是 1080×1920 → 1242×2208 来自
+  MobileGestalt/UIKit；若是 1242×2208 → 来自 IOMFB 自身；
+- `client io … selector=3/4/5/6` 出现 → CA 已进入 swap；不出现 → 卡在
+  renderer/accelerator（对应 `IOAcceleratorES ok=0`）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
