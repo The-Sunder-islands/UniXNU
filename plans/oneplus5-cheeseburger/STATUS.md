@@ -7490,6 +7490,44 @@ Mac `~/h103/boot-H177.img`、仓库 `out/cheeseburger/boot/boot-H177.img`。
    Metal/Vulkan 用户态插件（`drivers/NativeAdreno`、`build-adreno-metal-plugin.py`），
    需要先构建 Turnip，属于独立的大工程。
 
+### H177 结果：delta 仍未消除旧文本，根因是环游标起点（2026-11-07）
+
+`H177-log-20261107-224329.txt`：
+
+- header 正常（`slot_boot=2e071d92 slot_build=H177 slot_seq_max=24`）；
+- 但正文仍在 368 s 出现 H170 时代的
+  `NATIVE_UFS_GPT: read DMA low failed; high fallback`（该字符串在当前内核里
+  已不存在），并且 **没有任何** `NATIVE_UFS_DMA` / `chunk=` / `NATIVE_BUILD: H177`
+  行——说明这些槽的内容不是本次 boot 的。
+
+根因：暖重启不清内核消息环，且环的写游标不一定从 0 开始。`gH103LastSlotMsgX`
+初始为 -1，首次刷盘用 `previous=0`，于是把 `[0, cursor)` 整段（包含上一次 boot
+留下的文本）都写进了第一个槽。
+
+### H178：首次刷盘从“探针启动时的游标”开始（2026-11-07）
+
+`drivers/NativeUfsProbe/NativeUfsProbe.cpp`：
+
+1. 在 `start()` 里记录当前 `msgbufp->msg_bufx` 到 `gH103LastSlotMsgX`，
+   并打印 `NATIVE_UFS_LOG: base cursor=%d size=%d`；
+2. 首个槽因此只包含探针启动之后新产生的字节（代价是 0–40 s 的早期启动日志
+   不再进入槽，这些内容其它轮次已有记录）；
+3. 构建标记 `NATIVE_BUILD: H178`。
+
+```text
+H178 kernel:  4f94e3997004085208be08b4f78e0fcf2dd86aad35c1c2d7eb2451fc26282a36
+H178 payload: ec973ed18828cea013b9878feb866ae67e2229b3fb4cf425bdd1485a507ea4d4
+H178 boot:    fc7c2df5fa2e54b2514b2b905a5a446f7c6b0464e0ab061269e759d12e5702b9
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H178.img`（已核对）、
+Mac `~/h103/boot-H178.img`、仓库 `out/cheeseburger/boot/boot-H178.img`。
+手机在 TWRP，`adb reboot bootloader` → `fastboot boot` 启动（未写分区）。
+
+判读：日志里应出现 `base cursor=… size=…`，并且 **不再出现**
+`read DMA low failed`（H170 的字符串）或 `NATIVE_BUILD: H169`；
+随后才能看到 `op=match … AGXAccelerator ok=?`、`open request type=?`、`frames=?`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

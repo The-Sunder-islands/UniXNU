@@ -59,7 +59,7 @@ static uint32_t gH103SlotCursor;
 // boot wrote it.  The header alone is not enough: it is written after the
 // slot, and a late header write failure leaves a stale slots_written behind,
 // which made earlier logs mix slots from several boots.
-#define H103_BUILD "H177"
+#define H103_BUILD "H178"
 static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
@@ -3241,6 +3241,18 @@ NativeUfsProbe::start (IOService *provider)
   PE_parse_boot_argn ("h103-load-iogpu", &loadIogpu, sizeof loadIogpu);
   gH103LoadIogpu = loadIogpu ? 1 : 0;
   gH103StartTicks = mach_absolute_time ();
+  // H178: a warm reboot leaves the kernel message ring in place, and its write
+  // cursor does not necessarily start at zero.  With previous=0 the first
+  // flush therefore copied the whole ring up to the current cursor, i.e. the
+  // previous boot's console text (that is how H170-era "read DMA low failed"
+  // lines kept appearing inside H177 slots).  Start the delta at the cursor
+  // that exists when this probe runs, so every slot only holds bytes produced
+  // after it.
+  if (msgbufp && msgbufp->msg_bufx >= 0 && msgbufp->msg_bufx < msgbufp->msg_size) {
+    gH103LastSlotMsgX = msgbufp->msg_bufx;
+    IOLog ("NATIVE_UFS_LOG: base cursor=%d size=%d\n", msgbufp->msg_bufx,
+           msgbufp->msg_size);
+  }
   // H163: the first start wins.  A mountroot retry starts the probe twice in
   // one boot (seen at 59 s and 64 s); the stamp must not change with it.
   if (!gH103BootId) {
