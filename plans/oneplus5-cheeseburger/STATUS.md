@@ -7941,6 +7941,60 @@ H184 boot:    8f9ee990ce9f35795d2f1133ef264c7a14e781e18773db8b2965c4efb047179c
 `NativeAdrenoMetal.bundle` 自检路径，属预期）。若 `ext=3/...` 则 mount 本身被拒，
 需要看 bindfs 的返回码。
 
+### H184 结果：addon 与 union mount 都成功，但 backboardd 崩了（2026-11-08）
+
+心跳：
+
+```text
+addon=3/3/0/0/0/1  owner=4/0  ext=4/2  dm=1/2  wp=1/2
+```
+
+- `files=3 written=3 failed=0 error=0`：三个文件成功写进 Data volume；
+- `ext=4/2`：`/System/Library/Extensions` 的 union mount 生效（stage 4 =
+  封印层可见；status 2 是 `NativeAdrenoMetal` 自检路径，属预期）；
+- `dm/wp=1/2`：这两个 overlay 的源目录本就不存在，属预期。
+
+随后 CA 的发现流程第一次走到了插件：
+
+```text
+248.10  read key=MetalPluginName
+248.13  read key=MetalPluginClassName
+248.16  read key=IOUserServiceProperties
+248.21  NATIVE_H66_FCNTL / NATIVE_CACHE_SIG（新镜像被处理）
+248.32  NATIVE_TRAP: pid=55 comm=backboardd exc=1 code=0x1 sig=11
+```
+
+backboardd 在读完类名后约 80 ms **SIGSEGV**，并从 248 s 起反复崩溃重启
+（357/375/394/407/431/457/488/529/566/649 s）。对照 H180（Apple 插件、无 union）
+在同样读取 `MetalPluginClassName` 后**没有崩溃**，H181–H183（插件不可见）也没有
+backboardd trap。所以崩溃发生在“从 union 加载我们自己的插件”这一步。
+
+两种可能：(1) 插件代码/返回 nil 导致；(2) dyld 从 bindfs union mmap 可执行文件
+失败。H185 用 stderr 轨迹区分。
+
+### H185：插件加载/初始化轨迹（2026-11-08）
+
+`NativeNilMetalPlugin.mm` 增加：
+
+- `__attribute__((constructor))`：`NILMETAL: ctor pid=…`
+- `initWithAcceleratorPort:`：`NILMETAL: init port=… self=…`
+
+插件的 CDHash 变为 `1f684178cf193da5ee2db557106184aa68001259`，trustcache 用
+`add-owner-trust-hash.py` 在 H184 的 bundle 基础上重建 owner 模块（两个 Apple
+模块原样保留）。内核未变（标记仍是 H184）。
+
+```text
+H185 payload: 48356ad26c9ca9e4c5c448b0c9cdf02f04a8349b047585a341974c05d6c7f99e
+H185 boot:    34ebf2bef94429eb526aace32cae11e47899a3bf925b452f6eb8acfd6b6eaae4
+GPU addon:    94266978487d150486fc90074ce6b1c7c82ac515aac42a22bdd3646e432d4522
+trust bundle: 5653a354b2ea82cae14a4700b6faf82edd75a1c00407e3b69bdf074734cb89b1
+插件 CDHash:  1f684178cf193da5ee2db557106184aa68001259
+```
+
+判读：日志里出现 `NILMETAL: ctor` → 镜像已映射；再出现 `NILMETAL: init` → 我们的
+方法被调用。若只有 ctor、没有 init → 崩溃在 `principalClass`/类检查；
+若两条都没有 → 崩溃在 dlopen/mmap（bindfs 加载可执行文件的问题）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
