@@ -5952,6 +5952,45 @@ Mac `~/h103/boot-H147.img`、仓库 `out/cheeseburger/boot/boot-H147.img`。
 判读：`flags` 出现 `0x4000000`（personality 实例化）即通过匹配阶段；
 `NATIVE_IOMFB_PROBE` 的 `IOMobileFramebuffer` 应为非 0。
 
+### H147 结果：panic 仍在，且与 H146 完全同相（2026-11-07）
+
+`h147-log-20261107-122243.txt`：
+
+```text
+[23.706216] NATIVE_LEGACY: phase=4 dt=1 nub-registered name=NativeGOPFramebuffer
+[23.721046] NATIVE_PANIC: flags=f3610000
+```
+
+`flags=f3610000`：surface 找到、GOP 有效、nub 已注册，`0x4000000`（personality
+实例化）仍未置，2 ms 后 panic。反汇编 H147 的 `kernel.macho` 确认
+`IOKitDiagnostics::serialize` 已不再调用 `serializeClassDictionary`，因此还有
+**另一条**序列化路径把 `OSMetaClass` 对象送进 `OSSerialize`，撞上
+`panic("OSMetaClass::serialize(): Obsoleted")` 桩。屏幕上的 caller 地址不可信：
+内核经 prelink，dSYM 与运行时布局不一致。
+
+另记录一条同源现象：`IOCPUInterruptController: not registry member at
+registerService()` —— 本端口本来就有服务因父链不在 IOService plane 而注册失败。
+
+### H148：把 OSMetaClass::serialize 桩改为记录并跳过 + 构建标记（2026-11-07）
+
+1. `patches/xnu/zzzzzzzzzzzzzzzzzzzzzzzzzzz-h148-meta-serialize.patch`：
+   `OSMetaClass::serialize()` 不再 panic，改为最多 8 次
+   `NATIVE_META: serialize skipped for <class>` 后返回 false，序列化继续；
+2. `drivers/NativeUfsProbe`：`start()` 打印 `NATIVE_BUILD: H148`，此后每份日志
+   都能自证内核版本（前几轮已两次被上一轮残留日志误导）。
+
+```text
+H148 kernel:  04a4136b16656907e06f75ba7b5e457bb87196cbdf374361ef140b716c687a17
+H148 payload: 800158905c20fc24cb2419dd2a95f14222ce629be897050378619a9cadc98787
+H148 boot:    9bdf16be199d36f1b110cc933e9756cdd3426a462ccf21d42dad9b951defda5f
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H148.img`（已核对）、
+Mac `~/h103/boot-H148.img`、仓库 `out/cheeseburger/boot/boot-H148.img`。
+
+判读：不再 panic；`NATIVE_META: serialize skipped for …` 指出被序列化的类；
+`flags` 应出现 `0x4000000`；`NATIVE_IOMFB_PROBE` 的 `IOMobileFramebuffer` 应为非 0。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

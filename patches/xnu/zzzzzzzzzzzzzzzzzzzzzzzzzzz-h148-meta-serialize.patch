@@ -1,0 +1,23 @@
+diff --git a/libkern/c++/OSMetaClass.cpp b/libkern/c++/OSMetaClass.cpp
+--- a/libkern/c++/OSMetaClass.cpp
++++ b/libkern/c++/OSMetaClass.cpp
+@@ -1484,10 +1484,18 @@
+ 
+ /*********************************************************************
+ *********************************************************************/
++/* H148: a stray registry serialization must not take the machine down.
++ * The old body was panic("OSMetaClass::serialize(): Obsoleted"), and a boot
++ * path on this port reaches it; log which class (bounded) and skip it. */
++static unsigned gNativeMetaSerializeLogs;
++
+ bool
+ OSMetaClass::serialize(__unused OSSerialize * s) const
+ {
+-        panic("OSMetaClass::serialize(): Obsoleted");
++        if (gNativeMetaSerializeLogs < 8) {
++                gNativeMetaSerializeLogs++;
++                printf("NATIVE_META: serialize skipped for %s\n", getClassName());
++        }
+         return false;
+ }
+ 
