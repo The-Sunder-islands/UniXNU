@@ -6729,6 +6729,80 @@ display，应看到 `selector=3/4/5`（swap）或 CADisplay 断言消失；若�
 `IOAcceleratorES ok=0` 循环，则下一步按 H104k 的结论补一个可匹配的
 `IOAcceleratorES` 服务（窄 personality，不再重犯 H142 的全局匹配）。
 
+### H164 结果：每次启动都在 PMGR 处 panic（2026-11-07）
+
+H164 在每台机器上都停在同一处（屏幕照片）：
+
+```text
+calling mpo_policy_init for vnguard
+Security policy loaded: Guarded vnode policy (vnguard)
+NATIVE_TRUSTCACHE: not ready img4=0 amfi=0
+NATIVE_TRUSTCACHE: static cache skipped amfi=0 ready=0
+using 9996 buffer headers and 7046 cluster IO buffer headers
+Can't load kext com.apple.driver.ApplePMGR - requests to user space are disabled.
+panic(cpu 0 …): P11 PMGR: original dependency not loaded @CheeseburgerPlatformPower.cpp:135
+```
+
+对照 H163 的正常启动（`AppleImage4 → AMFI → Sandbox → vnguard`，随后
+`amfi=0xfffffff00bcfc690`、`P11 PMGR: original ApplePMGRNub registered`）可以判定：
+**这一轮所有预链接 kext 都没进 `sKextsByID`**（AMFI/AppleImage4/Sandbox/APFS/PMGR
+全部是预链接 kext，只有编进内核的 vnguard 注册了）。PMGR 只是第一个撞上的；
+即使跳过它，APFS 也加载不了。
+
+静态核对（全部相同，无法解释）：
+
+- `boot-H164.img` 的 ramdisk 就是 `payload-H164.img`（`562d10…`），其中 kernel 为
+  `c5f529dc…`；payload 的 `unixnu.toml` 与 H163 逐字节相同；
+- 两份内核的段布局、`__PRELINK_TEXT`/`__PRELINK_INFO` 地址与大小、
+  `__DATA_CONST/__mod_init_func` 98 项、`record_startup_extensions_function`
+  符号地址全部相同；
+- `__PRELINK_INFO` 的 38 个 kext 顺序与字典内容相同，唯一差异是每次构建都变的
+  `_PrelinkKCID`（同为 24 字符 base64）。
+
+因此需要直接观测 `readStartupExtensions()` 是否执行、在哪一步停下。
+
+### H165：预链接引导路径打点（2026-11-07，诊断版）
+
+1. `patches/xnu/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-h165-prelink-diag.patch`
+   （只加全局变量与赋值，不改行为）：
+
+   - `iokit/Kernel/IOStartIOKit.cpp` 定义四个持久段全局
+     `native_prelink_{section_size,parse_ok,kext_count,fn_set}`（放在这里而不是
+     `libsa/bootstrap.cpp`，因为后者所在的 bootstrap 段在 `bsd_init` 之前就被
+     `OSKextRemoveKextBootstrap` 释放）；
+   - `libsa/bootstrap.cpp` 在 `getsectbynamefromheader`、
+     `OSUnserializeXML`、`_PrelinkInfoDictionary` 三处记录实际结果；
+   - `IOStartIOKit.cpp` 在调用 `record_startup_extensions_function` 前记录其是否为空。
+2. 设备仓库 `scripts/CheeseburgerPlatformPower.cpp`：`cheeseburger_pmgr_startup()`
+   先打印
+
+```text
+P11 PMGR: prelink fn=%d sect=%x parse=%d kexts=%d load=%d
+```
+
+   失败时打印 `P11 PMGR: original dependency unavailable; continuing without the
+   ApplePMGR nub` 并**返回**，不再 panic（这样后续 APFS 是否同样缺失、以及持久
+   日志是否还能落盘都能看到）。
+3. 构建标记 `NATIVE_BUILD: H165`。
+
+```text
+H165 kernel:  a405c81f7a5b45c46d083fc4571ad0da13c921fbe68deded1c69c65ea480ac86
+H165 payload: 3d4cf4ce7fab8652a911a8d2bdf5587ed140fcd32a1762f585df0f6595b83b9c
+H165 boot:    9e11e11eda79714ee31836ece0bddfd0912b9d197e3a819ce2d5b85d03e0bb0c
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H165.img`（已核对）、
+Mac `~/h103/boot-H165.img`、仓库 `out/cheeseburger/boot/boot-H165.img`。
+
+判读：
+
+- `fn=0` → 静态构造没跑，`record_startup_extensions_function` 为空；
+- `sect=0` → `__PRELINK_INFO` 段没被找到；
+- `parse=0` → 内核 XML 解析器拒绝了该 plist；
+- `kexts=-2/0` → 解析成功但 kext 数组为空；
+- `kexts=38` 且 `load=0` → 预链接正常，问题在 H164 那张产物本身，需要给构建加
+  产物自检；`kexts=38` 但仍在别处失败 → 按后续日志继续定位。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

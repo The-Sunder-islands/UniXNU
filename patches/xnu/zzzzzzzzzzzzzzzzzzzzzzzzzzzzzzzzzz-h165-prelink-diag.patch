@@ -1,0 +1,67 @@
+diff --git a/iokit/Kernel/IOStartIOKit.cpp b/iokit/Kernel/IOStartIOKit.cpp
+index d74c063..472e0ee 100644
+--- a/iokit/Kernel/IOStartIOKit.cpp
++++ b/iokit/Kernel/IOStartIOKit.cpp
+@@ -130,6 +130,14 @@ iokit_post_constructor_init(void)
+  */
+ void (*record_startup_extensions_function)(void) = NULL;
+ 
++/* H165: what the prelink bootstrap actually did.  These live in the
++ * persistent part of the kernel (this file), not in the jettisoned
++ * bootstrap segment, so bsd_init can still read them. */
++volatile uint32_t native_prelink_section_size;
++volatile int native_prelink_parse_ok = -1;
++volatile int native_prelink_kext_count = -1;
++volatile int native_prelink_fn_set = -1;
++
+ void
+ InitIOKit(void *dtTop)
+ {
+@@ -165,6 +173,7 @@ InitIOKit(void *dtTop)
+ 	/* If the bootstrap segment set up a function to record startup
+ 	 * extensions, call it now.
+ 	 */
++	native_prelink_fn_set = record_startup_extensions_function ? 1 : 0;
+ 	if (record_startup_extensions_function) {
+ 		record_startup_extensions_function();
+ 	}
+diff --git a/libsa/bootstrap.cpp b/libsa/bootstrap.cpp
+index f0f770a..8b74032 100644
+--- a/libsa/bootstrap.cpp
++++ b/libsa/bootstrap.cpp
+@@ -70,6 +70,12 @@ extern void (*record_startup_extensions_function)(void);
+ extern void (*load_security_extensions_function)(void);
+ };
+ 
++/* H165: diagnostics written into the persistent IOKit globals.  This file
++ * lives in the jettisoned bootstrap segment, so it must not define them. */
++extern volatile uint32_t native_prelink_section_size;
++extern volatile int native_prelink_parse_ok;
++extern volatile int native_prelink_kext_count;
++
+ static void bootstrapRecordStartupExtensions(void);
+ static void bootstrapLoadSecurityExtensions(void);
+ 
+@@ -202,6 +208,7 @@ KLDBootstrap::readStartupExtensions(void)
+ 	 * has handed us.
+ 	 */
+ 	prelinkInfoSect = getsectbynamefromheader(mh, kPrelinkInfoSegment, kPrelinkInfoSection);
++	native_prelink_section_size = prelinkInfoSect ? (uint32_t)prelinkInfoSect->size : 0;
+ 	if (prelinkInfoSect->size) {
+ 		readPrelinkedExtensions(mh, KCKindPrimary);
+ 	} else {
+@@ -247,9 +254,14 @@ KLDBootstrap::readPrelinkedExtensions(kernel_mach_header_t *mh, kc_kind_t type)
+ 	 */
+ 	infoPlistSection = getsectbynamefromheader(mh, kPrelinkInfoSegment, kPrelinkInfoSection);
+ 	parsedXML = OSUnserializeXML((const char *)infoPlistSection->addr, errorString);
++	native_prelink_parse_ok = parsedXML ? 1 : 0;
+ 	if (parsedXML) {
+ 		infoDict = OSDynamicCast(OSDictionary, parsedXML.get());
+ 	}
++	if (infoDict) {
++		OSArray *kextCountArray = OSDynamicCast(OSArray, infoDict->getObject(kPrelinkInfoDictionaryKey));
++		native_prelink_kext_count = kextCountArray ? (int)kextCountArray->getCount() : -2;
++	}
+ 
+ 	if (!infoDict) {
+ 		const char *errorCString = "(unknown error)";
