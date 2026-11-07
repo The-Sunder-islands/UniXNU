@@ -1,0 +1,26 @@
+diff --git a/osfmk/kern/debug.c b/osfmk/kern/debug.c
+--- a/osfmk/kern/debug.c
++++ b/osfmk/kern/debug.c
+@@ -1137,8 +1137,21 @@
+ 	/*
+ 	 * H117: persist the console ring (and a NATIVE_PANIC marker) before the
+ 	 * machine-layer handler prints the panic text and stops the machine.
++	 * H151: also record the panic text itself.  The console copy never reaches
++	 * the message buffer, so a panic after the last flush left the persistent
++	 * log without the reason.
+ 	 */
+-	{ extern void native_panic_flush(void); native_panic_flush(); }
++	{
++		extern void native_panic_flush(void);
++		va_list native_panic_args;
++		char native_panic_msg[256];
++		va_copy(native_panic_args, *panic_args);
++		vsnprintf(native_panic_msg, sizeof(native_panic_msg),
++		    panic_format_str, native_panic_args);
++		va_end(native_panic_args);
++		printf("NATIVE_PANIC_STR: %s\n", native_panic_msg);
++		native_panic_flush();
++	}
+ 
+ #if defined(__x86_64__) && (DEVELOPMENT || DEBUG)
+ 	read_lbr();

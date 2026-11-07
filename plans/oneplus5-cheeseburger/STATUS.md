@@ -6069,6 +6069,46 @@ H150 boot:    aeb060190eb570a7d52e6b126067997c55447dfbcbd8149fc95faf6761ee4f54
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H150.img`（已核对）、
 Mac `~/h103/boot-H150.img`、仓库 `out/cheeseburger/boot/boot-H150.img`。
 
+### H150 结果：trust cache 修好，panic 前出现匹配线索（2026-11-07）
+
+`h150-log-20261107-125331.txt`：
+
+```text
+[453.957369] NATIVE_LEGACY: phase=4 dt=1 nub-registered name=NativeGOPFramebuffer
+[453.971373] Waiting on <dict …IOProviderClass=IOMedia…UUID=0476…>
+[453.973189] Couldn't alloc class "AppleARMFabricTrace"
+[453.973349] NATIVE_PANIC: flags=f3610000
+```
+
+- H150 生效：`trust cache` 的 NULL 解引用不再出现；
+- panic 前多了一条明确线索：`Couldn't alloc class "AppleARMFabricTrace"`
+  （`IOService.cpp:4045`，匹配循环里对缺失类的正常跳过）。我们把
+  `IOPlatformDevice` nub 注册进服务平面后，IOKit 会拿**所有**
+  `IOProviderClass=IOPlatformDevice` 的 personality（含 Apple 自己的
+  AppleARMIODevice 家族）来试配，其中某个类的 `init()` 在拿到非 Apple 的
+  nub 时崩掉；
+- `flags=f3610000` 说明还没走到我们的 `start()`（`0x4000000` 未置）。
+
+panic 原文没有进持久日志：`native_panic_flush()` 在 panic 文本打印之前执行
+（H117 的设计），日志只有 `NATIVE_PANIC` 标记。
+
+### H151：把 panic 原文写进持久日志（2026-11-07）
+
+`patches/xnu/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-h151-panic-string.patch`：
+`panic_trap_to_debugger()` 入口在调用 `native_panic_flush()` 之前，用
+`va_copy` + `vsnprintf` 把 panic 文本格式化成
+`NATIVE_PANIC_STR: <原文>` 写入 msgbuf 再刷盘（`vsnprintf` 在 debug.c:132 已声明，
+panic 上下文里 `printf` 已在用）。
+
+```text
+H151 kernel:  2080d80f47462cc1b4942699fd3d0fd72eec0c8bdb981b30840efb7c54c65135
+H151 payload: 420d926020a1855ef934b45dd820b5dc690ba5f2eda327697a11aa8bf84e4c0e
+H151 boot:    574157f718aaa87aecdee3dc67ff9d75efeff202dae454e9dd624c06c5197cf0
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H151.img`（已核对）、
+Mac `~/h103/boot-H151.img`、仓库 `out/cheeseburger/boot/boot-H151.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
