@@ -6109,6 +6109,49 @@ H151 boot:    574157f718aaa87aecdee3dc67ff9d75efeff202dae454e9dd624c06c5197cf0
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H151.img`（已核对）、
 Mac `~/h103/boot-H151.img`、仓库 `out/cheeseburger/boot/boot-H151.img`。
 
+### H151 结果：panic 原文到手，是 UFS 探针的硬断言（2026-11-07）
+
+`h151-log-20261107-130442.txt`：
+
+```text
+[466.524474] Waiting on <dict …IOProviderClass=IOMedia…UUID=0476…>
+[466.526249] Couldn't alloc class "AppleARMFabricTrace"
+[466.526412] NATIVE_PANIC_STR: NATIVE_UFS_GPT: qcom,ufshc ADT node not matched @NativeUfsProbe.cpp:2480
+```
+
+`NativeUfsProbe::start()` 里有：
+
+```c
+  if (!compatibleContains (compatible, "qcom,ufshc")) {
+    panic ("NATIVE_UFS_GPT: qcom,ufshc ADT node not matched");
+  }
+```
+
+我们把 `IOPlatformDevice` 的 GOP nub 注册进服务平面后，`registerService → startMatching`
+会让 IOKit 拿**所有** `IOProviderClass = IOPlatformDevice` 的 personality 来试配这个新
+nub；`NativeUfsProbe` 也在其中，于是它的 `start()` 被调用，而我们的 nub 没有
+`qcom,ufshc` 的 `compatible`，这条硬 panic 直接打死机器。
+
+### H152：UFS 探针对非本节点改为优雅拒绝（2026-11-07）
+
+`drivers/NativeUfsProbe/NativeUfsProbe.cpp`：先校验 `compatible` 与
+`p8,msm8998-direct-dma` profile，**再**调用 `IOService::start()`；不匹配时打印
+`NATIVE_UFS_GPT: not the UFS node provider=… skipping` 并 `return false`，
+不再 panic。
+
+```text
+H152 kernel:  cb03ef4e0659d643270d63a8250fd719d07bba0459dd408928c3169be99ec740
+H152 payload: 315da7efc556bb6bdf4c67f1475f8a8959d57ff4f67954dc68d9321b35cdc053
+H152 boot:    e0dd680c0a48b84ecc21f38cd4acb3a7120c0d4b667e2fc6471a25d3f501ee60
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H152.img`（已核对）、
+Mac `~/h103/boot-H152.img`、仓库 `out/cheeseburger/boot/boot-H152.img`。
+
+判读：不再出现该 panic；同一批匹配里 `NativeLegacyDisplay` 应被实例化，
+`flags` 出现 `0x4000000`/`0x8000000`，`NATIVE_IOMFB_PROBE` 的
+`IOMobileFramebuffer` 应为非 0。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

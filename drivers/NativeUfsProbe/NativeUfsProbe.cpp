@@ -2470,18 +2470,22 @@ NativeUfsLun::doAsyncReadWrite (IOMemoryDescriptor *buffer, UInt64 block,
 bool
 NativeUfsProbe::start (IOService *provider)
 {
-  if (!IOService::start (provider)) {
+  OSData *compatible = provider ?
+      OSDynamicCast (OSData, provider->getProperty ("compatible")) : nullptr;
+  OSData *profile = provider ?
+      OSDynamicCast (OSData, provider->getProperty ("p8,msm8998-direct-dma")) : nullptr;
+  // H152: the GOP display nub is also an IOPlatformDevice, so matching can
+  // offer this driver a provider that is not the UFS node.  Reject it instead
+  // of panicking; only the real qcom,ufshc node carries this profile.
+  if (!compatibleContains (compatible, "qcom,ufshc") || !profile ||
+      profile->getLength () != sizeof (uint32_t) ||
+      *static_cast<const uint32_t *> (profile->getBytesNoCopy ()) != 1) {
+    IOLog ("NATIVE_UFS_GPT: not the UFS node provider=%s, skipping\n",
+           provider ? provider->getName () : "-");
     return false;
   }
-
-  OSData *compatible = OSDynamicCast (OSData, provider->getProperty ("compatible"));
-  OSData *profile = OSDynamicCast (OSData, provider->getProperty ("p8,msm8998-direct-dma"));
-  if (!compatibleContains (compatible, "qcom,ufshc")) {
-    panic ("NATIVE_UFS_GPT: qcom,ufshc ADT node not matched");
-  }
-  if (!profile || profile->getLength () != sizeof (uint32_t) ||
-      *static_cast<const uint32_t *> (profile->getBytesNoCopy ()) != 1) {
-    panic ("NATIVE_UFS_GPT: missing p8,msm8998-direct-dma profile");
+  if (!IOService::start (provider)) {
+    return false;
   }
   IOLog ("NATIVE_UFS_GPT: warm-link probe start\n");
 
@@ -3019,7 +3023,7 @@ NativeUfsProbe::start (IOService *provider)
   PE_parse_boot_argn ("h103-load-iogpu", &loadIogpu, sizeof loadIogpu);
   gH103LoadIogpu = loadIogpu ? 1 : 0;
   gH103StartTicks = mach_absolute_time ();
-  IOLog ("NATIVE_BUILD: H151\n");
+  IOLog ("NATIVE_BUILD: H152\n");
   IOLog ("NATIVE_UFS_HB: slotMode=%d logSecs=%u hbTimer=%d loadIogpu=%d\n",
          gH103SlotMode, gH103LogSecs, gH103HbTimerOn, gH103LoadIogpu);
   thread_t heartbeat = nullptr;
