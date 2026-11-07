@@ -59,7 +59,7 @@ static uint32_t gH103SlotCursor;
 // boot wrote it.  The header alone is not enough: it is written after the
 // slot, and a late header write failure leaves a stale slots_written behind,
 // which made earlier logs mix slots from several boots.
-#define H103_BUILD "H174"
+#define H103_BUILD "H175"
 static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
@@ -257,6 +257,48 @@ h105DumpTick (void)
 // line is written first, then the 2x2 panel. H103bd was built exactly this way
 // and is the only confirmed 2x2 image; changing the interval or dropping the
 // ALIVE line was not proven safe.
+// H175: CoreAnimation reads MetalPluginName from the matched
+// IOAcceleratorES service and then loads
+// /System/Library/Extensions/<name>.bundle.  Adding this to the display
+// archive's accelerator object produced a bad prelink artifact (H173 panicked
+// in AppleM2ScalerCSCDriver), so the property is injected from here instead:
+// the heartbeat thread retries until the accelerator service appears, which is
+// always before backboardd reads the property.
+static void
+h103MaybeSetAcceleratorPlugin (void)
+{
+  static int done;
+  if (done) {
+    return;
+  }
+  unsigned enabled = 0;
+  if (!PE_parse_boot_argn ("offline-accelerator", &enabled, sizeof enabled) ||
+      enabled != 1) {
+    done = 1;
+    return;
+  }
+  char plugin[17];
+  int fromArg = 0;
+  if (PE_parse_boot_argn ("_offline-accelerator-plugin", plugin, sizeof plugin) &&
+      plugin[0]) {
+    fromArg = 1;
+  } else {
+    strlcpy (plugin, "AGXMetalA10", sizeof plugin);
+  }
+  OSDictionary *matching = IOService::serviceMatching ("IOAcceleratorES");
+  IOService *service = matching ? IOService::copyMatchingService (matching) : nullptr;
+  if (!service) {
+    OSSafeReleaseNULL (matching);
+    return;
+  }
+  bool set = service->setProperty ("MetalPluginName", plugin);
+  IOLog ("NATIVE_UFS_ACCEL: service=%p MetalPluginName=%s source=%s set=%u\n",
+         service, plugin, fromArg ? "arg" : "default", set ? 1 : 0);
+  OSSafeReleaseNULL (service);
+  OSSafeReleaseNULL (matching);
+  done = 1;
+}
+
 static void
 heartbeatThread (void *, wait_result_t)
 {
@@ -268,6 +310,7 @@ heartbeatThread (void *, wait_result_t)
     // 10 s beat.  Beat once per second until the h107 gate opens so the early
     // flush in h103SlotTick() can persist the crash window.
     IOSleep (h107GateOpen () ? 10000 : 1000);
+    h103MaybeSetAcceleratorPlugin ();
     beat++;
     if (beat == 1 || (beat % 10) == 0) {
     IOLog ("NATIVE_UFS_ALIVE: winFlight=%llu ufsFlight=%llu cmds=%llu "

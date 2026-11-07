@@ -7309,6 +7309,50 @@ Mac `~/h103/boot-H174.img`、仓库 `out/cheeseburger/boot/boot-H174.img`。
 - 若仍在 `pc=0xfffffff00b134000` panic → 说明是 display archive 重建本身导致
   预链接产物差异，需要给 `emit_prelink` 增加产物一致性校验。
 
+### H174 结果：回退后正常启动（2026-11-07）
+
+`h174-log-20261107-214856.txt`：
+
+- `Got boot device` 60.4 s、`BSD root: disk5s1`、OS/OwnerData/SystemCryptex 全部
+  mount-complete；
+- SpringBoard 存活（无 CADisplay 断言），`NATIVE_UFS_ALIVE` 里
+  `winReq=1930 winBytes=1010922496`，`NATIVE_UFS_LOCK` 0、`err 60` 0；
+- accelerator 在 365.2 s 发布，backboardd 匹配 `IOAcceleratorES ok=1`；
+- 但 369.7 s 的 `read key=MetalPluginName` 仍为空，`frames=0`。
+
+即：回退 H173 的 accelerator 源码后产物恢复正常，问题确实锁在那次 display
+archive 的再编译上。
+
+### H175：从 UFS 心跳注入 MetalPluginName（2026-11-07）
+
+不碰 display archive（保持 H174 的 `.a`）：
+
+1. `drivers/NativeUfsProbe/NativeUfsProbe.cpp` 新增
+   `h103MaybeSetAcceleratorPlugin()`，心跳线程每拍调用一次；
+2. 仅当 `offline-accelerator=1` 时启用；`IOService::serviceMatching
+   ("IOAcceleratorES")` → `copyMatchingService`，找到后
+   `setProperty("MetalPluginName", name)` 一次，并打印
+   `NATIVE_UFS_ACCEL: service=… MetalPluginName=… source=arg|default set=…`；
+3. 名字取 `_offline-accelerator-plugin`（解析失败用默认 `AGXMetalA10`）；
+4. 构建标记 `NATIVE_BUILD: H175`。
+
+```text
+H175 kernel:  e920ff0d12cd124fa2ea3bdd659ea5eee8607f753716979b9b0b57406b34db42
+H175 payload: 5d40815f33b6a81cff30dacd60bfc0721e56c1fec12b7e36776af908c104be65
+H175 boot:    f1a183eef0a363a5525041673c316022ca50da7a8378316a8953e46a54ea7a05
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H175.img`（已核对）、
+Mac `~/h103/boot-H175.img`、仓库 `out/cheeseburger/boot/boot-H175.img`。
+手机原在 TWRP，`adb reboot bootloader` → `fastboot boot` 启动（未写分区）。
+
+判读：
+
+- `NATIVE_UFS_ACCEL: … MetalPluginName=AGXMetalA10 …` 出现；
+- 随后 `NATIVE_A540_ACCEL: read key=MetalPluginName` 之后是否出现
+  `open request type=1`；
+- `frames>0` / `selector=3/4/5` 或 backboardd 崩溃。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
