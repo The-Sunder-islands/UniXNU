@@ -7738,6 +7738,59 @@ H181a boot:       61d825160ec21384220c197fed17af19d951819a00634b46320a833b7ed2ad
 - `README.md` 的 ADT 步骤改为实际使用的参数（含 `--gpu-addon`），并注明缺占位符
   会让 DarwinBoot 报 `boot refused: Compromised Data`。
 
+### H181a 结果：进入内核，但插件路径没被看到（2026-11-08）
+
+`H181a-log-20261108-001601.txt`（build=H181，uptime 583 s，窗口覆盖 59–967 s）：
+H181a 正常进入内核并跑到用户态（SpringBoard、runningboardd、containermanager 等都在），
+说明补 `GpuAddon` 占位符的判断正确。
+
+```text
+66.5   NATIVE_UFS_ACCEL: service=… MetalPluginName=NilMetal source=arg set=1
+284.7  NATIVE_A540_ACCEL: read key=MetalPluginName
+286.6  NATIVE_A540_ACCEL: read key=MetalPluginName
+369.7  NATIVE_A540_ACCEL: read key=MetalPluginName
+```
+
+与 H180 对比，关键差异是**没有** `read key=MetalPluginClassName`，也没有
+`NATIVE_IOGPU_ACCEL` / `NATIVE_FRAME`。按 `audit-target-metal-discovery.py` 审计出的
+原始发现链（先读 `MetalPluginName` → 组 `/System/Library/Extensions/<name>.bundle`
+→ 读 `MetalPluginClassName` → bundle/principal class），只读到插件名就停，说明
+`NilMetal.bundle` 这条路径对发现流程不可见：要么 addon 文件没写进 Data，
+要么 union mount 没成功。
+
+H181a 的 payload 里没有任何可用诊断（`zzy-native-gpu-addon-mount.patch` 只维护
+`native_gpu_addon_*` 全局量，不打印）。另外 298 s 有一次 SystemOS 读超时
+（`disk6 … err 60`），发生在发现流程（284 s）之后，不能解释这次失败。
+
+### H181b：给 addon 安装/union mount 加启动日志（2026-11-08）
+
+新增 `patches/xnu/zzz-native-gpu-addon-log.patch`（在 `zzy-native-gpu-addon-mount`
+之后应用，只加日志，不改行为）：
+
+- `native_gpu_addon_install()`：拿不到 loader 的 addon 时把 `native_gpu_addon_files`
+  置为 `-2`（区分“没有 handoff”和“解析失败”）；
+- `native_gpu_addon_prepare()` 末尾打印一行：
+
+```text
+NATIVE_GPU_ADDON: plugin=<arg> info=<err> files=<n> written=<n> same=<n> failed=<n> error=<err> ext=<stage>/<status> daemons=<stage>/<status> wallpaper=<stage>/<status>
+```
+
+其中 `ext/daemons/wallpaper` 的 stage 含义：1=源目录查找失败、2=源目录存在、
+3=mount 成功、4=封印层文件可见、5=owner 自己的文件可见；`status` 是最后错误码。
+`info` 是按 `_offline-accelerator-plugin` 拼出的
+`/System/Library/Extensions/<plugin>.bundle/Info.plist` 的查找结果。
+
+```text
+H181b kernel:  2472605d614744a844e82acdbca1812e5e8e24766a4b980ce61cd502ff053c5d
+H181b payload: 4f801d9fb30fd786cafe3ea9f016643af95d626de7156d01b59d1d50c686a285
+H181b boot:    65988f937f22bbdbe7f3862bbea163957e10c4fa968e4ed48d773778361379e8
+```
+
+判读：`files=3 written=3` 说明 addon 落地；`ext=3/0` 说明 union 生效；`info=0`
+说明 CA 要的 Info.plist 在挂载后可见。若 `files=-2` → loader handoff 断了；
+若 `ext=1/2` → `/private/var/ngpu/addons` 没建出来（安装失败）；若 `ext=3/2` →
+mount 后看不到封印层；`info≠0` 且 `ext≥3` → union 可见但插件路径仍不对。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

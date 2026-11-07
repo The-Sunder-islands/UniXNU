@@ -1,0 +1,38 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7516,6 +7516,7 @@
+ 	const uint8_t *addon = NULL;
+ 	uint64_t bytes = 0;
+ 	if (!native_ram_block_gpu_addon || !native_ram_block_gpu_addon(&addon, &bytes)) {
++		native_gpu_addon_files = -2;   /* no handoff from the loader */
+ 		return;
+ 	}
+ 	uint32_t count = 0;
+@@ -7627,6 +7628,26 @@
+ 	    "7570.iPadOS_17_Flat_Background-1024w-1366h@2x~ipad.ca/assets/J120.HEIC",
+ 	    "/Library/Wallpaper/Collections/iPadOS_17~ipad.wallpaperCollection/Wallpapers/7570.iPadOS_17_Flat-1024w-1366h@2x~ipad.wallpaper/"
+ 	    "7570.iPadOS_17_Flat_Background-1024w-1366h@2x~ipad.ca/J120.png", &native_gpu_addon3_stage, &native_gpu_addon3_status);
++	/* Bring-up report (H181b): the H181 run left no trace of where the addon install or the union mount stopped.
++	 * plugin/info is the Info.plist CoreAnimation will ask NSBundle for, through the same union. */
++	{
++		char plugin[32] = "", check[160];
++		int info = -1;
++		if (PE_parse_boot_argn("_offline-accelerator-plugin", plugin, sizeof(plugin)) && plugin[0]) {
++			snprintf(check, sizeof(check), "/System/Library/Extensions/%s.bundle/Info.plist", plugin);
++			vnode_t probe = NULLVP;
++			info = vnode_lookup(check, 0, &probe, vfs_context_current());
++			if (!info) {
++				vnode_put(probe);
++				probe = NULLVP;
++			}
++		}
++		printf("NATIVE_GPU_ADDON: plugin=%s info=%d files=%d written=%d same=%d failed=%d error=%d ext=%d/%d daemons=%d/%d wallpaper=%d/%d\n",
++		    plugin, info, (int)native_gpu_addon_files, (int)native_gpu_addon_written, (int)native_gpu_addon_same,
++		    (int)native_gpu_addon_failed, (int)native_gpu_addon_error, (int)native_gpu_addon_stage,
++		    (int)native_gpu_addon_status, (int)native_gpu_addon2_stage, (int)native_gpu_addon2_status,
++		    (int)native_gpu_addon3_stage, (int)native_gpu_addon3_status);
++	}
+ }
+ 
+ /* The deletable system apps (Weather, Notes, Calendar, ...) ship in the OS volume's /private/var/staged_system_apps. A restore copies
