@@ -7146,6 +7146,55 @@ Mac `~/h103/boot-H171.img`、仓库 `out/cheeseburger/boot/boot-H171.img`。
 - 若出现 `no low read DMA buffer` panic → 低内存确实耗尽，下一步在 display
   probe 之前预留缓冲。
 
+### H171 结果：APFS 不再 trap，但窗口读全部失败（2026-11-07）
+
+`H171-log-20261107-203706.txt`（`slot_build=H171`）：
+
+```text
+NATIVE_UFS_ROOT: published window[0]=OS …
+NATIVE_UFS_ROOT: published window[1]=SystemOS …
+NATIVE_UFS_WINDOW: SystemOS req=4 block=0 count=1
+NATIVE_UFS_BULK: lba=117f540 blocks=32 lock=2 cmd=16 unlock=1 ok=0
+NATIVE_UFS_WINDOW: SystemOS req=4 done=0 ok=0 ticks=276 read=269 write=0
+NATIVE_UFS_WINDOW: SystemOS req=5/6/7 … ok=0
+…
+Still waiting for root device
+NATIVE_PANIC_STR: Failed to mount root device @IOKitBSDInit.cpp:804
+```
+
+1. APFS 的 `Undefined kernel instruction` 不再出现——H171 的低内存分级回退生效；
+2. 但 `readWindowBulk()` 仍然一次发 **32 块 = 128 KB**（`blocks=32`），而 H171 可能
+   只拿到较小的低内存 DMA 缓冲；`ufsCommand()` 里 `bytes > q->dataCapacity`
+   直接返回失败，`ticks=276`（~14 µs）说明命令瞬间被拒，不是超时；
+3. 于是窗口读全部 `ok=0`，APFS 拿不到任何数据，mountroot 超时
+   `Failed to mount root device`。
+
+### H172：窗口批量读按 DMA 容量分块（2026-11-07）
+
+`NativeUfsProbe::readWindowBulk()`：
+
+1. `chunkBlocks = fQueue.dataCapacity / 4096`（为 0 直接失败）；
+2. 把一次 32 块的 READ(10) 拆成 `chunkBlocks` 大小的多条命令，每条各拿一次
+   `fLock`（保持 H128 的“一条命令一个锁”），成功后
+   `dst += bytes; at += chunk; remaining -= chunk`；
+3. 日志改为
+   `NATIVE_UFS_BULK: lba=… blocks=32 chunk=… calls=… lock=… cmd=… ok=…`；
+4. 构建标记 `NATIVE_BUILD: H172`。
+
+```text
+H172 kernel:  f60ba4ef6d2ffa66f13ae42815c27c06b185e35a53aad6322a6028ee9e46a060
+H172 payload: 99493d3b4fb4b522adb05f7931ce4ae03dbe290c6bb9c6cdb3ee5a3eedebf705
+H172 boot:    ecd62a6723ecd412393b39532658b1c23de8112bf20f0868c9b082f9525c0596
+```
+
+payload 仍带 `offline-accelerator=1` 与 `_offline-accelerator-plugin=AGXMetalA10`。
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H172.img`（已核对）、
+Mac `~/h103/boot-H172.img`、仓库 `out/cheeseburger/boot/boot-H172.img`。
+
+判读：`NATIVE_UFS_BULK … chunk=<实际容量/4096> calls=N ok=1`、
+`NATIVE_UFS_WINDOW … done=1 ok=1`，随后应出现 `Got boot device`、`BSD root: …`、
+`mount-complete`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

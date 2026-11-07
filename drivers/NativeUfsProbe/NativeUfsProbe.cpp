@@ -59,7 +59,7 @@ static uint32_t gH103SlotCursor;
 // boot wrote it.  The header alone is not enough: it is written after the
 // slot, and a late header write failure leaves a stale slots_written behind,
 // which made earlier logs mix slots from several boots.
-#define H103_BUILD "H171"
+#define H103_BUILD "H172"
 static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
@@ -1852,37 +1852,65 @@ NativeUfsProbe::readWindowBulk (uint64_t lba, uint32_t blocks, void *out)
       lba > 0xffffffffULL - (blocks - 1)) {
     return false;
   }
-  uint64_t lockStart = mach_absolute_time ();
-  if (!lockWithTimeout (fLock, "readWindowBulk", UFS_DATA_LOCK_TICKS)) {
-    IOLog ("NATIVE_UFS_LOCK: readWindowBulk blocked lba=%llx blocks=%u wait=%llu\n",
-           lba, blocks, (unsigned long long) (mach_absolute_time () - lockStart));
+  // H172: one READ(10) may not exceed the queue's DMA capacity.  H171 can
+  // hand us a smaller low-memory buffer, and the fixed 128 KB command then
+  // failed instantly (ufsCommand rejects bytes > dataCapacity), which is why
+  // every window read returned ok=0 and mountroot never saw APFS.  Split the
+  // request into capacity-sized commands, one lock per command (H128).
+  const uint32_t chunkBlocks = fQueue.dataCapacity / 4096U;
+  if (!chunkBlocks) {
     return false;
   }
-  uint64_t lockTicks = mach_absolute_time () - lockStart;
-  uint8_t cdb[16] = { 0x28 };
-  putBe32 (cdb + 2, static_cast<uint32_t> (lba));
-  cdb[7] = static_cast<uint8_t> (blocks >> 8);
-  cdb[8] = static_cast<uint8_t> (blocks);
-  unsigned bytes = blocks * 4096;
-  gUfsLastLba = lba;
-  gUfsLastBytes = bytes;
-  uint64_t commandStart = mach_absolute_time ();
-  bool ok = ufsCommand (&fQueue, 0, cdb, bytes, out);
-  uint64_t commandTicks = mach_absolute_time () - commandStart;
-  uint64_t unlockStart = mach_absolute_time ();
-  IOLockUnlock (fLock);
-  // H128: h103SlotTick() used to run here, i.e. still inside the window
-  // device's request lock; it now runs from the heartbeat thread.
-  uint64_t unlockTicks = mach_absolute_time () - unlockStart;
+  uint8_t *dst = static_cast<uint8_t *> (out);
+  uint32_t remaining = blocks;
+  uint64_t at = lba;
+  bool allOk = true;
+  uint64_t firstLock = 0, firstCommand = 0;
+  unsigned calls = 0;
+  while (remaining) {
+    uint32_t chunk = remaining < chunkBlocks ? remaining : chunkBlocks;
+    uint64_t lockStart = mach_absolute_time ();
+    if (!lockWithTimeout (fLock, "readWindowBulk", UFS_DATA_LOCK_TICKS)) {
+      IOLog ("NATIVE_UFS_LOCK: readWindowBulk blocked lba=%llx blocks=%u wait=%llu\n",
+             at, chunk, (unsigned long long) (mach_absolute_time () - lockStart));
+      allOk = false;
+      break;
+    }
+    uint64_t lockTicks = mach_absolute_time () - lockStart;
+    uint8_t cdb[16] = { 0x28 };
+    putBe32 (cdb + 2, static_cast<uint32_t> (at));
+    cdb[7] = static_cast<uint8_t> (chunk >> 8);
+    cdb[8] = static_cast<uint8_t> (chunk);
+    unsigned bytes = chunk * 4096U;
+    gUfsLastLba = at;
+    gUfsLastBytes = bytes;
+    uint64_t commandStart = mach_absolute_time ();
+    bool ok = ufsCommand (&fQueue, 0, cdb, bytes, dst);
+    uint64_t commandTicks = mach_absolute_time () - commandStart;
+    IOLockUnlock (fLock);
+    if (!calls) {
+      firstLock = lockTicks;
+      firstCommand = commandTicks;
+    }
+    calls++;
+    if (!ok) {
+      allOk = false;
+      break;
+    }
+    dst += bytes;
+    at += chunk;
+    remaining -= chunk;
+  }
   static unsigned gBulkPhases;
   unsigned call = gBulkPhases++;
-  if (!gH103Quiet && (call < 8 || commandTicks > 19200000ULL || lockTicks > 19200000ULL)) {
-    IOLog ("NATIVE_UFS_BULK: lba=%llx blocks=%u lock=%llu cmd=%llu unlock=%llu ok=%u\n",
-           lba, blocks, (unsigned long long) lockTicks,
-           (unsigned long long) commandTicks,
-           (unsigned long long) unlockTicks, ok ? 1 : 0);
+  if (!gH103Quiet &&
+      (call < 8 || firstCommand > 19200000ULL || firstLock > 19200000ULL)) {
+    IOLog ("NATIVE_UFS_BULK: lba=%llx blocks=%u chunk=%u calls=%u lock=%llu cmd=%llu ok=%u\n",
+           lba, blocks, chunkBlocks, calls,
+           (unsigned long long) firstLock, (unsigned long long) firstCommand,
+           allOk ? 1 : 0);
   }
-  return ok;
+  return allOk;
 }
 
 bool
