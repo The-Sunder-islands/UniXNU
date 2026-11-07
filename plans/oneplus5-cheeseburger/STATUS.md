@@ -6803,6 +6803,60 @@ Mac `~/h103/boot-H165.img`、仓库 `out/cheeseburger/boot/boot-H165.img`。
 - `kexts=38` 且 `load=0` → 预链接正常，问题在 H164 那张产物本身，需要给构建加
   产物自检；`kexts=38` 但仍在别处失败 → 按后续日志继续定位。
 
+### H165 结果：能启动、H164 显示改动生效，但日志被上一轮 boot 污染（2026-11-07）
+
+`h165-log-20261107-181312.txt`：
+
+1. **H165 正常启动并长期运行**：APFS、AMFI、Sandbox、PMGR nub 都正常，内容一直到
+   2426 s，daemon 持续拉起；H164 那种“预链接 kext 全部未注册”的 panic 没有复现。
+2. **slot 戳生效**：24 个 slot 全部是
+   `SHLOGS v1 boot=7e08b0130 seq=0..23 build=H165`。
+3. **H164 的显示改动确实在工作**：
+
+```text
+client io pid=88 selector=8  status=0 out=438,780     → GetDisplaySize = 1080x1920
+client io pid=88 selector=28 status=0 out=191         → GetDotPitch = 401（此前 NotFound）
+client fixup pid=55 selector=57/22/33/79/74 unsupported->0
+NATIVE_FRAME: event=5 … client=2 frames=0
+```
+
+   仍未 swap（`frames=0`）；SpringBoard 的 15 次断言仍是
+   `"failed to find the main CADisplay"`（501–798 s）。
+4. **但日志仍混入上一轮 boot 的文本**：出现 H155 之前的
+   `NATIVE_UFS_HB: slotMode=1 hbTimer=0 loadIogpu=1`（缺 `logSecs=`）、没有
+   `NATIVE_BUILD`、没有 `P11 PMGR: prelink fn=…`，而且 slot 戳的 uptime 只到
+   664 s 却包含 2426 s 的正文。
+
+根因：暖重启不清 DRAM，内核消息环也没有清零；`h103CopyMsgbufTail()` 拷贝
+“以写指针结尾的最后 N 字节”时，在写指针尚未绕满一圈的情况下**回卷到环尾**，
+而那部分仍是上一次 boot 写下的旧文本。于是每个 slot 都掺入旧内核输出，
+H165 的 PMGR 诊断行正好被挤掉。
+
+### H166：日志槽只拷贝本次 boot 的字节（2026-11-07）
+
+`drivers/NativeUfsProbe/NativeUfsProbe.cpp` 的 `h103CopyMsgbufTail()`：
+
+1. 用静态的 `lastX`/`laps` 跟踪消息环是否绕满一圈；
+2. `laps == 0`（本次 boot 还没绕圈）→ 有效区间是 `[0, msg_bufx)`，从
+   `valid - n` 线性拷贝，**绝不回卷**；
+3. `laps > 0`（整圈都是本次 boot 的数据）→ 才使用原来的回卷公式；
+4. 构建标记 `NATIVE_BUILD: H166`。
+
+```text
+H166 kernel:  7f226526d8e19b4da4af1f05f8e4f2c2da74c5b1040951015ec4769ec93de984
+H166 payload: 14531cf615ed160d350807f46e455bc8e13b25098f4bd32a1818fff345c55c3f
+H166 boot:    3098df94e66b8d2786eeadd8d862030e601acf523c31e08cf263a75c5002e1d3
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H166.img`（已核对）、
+Mac `~/h103/boot-H166.img`、仓库 `out/cheeseburger/boot/boot-H166.img`。
+
+判读：每个 slot 只应包含本次 boot 的字节；报告中应能第一次看到
+`NATIVE_BUILD: H166 boot=…` 和
+`P11 PMGR: prelink fn=… sect=… parse=… kexts=… load=…`。
+另：H164 的 panic 在 H165 上没有复现，待用 `boot-H164.img` 再启动一次留档，
+以区分“产物损坏”与“启动期竞态”。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

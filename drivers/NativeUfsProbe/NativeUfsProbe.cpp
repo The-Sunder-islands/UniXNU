@@ -59,7 +59,7 @@ static uint32_t gH103SlotCursor;
 // boot wrote it.  The header alone is not enough: it is written after the
 // slot, and a late header write failure leaves a stale slots_written behind,
 // which made earlier logs mix slots from several boots.
-#define H103_BUILD "H165"
+#define H103_BUILD "H166"
 static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
@@ -457,7 +457,30 @@ h103CopyMsgbufTail (uint8_t *out, uint32_t cap)
   if (x < 0 || x >= size) {
     x = 0;
   }
-  uint32_t n = (cap < static_cast<uint32_t> (size)) ? cap : static_cast<uint32_t> (size);
+  // H166: a warm reboot does not clear DRAM, and the kernel message ring is
+  // not zeroed either.  Before the write cursor completes its first lap, the
+  // bytes "before" it still belong to the previous boot, so copying the last
+  // `cap` bytes as a wrap-around tail mixed old-kernel output into every slot
+  // (that is how stale lines with identical timestamps appeared).  Track
+  // laps and copy linearly until the ring really has wrapped.
+  static uint32_t lastX;
+  static uint32_t laps;
+  if (static_cast<uint32_t> (x) < lastX) {
+    laps++;
+  }
+  lastX = static_cast<uint32_t> (x);
+  uint32_t valid = laps ? static_cast<uint32_t> (size) : static_cast<uint32_t> (x);
+  uint32_t n = cap < valid ? cap : valid;
+  if (!n) {
+    return 0;
+  }
+  if (!laps) {
+    uint32_t start = valid - n;
+    for (uint32_t i = 0; i < n; ++i) {
+      out[i] = static_cast<uint8_t> (m->msg_bufc[start + i]);
+    }
+    return n;
+  }
   uint32_t start = (static_cast<uint32_t> (x) + static_cast<uint32_t> (size) - n) %
                    static_cast<uint32_t> (size);
   for (uint32_t i = 0; i < n; ++i) {
