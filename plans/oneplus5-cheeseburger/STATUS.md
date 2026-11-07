@@ -6322,6 +6322,35 @@ H156 boot:    b7c58a8c08eb5771e8c7e095777af1e90dd2b53ab86b13c30762a0f9083c5cc7
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H156.img`（已核对）、
 Mac `~/h103/boot-H156.img`、仓库 `out/cheeseburger/boot/boot-H156.img`。
 
+### H157：心跳在前门未开时按 1 秒节拍并每次刷盘（2026-11-07）
+
+H153–H156 的屏幕都显示系统在 launchd 阶段几秒内就崩，而持久日志一直是 H151 的旧内容。
+原因不是工具缓存（`--adb` 每次重新 dd），而是：
+
+- 周期刷盘挂在 10 秒心跳上，第一次 tick 就在崩溃之后；
+- panic 时刻的 `native_panic_flush()` 又因为这次 data abort 属于“禁用抢占”上下文，
+  被 H154 的保护跳过。
+
+H157 把观测点前移：
+
+1. `heartbeatThread()` 在 `h107GateOpen()` 为假时按 **1 秒**节拍（门开后恢复 10 秒），
+   `NATIVE_UFS_ALIVE` 仍只在第 1 拍和每 10 拍打印；
+2. `h103SlotTick()` 的“门未开”分支改为**每拍都 `h103FlushNow()`**（不再受
+   `h103-log-secs` 限制）；
+3. 构建标记 `NATIVE_BUILD: H157`。
+
+```text
+H157 kernel:  4965c1b113ba53d70a5ecf8577ef24bbbd7035497b57190417f3395183eb21b3
+H157 payload: 8292d473cc2c5199d0a16f63ef34b92533e811999f514a022635d960c628b23a
+H157 boot:    3b22fd414048e43b1fadb778f845a8d16b9d98c587237c92f6dba1cbbdccbf57
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H157.img`（已核对）、
+Mac `~/h103/boot-H157.img`、仓库 `out/cheeseburger/boot/boot-H157.img`。
+
+判读：只要这次启动跑过 UFS 启动后 1 秒，日志 header 的 `boot_id`/`slots_written`
+就应该变化，并出现 `NATIVE_BUILD: H157` 与崩溃前最后 1~2 秒的内容。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
