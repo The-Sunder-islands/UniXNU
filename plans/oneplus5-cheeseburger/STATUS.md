@@ -7438,6 +7438,58 @@ Mac `~/h103/boot-H177.img`、仓库 `out/cheeseburger/boot/boot-H177.img`。
 `op=match comm=backboardd d=AGXAccelerator ok=?`、`open request type=?`、
 `frames=?`。
 
+## 近期结果汇总（H167–H177，2026-11-07）
+
+本节把最近十轮的结论收在一处；逐轮细节见下面各小节。
+
+### 已经打通的部分
+
+1. **存储/挂载**（H166–H172、H177）：
+   - 暖重启残留字节不再混入日志（H166 tail 修复、H167 `SHLOGS v2` 精确长度、
+     H177 改为真正的刷盘 delta）；
+   - 低内存物理连续 DMA 改为 128K→4K 分级回退（H171），窗口读按实际容量
+     分块（H172）——`Got boot device` / `BSD root: disk5s1` / OS、OwnerData、
+     SystemCryptex 三个卷的 `mount-complete` 在 60 s 左右完成；
+   - `NATIVE_UFS_LOCK`、`err 60` 稳定为 0。
+2. **显示可见性 / CADisplay**（H159–H167）：
+   - `IOMobileFramebufferLegacy` 服务可被 backboardd 打开（`match=1`）；
+   - H164 的“未实现选择器返回成功并清零 + canvas/dot-pitch”之后，
+     SpringBoard 不再撞 `"failed to find the main CADisplay"`，可长期存活；
+   - 显示服务报告 `GetDisplaySize = 1080x1920`、`dotpitch = 401`、
+     `canvas = 1080x1920`。
+3. **accelerator 发现链**（H168–H176）：
+   - 裸 `IOAcceleratorES` 子类 + `newUserClient` 让 backboardd 的
+     `IOServiceMatching("IOAcceleratorES")` 变为 `ok=1`，此前 257 次的轮询停止；
+   - UFS 心跳注入 `MetalPluginName=AGXMetalA10`（H175）后，Apple 的 AGX 插件被
+     加载，CA 转而查询 `AGXAccelerator`（H176 已把桩类改名为 `AGXAccelerator`）。
+
+### 仍未打通的部分
+
+- **没有一帧 swap**：`NATIVE_FRAME … frames=0`、`selector 3/4/5` 从未出现，
+  屏幕始终是内核控制台（控制台只在第一帧 swap 时让出）；
+- backboardd 的窗口服务器已打开 IOMFB、启用帧信息通知，但渲染器没有产出。
+
+### 已知的坑
+
+- **display archive 再编译有风险**：H173 仅给 `NativeA540AcceleratorProbe::start()`
+  增加了 boot-args 日志/默认插件名，产物就稳定 panic 在
+  `AppleM2ScalerCSCDriver`（`pc=0xfffffff00b134000`，PAC 认证失败形态）；
+  H174 回退后立即恢复正常。此后 accelerator 侧改动尽量放到 UFS 驱动（H175 起）。
+- H164 的预链接产物曾经“每次启动都不注册任何 kext”，重建后消失；
+  这类产物级差异目前只能靠“构建后实机启动”验证。
+- `liveactivitiesd` 仍在 `SessionSyncEngine + 0x1d4f8` BRK（次级问题，未处理）。
+
+### 下一步（按优先级）
+
+1. 用 H177 的干净日志确认 H176 的真实结果：
+   `op=match … AGXAccelerator ok=?`、`open request type=?`、`frames=?`；
+2. 若 `ok=1` 且 Metal 打开设备后仍不渲染 → 转“自写最小 `_MTLDevice` nil 插件
+   + Data seed 注入”（`add-gpu-plugin-data.py` + `sheng-gpu-addon=1` 通道），
+   目标是让 CA 回退软件渲染并出第一帧；
+3. 若要真正用 GPU，则进入 Adreno 主线：内核 Adreno 驱动 + Turnip/Mesa 的
+   Metal/Vulkan 用户态插件（`drivers/NativeAdreno`、`build-adreno-metal-plugin.py`），
+   需要先构建 Turnip，属于独立的大工程。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
