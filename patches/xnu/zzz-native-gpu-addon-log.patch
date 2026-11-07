@@ -9,7 +9,25 @@ diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
  		return;
  	}
  	uint32_t count = 0;
-@@ -7627,6 +7628,26 @@
+@@ -7604,7 +7605,16 @@
+ native_gpu_addon_prepare(proc_t p, user_addr_t scratch)
+ {
+ 	uint32_t enabled = 0;
+-	if (!PE_parse_boot_argn("sheng-gpu-addon", &enabled, sizeof(enabled)) || enabled != 1) {
++	/* Bring-up report (H182b): the H181b/H182 runs never reached the addon code although the argument is in the
++	 * payload, so print what the kernel actually received before the gate. */
++	char *boot_arguments = PE_boot_args();
++	size_t boot_length = strlen(boot_arguments);
++	char *token = strnstr(boot_arguments, "sheng-gpu-addon", boot_length);
++	boolean_t found = PE_parse_boot_argn("sheng-gpu-addon", &enabled, sizeof(enabled));
++	printf("NATIVE_GPU_ADDON: probe found=%d enabled=%u length=%u token=%d tail=%s\n", found, enabled,
++	    (unsigned)boot_length, token ? (int)(token - boot_arguments) : -1,
++	    boot_arguments + (boot_length > 120 ? boot_length - 120 : 0));
++	if (!found || enabled != 1) {
+ 		return;
+ 	}
+ 	native_gpu_addon_install(p, scratch);
+@@ -7627,6 +7637,26 @@
  	    "7570.iPadOS_17_Flat_Background-1024w-1366h@2x~ipad.ca/assets/J120.HEIC",
  	    "/Library/Wallpaper/Collections/iPadOS_17~ipad.wallpaperCollection/Wallpapers/7570.iPadOS_17_Flat-1024w-1366h@2x~ipad.wallpaper/"
  	    "7570.iPadOS_17_Flat_Background-1024w-1366h@2x~ipad.ca/J120.png", &native_gpu_addon3_stage, &native_gpu_addon3_status);
