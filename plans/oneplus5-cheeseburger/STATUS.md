@@ -6189,6 +6189,56 @@ H153 boot:    84804f7c48d23e4b3646ce4c3b6456eb8ac05a5628766f602adafde0f0eba89b
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H153.img`（已核对）、
 Mac `~/h103/boot-H153.img`、仓库 `out/cheeseburger/boot/boot-H153.img`。
 
+### H153 结果：进展很大，但 panic 钩子自己被 mutex 断言打死（2026-11-07）
+
+屏幕显示 H153 已越过很多关卡：
+
+```text
+NATIVE_LEGACY: phase=4 dt=1 nub-registered name=NativeGOPFramebuffer
+NATIVE_UFS_GPT: not the UFS node provider=NativeGOPFramebuffer, skipping   ← H153 拦截生效
+apfs: 成功挂载 Data / SystemCryptex 等卷
+NATIVE_H67_OPEN: … dyld_shared_cache_arm64 …  shared_region_start_address() failed
+NATIVE_UFS_ALIVE: winFlight=0 ufsFlight=0 cmds=1731 …
+panic(cpu 0 …): Attempt to take mutex 0xfffffff00762cc40 with preemption disabled (1) @lock_rtx.c:194
+```
+
+但持久日志**完全没更新**（`boot_id`/`slots_written` 与 H151 相同）。原因是 H151 的 panic 钩子
+在 `panic_trap_to_debugger()` 入口做 `printf`（取 msgbuf mutex）并调用
+`native_panic_flush()`（取 `fLock`）。当真正的 panic 发生在**禁用抢占**的上下文里
+（例如持有自旋锁或在锁内出错），钩子会立刻引发二次 panic，掩盖原始原因，而且
+flush 也永远写不出去 —— 与“屏幕只见 mutex panic、磁盘日志不变”完全一致。
+
+### H154：panic 钩子先检查抢占级别（2026-11-07）
+
+`patches/xnu/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-h154-panic-guard.patch`：
+
+```c
+	{
+		extern int get_preemption_level(void);
+		extern void native_panic_flush(void);
+		if (get_preemption_level() == 0) {
+			va_copy(…); vsnprintf(…);
+			printf("NATIVE_PANIC_STR: %s\n", msg);
+			native_panic_flush();
+		}
+		/* 抢占被禁时不做任何加锁动作，让原始 panic 原样输出 */
+	}
+```
+
+构建标记更新为 `NATIVE_BUILD: H154`。
+
+```text
+H154 kernel:  61142f9389944234b91a3a947e6973eedc0e11dade6deb1fb4df32c5cf5f3388
+H154 payload: 7c18cbb8c1afbe423eb96e6102ce0c58f342b6c5770578e0b34d9900cf7ba12a
+H154 boot:    741ded6f1a3f2d8acbc3777b4d8c31f46e98932e2aac0526559d4ddbe5f0b415
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H154.img`（已核对）、
+Mac `~/h103/boot-H154.img`、仓库 `out/cheeseburger/boot/boot-H154.img`。
+
+判读：若仍在“禁用抢占”上下文 panic，屏幕会显示**原始** panic 文本（需拍照）；
+若抢占正常，日志里会有 `NATIVE_PANIC_STR` 且槽会更新。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

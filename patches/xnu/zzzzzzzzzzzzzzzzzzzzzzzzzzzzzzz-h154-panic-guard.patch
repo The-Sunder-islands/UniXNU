@@ -1,0 +1,33 @@
+diff --git a/osfmk/kern/debug.c b/osfmk/kern/debug.c
+--- a/osfmk/kern/debug.c
++++ b/osfmk/kern/debug.c
+@@ -1142,15 +1142,21 @@
+ 	 * log without the reason.
+ 	 */
+ 	{
++		extern int get_preemption_level(void);
+ 		extern void native_panic_flush(void);
+-		va_list native_panic_args;
+-		char native_panic_msg[256];
+-		va_copy(native_panic_args, *panic_args);
+-		vsnprintf(native_panic_msg, sizeof(native_panic_msg),
+-		    panic_format_str, native_panic_args);
+-		va_end(native_panic_args);
+-		printf("NATIVE_PANIC_STR: %s\n", native_panic_msg);
+-		native_panic_flush();
++		/* H154: printf takes the msgbuf mutex and native_panic_flush takes the
++		 * storage lock; with preemption disabled either one panics again and
++		 * hides the real reason.  Only use them from a normal context. */
++		if (get_preemption_level() == 0) {
++			va_list native_panic_args;
++			char native_panic_msg[256];
++			va_copy(native_panic_args, *panic_args);
++			vsnprintf(native_panic_msg, sizeof(native_panic_msg),
++			    panic_format_str, native_panic_args);
++			va_end(native_panic_args);
++			printf("NATIVE_PANIC_STR: %s\n", native_panic_msg);
++			native_panic_flush();
++		}
+ 	}
+ 
+ #if defined(__x86_64__) && (DEVELOPMENT || DEBUG)
