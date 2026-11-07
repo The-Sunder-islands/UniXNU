@@ -7399,6 +7399,45 @@ Mac `~/h103/boot-H176.img`、仓库 `out/cheeseburger/boot/boot-H176.img`。
 - `NATIVE_A540_ACCEL: open request type=1`（Apple 的 AGX 用户态打开桩）；
 - 之后若返回 nil → CA 可能回退软件渲染（`frames>0`）；若崩溃 → 改为自写 nil 插件。
 
+### H176 结果：日志窗口再次丢失（2026-11-07）
+
+`H176-log-20261107-222617.txt`：
+
+- 注入生效：`41.446 NATIVE_UFS_ACCEL: … MetalPluginName=AGXMetalA10 source=arg set=1`；
+- 但 240–345 s 的新鲜窗口里 **没有一条** `op=match comm=backboardd`，
+  唯一的 `AGXAccelerator` 行是 H175 的残留（时间戳 `357.685793` 与上一份完全相同），
+  365–372 s 的 `Got boot device`/mount 也来自上一轮 H169；
+- 屏幕仍是内核控制台在滚，即 backboardd 仍未提交帧。
+
+根因：槽内容仍是“消息环最后 N 字节”（tail）。本次 boot 写入量不足 N、且内核消息环
+跨暖重启不清零时，拷贝会伸进上一轮 boot 的文本，正好把最关键的那段挤掉。
+
+### H177：槽内容改为真正的 delta（2026-11-07）
+
+`drivers/NativeUfsProbe/NativeUfsProbe.cpp`：
+
+1. `h103CopyMsgbufTail()` 换成 `h103CopyMsgbufDelta(out, cap, previous, cursor)`：
+   - `delta = cursor >= previous ? cursor - previous : size - previous + cursor`；
+   - 只拷贝 `[cursor - delta, cursor)` 这段（环形）字节；
+   - `delta > cap`（游标被重置/跳变）时保留最新 `cap` 字节；
+   - 首次刷盘 `previous = 0` → 拷贝本次 boot 到目前为止的全部输出；
+2. 槽内的 `SHLOGS v2 … bytes=` 现在就是这段 delta 的真实长度；
+3. 构建标记 `NATIVE_BUILD: H177`。
+
+```text
+H177 kernel:  978b1c0d3dd7ab048659a30acea3b7373bfda93d897cabaf967eb576e5bcf737
+H177 payload: 06fffcbd90a33390499f6b762adf5e7a2ea1ba302030a1122cb640436d57e577
+H177 boot:    5d24f8954d8c1dde666b808875efc5ae5446c93d4337ebb13b156a5162db7d27
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H177.img`（已核对）、
+Mac `~/h103/boot-H177.img`、仓库 `out/cheeseburger/boot/boot-H177.img`。
+手机在 TWRP，`adb reboot bootloader` → `fastboot boot` 启动（未写分区）。
+
+判读：日志里每一行都应属于本次 boot；应能看到此前被挤掉的
+`op=match comm=backboardd d=AGXAccelerator ok=?`、`open request type=?`、
+`frames=?`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

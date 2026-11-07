@@ -59,7 +59,7 @@ static uint32_t gH103SlotCursor;
 // boot wrote it.  The header alone is not enough: it is written after the
 // slot, and a late header write failure leaves a stale slots_written behind,
 // which made earlier logs mix slots from several boots.
-#define H103_BUILD "H176"
+#define H103_BUILD "H177"
 static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
@@ -529,47 +529,35 @@ h103CopyMsgbuf (uint8_t *out)
 }
 
 static uint32_t
-h103CopyMsgbufTail (uint8_t *out, uint32_t cap)
+h103CopyMsgbufDelta (uint8_t *out, uint32_t cap, uint32_t previous, uint32_t cursor)
 {
   memset (out, 0, cap);
   struct H103MsgBuf *m = msgbufp;
-  if (!m || !m->msg_bufc || m->msg_size <= 0) {
+  if (!m || !m->msg_bufc || m->msg_size <= 0 || !cap) {
     return 0;
   }
-  int size = m->msg_size, x = m->msg_bufx;
-  if (x < 0 || x >= size) {
-    x = 0;
+  const uint32_t size = static_cast<uint32_t> (m->msg_size);
+  previous %= size;
+  cursor %= size;
+  // H177: copy exactly the bytes produced since the previous successful flush.
+  // The old "last cap bytes of the ring" copy reached backwards into whatever
+  // the previous boot had left in the (cleared-but-not-zeroed) ring, which is
+  // how finished boots kept leaking lines with identical timestamps into every
+  // slot and hiding the window we needed.
+  uint32_t delta = cursor >= previous ? cursor - previous : size - previous + cursor;
+  if (delta > cap) {
+    // A jump larger than one slot means the ring was re-initialised (or the
+    // cursor reset); the newest bytes are still valid, so keep the last cap.
+    delta = cap;
   }
-  // H166: a warm reboot does not clear DRAM, and the kernel message ring is
-  // not zeroed either.  Before the write cursor completes its first lap, the
-  // bytes "before" it still belong to the previous boot, so copying the last
-  // `cap` bytes as a wrap-around tail mixed old-kernel output into every slot
-  // (that is how stale lines with identical timestamps appeared).  Track
-  // laps and copy linearly until the ring really has wrapped.
-  static uint32_t lastX;
-  static uint32_t laps;
-  if (static_cast<uint32_t> (x) < lastX) {
-    laps++;
-  }
-  lastX = static_cast<uint32_t> (x);
-  uint32_t valid = laps ? static_cast<uint32_t> (size) : static_cast<uint32_t> (x);
-  uint32_t n = cap < valid ? cap : valid;
-  if (!n) {
+  if (!delta) {
     return 0;
   }
-  if (!laps) {
-    uint32_t start = valid - n;
-    for (uint32_t i = 0; i < n; ++i) {
-      out[i] = static_cast<uint8_t> (m->msg_bufc[start + i]);
-    }
-    return n;
+  const uint32_t start = (cursor + size - delta) % size;
+  for (uint32_t i = 0; i < delta; ++i) {
+    out[i] = static_cast<uint8_t> (m->msg_bufc[(start + i) % size]);
   }
-  uint32_t start = (static_cast<uint32_t> (x) + static_cast<uint32_t> (size) - n) %
-                   static_cast<uint32_t> (size);
-  for (uint32_t i = 0; i < n; ++i) {
-    out[i] = static_cast<uint8_t> (m->msg_bufc[(start + i) % static_cast<uint32_t> (size)]);
-  }
-  return n;
+  return delta;
 }
 
 #define UFS_REG_IS 0x20U
@@ -2232,7 +2220,8 @@ NativeUfsProbe::h103SlotWrite (void)
   // slice precisely and never look at the un-written remainder.
   const uint32_t stampBytes = 128;
   uint32_t payloadCap = bodyBytes > stampBytes ? bodyBytes - stampBytes : 0;
-  uint32_t n = payloadCap ? h103CopyMsgbufTail (body + stampBytes, payloadCap) : 0;
+  uint32_t n = payloadCap ?
+      h103CopyMsgbufDelta (body + stampBytes, payloadCap, previous, static_cast<uint32_t> (cursor)) : 0;
   char stamp[128];
   int stampLen = snprintf (stamp, sizeof stamp,
       "SHLOGS v2 boot=%llx seq=%u build=%s uptime=%u bytes=%u",
