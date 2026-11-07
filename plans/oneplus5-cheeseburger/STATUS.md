@@ -8084,6 +8084,36 @@ H188 boot:    ad288bf1cd477b3dc875d3c02e1a08f757fed640bf4091f4cc25845845c94b01
 这是纯诊断镜像：无论结果如何，backboardd 都会在加载插件时退出，系统不会进入可用的
 图形状态。
 
+### H188 结果：镜像确实被加载并执行（2026-11-08）
+
+日志里出现：
+
+```text
+NATIVE_EXIT: pid=55 ppid=1 comm=backboardd status=0x2a00 ns=0 code=0x0
+```
+
+`status=0x2a00`、`ns=0` 就是 constructor 里的 `_exit(42)`；随后每个 backboardd
+实例（131、137、143…）都在加载插件时以 42 退出。**这证明**：
+
+- union 挂载、trust cache、4 KiB 页签名都正常；
+- 插件 bundle 的镜像被 dlopen 且 constructor 执行；
+- H184–H186 的 `sig=11` 发生在插件代码开始执行**之后**，不是 dyld/mmap 或签名问题。
+
+### H189：把退出码移进 initWithAcceleratorPort（2026-11-08）
+
+constructor 正常返回，`initWithAcceleratorPort:` 一进入就 `_exit(43)`：
+
+- 出现 `status=0x2b00` → 类检查和消息发送都通过，H184–H186 的崩溃发生在返回
+  nil **之后**（CA/Metal 不接受 nil 设备），路线 B 到此为止；
+- 没有 `0x2b00`、仍是 `sig=11` → 崩溃在 constructor 与 init 之间
+  （`principalClass` / `classNamed:` / `isSubclassOfClass:`），是可修的类声明问题。
+
+```text
+H189 payload: 9ff5b70ecdb456f4d175b0b530a123b95fd399cd11d553c8c280e39cdb4aa90e
+H189 boot:    c5a3c3c55b9737a6df03a7e692b7e513be310df6100c1d4200be2000a3707005
+插件 CDHash:  0932f6fad2eae877f800cc5bdac14a78aec81bf0
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
