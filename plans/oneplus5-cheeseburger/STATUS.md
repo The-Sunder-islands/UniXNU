@@ -6152,6 +6152,43 @@ Mac `~/h103/boot-H152.img`、仓库 `out/cheeseburger/boot/boot-H152.img`。
 `flags` 出现 `0x4000000`/`0x8000000`，`NATIVE_IOMFB_PROBE` 的
 `IOMobileFramebuffer` 应为非 0。
 
+### H152 结果：校验过早，UFS 探针把真节点也拒了（2026-11-07）
+
+H152 上机后持久日志正文没有更新（三次导出文件均 37878 字节，md5 只差文件头时间戳），
+说明这次启动**没有向槽里写任何东西**。原因是 H152 把
+`compatible`/`p8,msm8998-direct-dma` 校验挪到了 `IOService::start(provider)` **之前**：
+
+```c
+  OSData *compatible = provider ? provider->getProperty ("compatible") : nullptr;
+  if (!compatibleContains (compatible, "qcom,ufshc") ...) return false;   // 属性还没就绪
+```
+
+provider 的这些属性是在 `IOService::start(provider)` 过程中才可用的，于是真正的 UFS
+节点也被拒绝 → 存储驱动不启动 → 日志窗口不存在 → 既无日志也无从判断。
+
+### H153：恢复原顺序，只把 panic 换成拒绝（2026-11-07）
+
+```c
+  if (!IOService::start (provider)) return false;
+  OSData *compatible = ...getProperty ("compatible");
+  OSData *profile = ...;
+  if (!compatibleContains (...) || !profile || ...) {
+    IOLog ("NATIVE_UFS_GPT: not the UFS node provider=%s, skipping\n", provider->getName ());
+    return false;      // 不再 panic
+  }
+```
+
+真 UFS 节点行为与 H151 完全一致；GOP nub 被匹配时只是返回 false。
+
+```text
+H153 kernel:  aa76eadeea40219cf800342676eddadfe775ce9b9c4a918f294098567cb5724b
+H153 payload: 2fe4b7620d5ec8fe98a6f9d66aa73bcbefe4757d84139a0a8dba61ba8b32355c
+H153 boot:    84804f7c48d23e4b3646ce4c3b6456eb8ac05a5628766f602adafde0f0eba89b
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H153.img`（已核对）、
+Mac `~/h103/boot-H153.img`、仓库 `out/cheeseburger/boot/boot-H153.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
