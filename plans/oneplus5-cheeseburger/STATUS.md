@@ -6405,6 +6405,57 @@ Mac `~/h103/boot-H158.img`、仓库 `out/cheeseburger/boot/boot-H158.img`。
 判读：若内核 data abort 消失、系统回到“SpringBoard 因缺 CADisplay 崩溃”的状态，
 即确认 personality 是触发源；下一步再设计不会触发全局匹配的显示发布方式。
 
+### H158 结果：显示手工路径恢复；SystemOS 卷查找出现时序失败（2026-11-07）
+
+`h158-log-20261107-144948.txt`（首次拿到本轮新日志，`boot_id 5554932097`）：
+
+1. **显示手工路径工作**，并直接证实 matched-state 结论：
+
+```text
+NATIVE_LEGACY: self inactive=0 ioclass=IOMobileFramebufferLegacy provider=IOPlatformDevice
+NATIVE_LEGACY: self-match name=IOMobileFramebuffer       -> 0 same=0
+NATIVE_LEGACY: self-match name=IOMobileFramebufferLegacy -> 0 same=0
+NATIVE_LEGACY: self-match name=NativeLegacyDisplay       -> 0 same=0
+```
+
+   连精确类名都查不到，因为 `copyMatchingService()` 只返回
+   `kIOServiceMatchedState`；手工 start 的服务永远没有这一位。
+
+2. 内核 data abort 未出现，但卡在更早处：
+
+```text
+287.5  nx_mount: disk3 checkpoint search: largest xid 14 …
+288.4  nx_mount: disk3 stable checkpoint indices …
+（没有 disk3s1 的 handle_mount / mount-complete）
+289.3  NATIVE_PANIC_STR: offline owner SystemOS mount failed: 80 @kern_exec.c:8456
+```
+
+`EAUTH(80)` 来自 `native_owner_cache_prepare()`：它按 UUID
+`8846FE78-…` 用 `getMatchingServices` **一次性**查找 SystemOS 卷的 IOMedia，
+而这一轮该 media 尚未发布（disk3 容器只做了 checkpoint search），于是
+`goto done`。对照历史记录（H96 §4.3、H130/H151）该路径一直是成功的，
+**这个问题以前没有出现过**。
+
+### H159：SystemOS 卷查找加有界重试与失败原因（2026-11-07）
+
+1. `drivers/NativeUfsProbe/NativeUfsProbe.cpp`：把一次性查找拆成
+   `native_volume_lookup_once()`，外层最多 10 次 × 200 ms 重试，每次打印
+   `NATIVE_SYSTEMOS_WAIT: attempt=N matches=M`，命中时打印
+   `NATIVE_SYSTEMOS_WAIT: found after N attempts`；UUID/BSD name/唯一匹配校验不变。
+2. `patches/xnu/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-h159-owner-mount-diag.patch`：
+   `native_owner_cache_prepare()` 的两处失败点打印具体原因
+   （`NATIVE_OWNER_MOUNT: root not authorized …` /
+   `NATIVE_OWNER_MOUNT: SystemOS media not found stage=…`）。
+
+```text
+H159 kernel:  fa6af7c67878561cb68bea1ff5307f8f376fc0b1164b2e9d618e719c4046e82b
+H159 payload: 5181bead860ea076d5576de9a3ef21e2b96b37e95ebc5c2799a91dc435517087
+H159 boot:    9838468c5c54e51c9f6045341bda06c90f4771ced51003051dd3636f64118643
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H159.img`（已核对）、
+Mac `~/h103/boot-H159.img`、仓库 `out/cheeseburger/boot/boot-H159.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

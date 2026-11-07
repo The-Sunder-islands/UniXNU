@@ -1318,10 +1318,13 @@ native_verified_block_root_authorized (dev_t device)
   return device != NODEV;
 }
 
-extern "C" int
-native_verified_block_volume_device (const char *uuid, dev_t *device,
-                                    char *path, size_t size)
+static int
+native_volume_lookup_once (const char *uuid, dev_t *device, char *path,
+                           size_t size, unsigned *matches_out)
 {
+  if (matches_out) {
+    *matches_out = 0;
+  }
   if (!uuid || !device || !path || size < 6 || strlen (uuid) != 36) {
     return 0;
   }
@@ -1347,6 +1350,9 @@ native_verified_block_volume_device (const char *uuid, dev_t *device,
   }
   unsigned matches = 0;
   bool authorized = false;
+  if (matches_out) {
+    *matches_out = 0;
+  }
   dev_t candidate = NODEV;
   char candidatePath[64] = {};
   while (OSObject *object = iterator->getNextObject ()) {
@@ -1380,12 +1386,37 @@ native_verified_block_volume_device (const char *uuid, dev_t *device,
     authorized = true;
   }
   OSSafeReleaseNULL (iterator);
+  if (matches_out) {
+    *matches_out = matches;
+  }
   if (!authorized || matches != 1) {
     return 0;
   }
   *device = candidate;
   strlcpy (path, candidatePath, size);
   return 1;
+}
+
+// H159: APFS publishes the SystemOS volume media asynchronously; the one-shot
+// lookup lost the race (disk3 checkpoint search happened, but disk3s1 had not
+// appeared yet) and native_owner_cache_prepare() reported EAUTH.  Retry briefly
+// and log every attempt so the next log names the reason.
+extern "C" int
+native_verified_block_volume_device (const char *uuid, dev_t *device,
+                                     char *path, size_t size)
+{
+  for (unsigned attempt = 0; attempt < 10; attempt++) {
+    unsigned matches = 0;
+    if (native_volume_lookup_once (uuid, device, path, size, &matches)) {
+      if (attempt) {
+        IOLog ("NATIVE_SYSTEMOS_WAIT: found after %u attempts\n", attempt + 1);
+      }
+      return 1;
+    }
+    IOLog ("NATIVE_SYSTEMOS_WAIT: attempt=%u matches=%u\n", attempt + 1, matches);
+    IOSleep (200);
+  }
+  return 0;
 }
 
 static bool
@@ -3042,7 +3073,7 @@ NativeUfsProbe::start (IOService *provider)
   PE_parse_boot_argn ("h103-load-iogpu", &loadIogpu, sizeof loadIogpu);
   gH103LoadIogpu = loadIogpu ? 1 : 0;
   gH103StartTicks = mach_absolute_time ();
-  IOLog ("NATIVE_BUILD: H157\n");
+  IOLog ("NATIVE_BUILD: H159\n");
   IOLog ("NATIVE_UFS_HB: slotMode=%d logSecs=%u hbTimer=%d loadIogpu=%d\n",
          gH103SlotMode, gH103LogSecs, gH103HbTimerOn, gH103LoadIogpu);
   thread_t heartbeat = nullptr;

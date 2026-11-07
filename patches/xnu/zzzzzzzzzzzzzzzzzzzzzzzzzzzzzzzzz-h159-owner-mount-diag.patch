@@ -1,0 +1,24 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7127,10 +7127,18 @@
+ 	if (device_vnode) vnode_put(device_vnode);
+ 	root_authorized = (vfs_flags(root_mount) & MNT_RDONLY) && root_device != NODEV &&
+ 	    native_verified_block_root_authorized(root_device);
+-	if (!root_authorized) goto done;
++	if (!root_authorized) {
++		printf("NATIVE_OWNER_MOUNT: root not authorized dev=%d ro=%d\n",
++		    (int)root_device, (vfs_flags(root_mount) & MNT_RDONLY) ? 1 : 0);
++		goto done;
++	}
+ 	native_owner_cache_stage = 1;
+ 	if (!native_verified_block_volume_device(volume, &selected, device_path,
+-	    sizeof(device_path))) goto done;
++	    sizeof(device_path))) {
++		printf("NATIVE_OWNER_MOUNT: SystemOS media not found stage=%d\n",
++		    native_owner_cache_stage);
++		goto done;
++	}
+ 	strlcpy(native_owner_cache_device_path, device_path, sizeof(native_owner_cache_device_path));
+ 	native_owner_cache_selected_device = selected;
+ 	native_owner_cache_stage = 2;
