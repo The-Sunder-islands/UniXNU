@@ -5640,6 +5640,56 @@ H140 boot:    dcf631ed37e44a6712cbbe2e1ea6c0a08a4c3932944904f70456d1149aeb5758
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H140.img`（已核对）、
 Mac `~/h103/boot-H140.img`、仓库 `out/cheeseburger/boot/boot-H140.img`。
 
+### H140 结果：探针有效，但显示服务按类名查不到（2026-11-07）
+
+`h140-log-20261107-102006.txt`：
+
+```text
+NATIVE_IOMFB_PROBE: name=IOMobileFramebuffer        service=0            flags=86000
+NATIVE_IOMFB_PROBE: name=IOMobileFramebufferLegacy  service=0            flags=86000
+NATIVE_IOMFB_PROBE: name=IOPlatformExpertDevice     service=0xfffffff8f9080e80 class=IOPlatformExpertDevice
+```
+
+对照组命中（`flags & 0x80000`），说明探针有效。`IOService::matchInternal`
+（`iokit/Kernel/IOService.cpp`）对 `serviceMatching()` 写入的 `IOProviderClass`
+用 `metaCast(str)` 比较，**支持子类**；因此“按类名查不到”是一个真结论：
+`NativeLegacyDisplay` 实例在注册表里无法用 `IOMobileFramebuffer*` 命中。
+
+驱动侧日志显示它确实注册了两次（52 s、57 s 各一套 probe → start → reg=1）：
+
+```text
+NATIVE_LEGACY: registerService object=0xfffffff5f5be9000
+NATIVE_LEGACY: phase=4 dt=1 probe=1 attach=1 start=1 reg=1
+```
+
+`backlight-control` 发布后 backboardd 没有新动作（`NATIVE_FRAME … client=0`）。
+
+### H141：显示驱动自证注册与类匹配（2026-11-07）
+
+`NativeLegacyDisplay::registerService()` 在 `IOService::registerService()` 之后：
+
+```text
+NATIVE_LEGACY: self inactive=… ioclass=… provider=…
+NATIVE_LEGACY: self-match name=IOMobileFramebuffer       -> %p same=…
+NATIVE_LEGACY: self-match name=IOMobileFramebufferLegacy -> %p same=…
+NATIVE_LEGACY: self-match name=NativeLegacyDisplay       -> %p same=…
+```
+
+UFS 探针增加具体类名 `"NativeLegacyDisplay"`（置 `0x100000`）。
+判读：三者都查不到 → 没真正进注册表；只有具体类名能查到 → 归档类
+`OSMetaClass` 名字/层级问题；都能查到而 UFS 模块看不到 → 跨模块可见性。
+
+（另注：`IOService` 在这版 XNU 没有 `isRegistered()`，改用 `isInactive()`。）
+
+```text
+H141 kernel:  edc8e2cfae0f53f1271a33afd59ded72911533996d00d40e821dd097042e2940
+H141 payload: fe7342fd41af73d8298f3e118a491d6a2a64c43b8047dc9f70b73bf4348fa94e
+H141 boot:    94faa47ef6bc9281ed93d66ca575fa02920011b9065fd33844f1f6b0c3ae593c
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H141.img`（已核对）、
+Mac `~/h103/boot-H141.img`、仓库 `out/cheeseburger/boot/boot-H141.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

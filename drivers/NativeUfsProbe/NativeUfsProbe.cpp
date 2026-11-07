@@ -1617,10 +1617,12 @@ h103ProbeIomfb (void)
   // 0x80000 is a control: backboardd itself matches IOPlatformExpertDevice
   // with ok=1, so this separates "our service is not matchable" from
   // "this API does not match by class name at all".
-  const uint32_t bits[3] = { 0x20000U, 0x40000U, 0x80000U };
-  const char *names[3] = { "IOMobileFramebuffer", "IOMobileFramebufferLegacy",
-                           "IOPlatformExpertDevice" };
-  for (unsigned i = 0; i < 3; i++) {
+  // 0x100000 asks for the concrete class name, separating "not in the
+  // registry" from "present but not matchable as an IOMobileFramebuffer".
+  const uint32_t bits[4] = { 0x20000U, 0x40000U, 0x80000U, 0x100000U };
+  const char *names[4] = { "IOMobileFramebuffer", "IOMobileFramebufferLegacy",
+                           "IOPlatformExpertDevice", "NativeLegacyDisplay" };
+  for (unsigned i = 0; i < 4; i++) {
     OSDictionary *matching = IOService::serviceMatching (names[i]);
     IOService *service = matching ? IOService::copyMatchingService (matching) : nullptr;
     if (service) {
