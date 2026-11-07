@@ -5902,6 +5902,56 @@ H146 boot:    fa20cd0ea2562b0f8ee752acaee37f6c898ccf96917f4ca4063cda24b8c6f6ea
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H146.img`（已核对）、
 Mac `~/h103/boot-H146.img`、仓库 `out/cheeseburger/boot/boot-H146.img`。
 
+### H146 结果：surface 重试成功，但匹配阶段 panic（2026-11-07）
+
+`h146-log-20261107-120817.txt`（panic 前的持久日志，`NATIVE_PANIC` 正常落盘）：
+
+```text
+NATIVE_LEGACY: IOSurface status=0 found=1                 ← 第 2 次重试等到了
+NATIVE_LEGACY: nub attach=1 start=1
+NATIVE_LEGACY: phase=4 dt=1 nub-registered name=NativeGOPFramebuffer
+Waiting on <dict …IOProviderClass=IOMedia…UUID=0476…>
+NATIVE_PANIC: flags=f3610000
+```
+
+`flags=f3610000`：surface 找到 ✅、GOP 有效 ✅、nub 已注册 ✅，但
+`0x4000000`（personality 实例化）未置 —— panic 发生在
+`registerService → startMatching` 过程中。
+
+dSYM 反查 panic caller `0xfffffff007850640` →
+`OSMetaClass::serializeClassDictionary()`。XNU 源码里这是 retail 内核的死路径：
+
+```c
+bool OSMetaClass::serialize(OSSerialize *s) const { panic("OSMetaClass::serialize(): Obsoleted"); }
+
+bool IOKitDiagnostics::serialize(OSSerialize *s) const
+{
+	…
+	OSMetaClass::serializeClassDictionary(dict);   // 唯一调用者
+```
+
+而 `IOKitDiagnostics` 在 `IOStartIOKit.cpp:121` 被挂成 **root 服务属性**
+（`kIOKitDiagnosticsKey`），任何对 root/含该属性的对象序列化都会 panic。
+此前不触发是因为 nub 从未注册、匹配机制没跑。
+
+### H147：去掉这条 retail 死路径（2026-11-07）
+
+`patches/xnu/zzzzzzzzzzzzzzzzzzzzzzzzzz-h147-iokitdiag.patch`：在
+`IOKitDiagnostics::serialize()` 中移除 `OSMetaClass::serializeClassDictionary(dict)`
+调用，保留分配计数。只是不再输出类统计，不影响驱动行为。
+
+```text
+H147 kernel:  128453eec52fc869052d64613a0ec8efe5a2d09d3175612f2f8cb34e3ceca384
+H147 payload: 0d5c0c1d1e2c34f497f56fccf636e7e2f522ca7ba5192df3e7ebebf2b13d242e
+H147 boot:    040b8383f9aaf8e3b001fab6da42dd052c73cde88b4f365e070675d1ef0776c3
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H147.img`（已核对）、
+Mac `~/h103/boot-H147.img`、仓库 `out/cheeseburger/boot/boot-H147.img`。
+
+判读：`flags` 出现 `0x4000000`（personality 实例化）即通过匹配阶段；
+`NATIVE_IOMFB_PROBE` 的 `IOMobileFramebuffer` 应为非 0。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

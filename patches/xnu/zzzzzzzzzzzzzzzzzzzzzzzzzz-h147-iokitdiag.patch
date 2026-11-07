@@ -1,0 +1,16 @@
+diff --git a/iokit/Kernel/IOKitDebug.cpp b/iokit/Kernel/IOKitDebug.cpp
+--- a/iokit/Kernel/IOKitDebug.cpp
++++ b/iokit/Kernel/IOKitDebug.cpp
+@@ -206,7 +206,11 @@
+ 	updateOffset( dict, debug_iomalloc_size, "IOMalloc allocation" );
+ 	updateOffset( dict, debug_iomallocpageable_size, "Pageable allocation" );
+ 
+-	OSMetaClass::serializeClassDictionary(dict);
++	/* H147: OSMetaClass::serialize() is a panic("Obsoleted") stub in this
++	 * kernel, and this object is published as the root service property
++	 * IOKitDiagnostics, so ANY serialization of the registry root reached
++	 * this call and panicked.  The class statistics are not needed: keep
++	 * the allocation counters above and skip the class dictionary. */
+ 
+ 	ok = dict->serialize( s );
+ 
