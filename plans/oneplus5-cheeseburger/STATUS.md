@@ -7256,6 +7256,59 @@ Mac `~/h103/boot-H173.img`、仓库 `out/cheeseburger/boot/boot-H173.img`。
 - 随后是否出现 `NATIVE_A540_ACCEL: open request type=1`（Metal 打开设备）；
 - 是否出现 swap（`frames>0`）或 backboardd 崩溃。
 
+### H173 结果：稳定 panic 在 AppleM2ScalerCSCDriver（2026-11-07）
+
+两次启动都在同一处（屏幕照片）：
+
+```text
+ktriage_register_subsystem_strings: set subsystem 8 strings
+NATIVE_PANIC_STR: Undefined kernel instruction:
+    pc=0xfffffff00b134000 instr=807ff000 @sleh.c:1874
+panic(cpu 0 caller 0xfffffff007a1995c): Undefined kernel instruction … @sleh.c:1874
+```
+
+- `pc=0xfffffff00b134000` 属于 **`com.apple.driver.AppleM2ScalerCSCDriver`
+  的 `__TEXT_EXEC`**（基址 `0xfffffff00b0ed000`，偏移 `0x47000`）；
+- 与 H170 的 APFS panic 同签名（pc 在某个预链接 kext 内、`instr` 都是
+  `807ff000`，而镜像里该地址是合法指令）。arm64e 的 **PAC 认证失败**在 XNU 里
+  就表现为 `ESR_EC_UNKNOWN` → “Undefined kernel instruction”，pc 是被跳转的目标，
+  因此更像某个间接调用指针被认证失败/写坏，而不是真的执行到坏指令；
+- 时间点在 `native_mobile_graphics_load_probe()` 的
+  `OSKextLoadKextWithIdentifier("com.apple.iokit.IOMobileGraphicsFamily")`
+  内部，**早于**我们的 accelerator 代码（`postModLoad` 之后才跑）。
+
+构建确定性检查：用**完全相同的源码**重建一次，内核
+`bac58eb4…` → `8cb90022…`、再换源码前又得到 `8cb9…` 系列，段对比只有
+`__TEXT` 16 字节、`__PRELINK_INFO` 22 字节（KCID）和 `__LINKEDIT` 不同，
+`__TEXT_EXEC/__PRELINK_TEXT/__PLK_TEXT_EXEC/__PLK_DATA_CONST` 完全一致，
+`IOLog/kprintf/OSKextLoadKextWithIdentifier/IOService::start` 等被 kext 引用的
+内核符号地址也相同——所以**不是构建不确定**，而是这次 display archive 的内容/布局
+导致的产物差异。
+
+### H174：回退 accelerator 的 H173 诊断改动（2026-11-07）
+
+按 H174 计划的第 2 步：把
+`drivers/NativeMobileDisplay/NativeA540AcceleratorProbe.cpp` 恢复到 H170 版本
+（去掉 H173 加的 boot-args 日志/默认插件名，保留 H168–H170 的 accelerator 功能），
+其余不变，构建标记 `NATIVE_BUILD: H174`。
+
+```text
+H174 kernel:  8ba9992cd6574bd59645abc3298b8fe629b719445d2240eda95b7e80c0ab1bc8
+H174 payload: 93f314d7895decccf73e8418445fea6d9309d4b8ac494d289e58c1be0d4d4aa4
+H174 boot:    2aad7b39726eba782e2e1a124b09014183a4d9dcaaa655338e0e8d3114df0679
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H174.img`（已核对）、
+Mac `~/h103/boot-H174.img`、仓库 `out/cheeseburger/boot/boot-H174.img`。
+已用 `fastboot boot` 启动（未写任何分区）。
+
+判读：
+
+- 若能正常启动 → 就是 H173 那段 accelerator 改动触发的（尽管执行时间在后），
+  以后把 boot-args/默认插件名诊断放到 UFS 驱动侧实现；
+- 若仍在 `pc=0xfffffff00b134000` panic → 说明是 display archive 重建本身导致
+  预链接产物差异，需要给 `emit_prelink` 增加产物一致性校验。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
