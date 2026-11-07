@@ -27,7 +27,12 @@ if not TURNIP.is_file():
     raise SystemExit('Build Turnip first: python3 scripts/build-turnip-darwin.py --target ios')
 subprocess.run(['python3', ROOT / 'scripts/gen-turnip-smoke-shaders.py'], check=True)
 # Turnip's first submission, recorded on the host, for the plugin's prefix replay (build/turnip-smoke/TurnipReplay.h).
-subprocess.run(['python3', ROOT / 'scripts/gen-turnip-replay.py'], check=True)
+# The recorder compiles the AArch64 kernel sources for the host and runs them, so it needs an arm64 Mac; the header is optional
+# (NativeAdrenoUserTest.h includes it only with __has_include), so an Intel build host skips it instead of failing.
+try:
+    subprocess.run(['python3', ROOT / 'scripts/gen-turnip-replay.py'], check=True)
+except subprocess.CalledProcessError:
+    print('WARN: host replay not generated on this build host; building without TurnipReplay.h')
 subprocess.run(['python3', ROOT / 'scripts/build-native-metal-bridge.py', '--target', 'ios'], check=True)
 BRIDGE = ROOT / 'build/native-metal-bridge/ios/libnative_metal_bridge.a'
 pm4 = OUT / 'AdrenoPM4.o'

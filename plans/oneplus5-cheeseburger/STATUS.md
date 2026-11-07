@@ -8176,6 +8176,56 @@ frames>0               : 0
 的 Metal 设备（`build-adreno-metal-plugin.py` 已有完整流程），通过同一条 addon/union
 通道投放。
 
+### 路线 C：真实 Adreno Metal 插件构建成功并投放（2026-11-08）
+
+H190 之后转向路线 C，用仓库已有的 `NativeAdrenoMetal` + Turnip/Mesa 构建真实 Metal 设备。
+Mac 构建机（13th Gen Intel i5，macOS 15.8.2）原本缺少整套工具链，本次补齐：
+
+- Python 3.12（uv 安装到 `.cache/mesa-venv`）+ meson/ninja/cmake + packaging/mako/pyyaml；
+- bison 3.8.2（pin 的 tarball，装到 `.cache/mesa-tools`）；
+- glslang（vulkan-sdk-1.4.328.1）与 shaderc/SPIRV-Tools（glslc、spirv-val），装到 `.cache/mesa-tools`；
+- Mesa 稀疏克隆到 `.cache/mesa-work`，checkout pin `85fda3b3640` 并应用 8 个记录补丁；
+- rustup + Rust 1.98.0（含 `aarch64-apple-ios` target）；metal2vulkan 克隆到
+  `.cache/gpu-reference/metal2vulkan`（pin `720ef1ce`，`core.abbrev=7` 才能通过源码校验）。
+
+构建结果：
+
+```text
+Turnip (ios)   build/mesa-tu-ios/src/freedreno/vulkan/libvulkan_freedreno.dylib  17,886,640 B
+Turnip (host)  build/mesa-tu/src/freedreno/vulkan/libvulkan_freedreno.dylib
+bridge (ios)   build/native-metal-bridge/ios/libnative_metal_bridge.a
+plugin CDHash  cf9d9f4626d0644d3fc0a227f8fbabd8fbac5826
+daemon CDHash  0b158329cb994b71f60f8eabaf3133d3d1760435
+turnip CDHash  39a625607e3f916d6763f964fc61da74bf3895d1
+```
+
+两个构建脚本的改动：
+
+- `build-adreno-metal-plugin.py`：`gen-turnip-replay.py` 需要 **arm64 主机**（它把 AArch64
+  内核源码编到主机上并运行）。Intel Mac 上改为失败降级——`TurnipReplay.h` 本来就是可选
+  （`__has_include`），插件照常构建；
+- 新增 `scripts/pack-adreno-addon.py`：`make-gpu-addon.py` 把目录名写死为
+  `NativeAdrenoMetal.bundle`（17 字符），而 `_offline-accelerator-plugin` 最多拷贝 16 字符，
+  所以投放目录改用 `NativeAdreno.bundle`，bundle 内 `CFBundleExecutable` 仍是
+  `NativeAdrenoMetal`。
+
+payload 组装：
+
+- addon 12,125,208 B：`addons/NativeAdreno.bundle/**`（含 `libvulkan_freedreno.dylib`）、
+  `bin/adrenoprobed`、`daemons/*.plist`；
+- trust bundle 同时加入 plugin/daemon/turnip 三个 CDHash（两个 Apple 模块原样保留）；
+- args：`_offline-accelerator-plugin=NativeAdreno`（其余不变）；
+- 内核沿用 H184 构建（带 addon 心跳诊断）。
+
+```text
+H191 payload: 5c1f697b9fa7ea401beab08290bdafb72197be82e1dc2b9e4cd3923840b0d5dd
+H191 boot:    9f08a70a7056385273ca7488e57090a7af5e43ca71e2913d7fe9862ec80288cb
+```
+
+判读：心跳 `addon=8/8/0/0/0/1 ext=4/2` 表示插件/daemon/Turnip 已落地；随后看
+CA 是否加载 `NativeAdreno.bundle`、是否出现 `NILMETAL` 之外的插件日志，以及
+backboardd 是否打开 AGX user client、是否出现帧。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
