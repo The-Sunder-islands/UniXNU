@@ -7195,6 +7195,67 @@ Mac `~/h103/boot-H172.img`、仓库 `out/cheeseburger/boot/boot-H172.img`。
 `NATIVE_UFS_WINDOW … done=1 ok=1`，随后应出现 `Got boot device`、`BSD root: …`、
 `mount-complete`。
 
+### H172 结果：完整启动成功（2026-11-07）
+
+`h172-log-20261107-210236.txt`（`slot_build=H172`）：
+
+```text
+Got boot device = …NativeUfsWindow…          （60.3 s）
+BSD root: disk5s1
+mount-complete DawnUpdate21H461…OS / OwnerData / SystemCryptex   （60–62 s）
+SpringBoard[27] exec（344.9 s，之后存活）
+NATIVE_A540_ACCEL: published IOAcceleratorES (probe only)
+op=match comm=backboardd d=IOAcceleratorES ok=1
+NATIVE_UFS_LOCK 0、err 60 0
+```
+
+即 H171/H172 的 UFS DMA 修复链完成：低内存分级回退 + 窗口读按容量分块后，
+挂载恢复正常，系统长期运行。
+
+但 `MetalPluginName` 没生效：日志里只有 CA 的
+`NATIVE_A540_ACCEL: read key=MetalPluginName`，没有我们自己的
+`MetalPluginName=…` 行——说明 `PE_parse_boot_argn("_offline-accelerator-plugin", …)`
+在运行时返回了 false（而同一串里更靠前的 `offline-accelerator=1` 解析成功，
+accelerator 已发布、`ok=1`）。因此 CA 没有加载
+`/System/Library/Extensions/AGXMetalA10.bundle`，也没有 `open request`，`frames=0`。
+
+### H173：确认 boot args 并让插件名有默认值（2026-11-07）
+
+`drivers/NativeMobileDisplay/NativeA540AcceleratorProbe.cpp`：
+
+1. `MetalPluginName` 解析失败时回落到默认值 `AGXMetalA10`，并记录来源：
+
+```text
+NATIVE_A540_ACCEL: MetalPluginName=AGXMetalA10 source=arg|default
+```
+
+2. 打印内核实际拿到的 boot args 长度与最后 96 字节：
+
+```text
+NATIVE_A540_ACCEL: bootargs len=… tail=…offline-accelerator=1 _offline-accelerator-plugin=AGXMetalA10
+```
+
+3. 构建标记 `NATIVE_BUILD: H173`。
+
+```text
+H173 kernel:  bac58eb476d022c22caf37ad6066e282285d20acb366a28621aaa7555234e222
+H173 payload: c291c811fae30f56348f1fed6caecfb5978ffc59ef761a7dd6796bdc530f2ee0
+H173 boot:    9c8103a12cbb3cbfba44d34aaa8f885050b369c77e44a7878100eaf222dbb152
+```
+
+payload 仍带 `offline-accelerator=1` 与 `_offline-accelerator-plugin=AGXMetalA10`。
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H173.img`（已核对）、
+Mac `~/h103/boot-H173.img`、仓库 `out/cheeseburger/boot/boot-H173.img`。
+
+投放：手机原处于 TWRP 3.4.0（cheeseburger），已 `adb reboot bootloader` →
+`fastboot boot boot-H173.img` 成功（只 boot，未写任何分区）。
+
+判读：
+
+- `source=arg` → 参数解析正常；`source=default` → 解析失败但插件名仍然生效；
+- 随后是否出现 `NATIVE_A540_ACCEL: open request type=1`（Metal 打开设备）；
+- 是否出现 swap（`frames>0`）或 backboardd 崩溃。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
