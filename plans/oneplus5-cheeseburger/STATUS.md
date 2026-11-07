@@ -6967,6 +6967,61 @@ Mac `~/h103/boot-H168.img`、仓库 `out/cheeseburger/boot/boot-H168.img`。
 - 若 `iogpu load status≠0`，说明 pre-root 阶段仍不能加载 IOGPUFamily，需要把
   accelerator 的注册挪到 post-root（后续版本）。
 
+### H168 结果：accelerator 匹配成功，轮询停止（2026-11-07）
+
+`h168-log-20261107-192607.txt`：
+
+```text
+200.759  NATIVE_LEGACY: iogpu load status=0 accelerator=1
+200.764  NATIVE_LEGACY: postModLoad status=0
+200.766  NATIVE_A540_ACCEL: started provider=0xfffffff2d1b88fc0
+200.769  NATIVE_A540_ACCEL: published IOAcceleratorES (probe only)
+200.771  NATIVE_LEGACY: accelerator publish=1
+304.948  NATIVE_IOGPU_ACCEL: name=IOAcceleratorES mc=0xfffffff00caeb688 …
+312.379  op=match comm=backboardd d=IOAcceleratorES ok=1
+312.470  op=match comm=backboardd d=IOAcceleratorES ok=1
+```
+
+1. 预链接里能加载 `IOGPUFamily`（`iogpu load status=0`），accelerator 类随同一批
+   `postModLoad` 注册成功（`status=0`），实例发布成功（`publish=1`）；
+2. `IOAcceleratorES` 的 metaclass 地址 `0xfffffff00caeb688` 与
+   `scripts/data/ioaccelerator-base-abi.json` 的 `metaclass` 一致，说明
+   `private_extern` 绝对绑定有效；
+3. **backboardd 的 `IOAcceleratorES` 匹配变成 `ok=1`，此前 257 次的轮询在 312 s 停止**；
+   紧接着 314.3 s 打开 `IOSurfaceRoot`，314.97 s 出现 `NATIVE_FRAME: event=5 client=2`；
+4. 仍然 `frames=0`：没有任何 swap（`client io` 里 `3/4/5` 从未出现），
+   也没有 `NATIVE_A540_ACCEL: user client` 行——CA 只是“看见”了 accelerator，
+   没有打开它；
+5. SpringBoard 全程存活（无 CADisplay 断言）；存储 `NATIVE_UFS_LOCK` 0、`err 60` 0。
+
+### H169：记录 accelerator 被查询的内容（2026-11-07，只加日志）
+
+`drivers/NativeMobileDisplay/NativeA540AcceleratorProbe.cpp`：
+
+1. 覆盖 `copyProperty(const OSSymbol*/OSString*/char*)`，记录 CA 的每次 registry
+   属性查询（前 40 条，`NATIVE_A540_ACCEL: read key=…`）——用户态
+   `IORegistryEntryCreateCFProperty` 正是走这个虚函数；
+2. `newUserClient` 入口打印 `NATIVE_A540_ACCEL: open request type=%u`，确认它是否
+   尝试打开。
+
+```text
+H169 kernel:  e5cc5a20a15de0de6a8ecd4e489fd79115080c6af53e999efdf32afcd046442f
+H169 payload: 509ed83dfcf6a14508f6c6beb7c64d5872ff6a9d5918a36836033e56f3615761
+H169 boot:    1450ebc11644bffe9a1c9cbec71b1b0aa9df706c726a95b9ecb35753ada9354a
+```
+
+payload 仍带 `offline-accelerator=1`。
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H169.img`（已核对）、
+Mac `~/h103/boot-H169.img`、仓库 `out/cheeseburger/boot/boot-H169.img`。
+
+判读：
+
+- 出现 `read key=MetalPluginName` / `IOGLBundleName` → 下一步是插件名与
+  `/System/Library/Extensions/<name>.bundle` 的选择；
+- 出现 `open request type=…`（成功或失败）→ 卡点转到 accelerator user client 协议；
+- 两者都没有 → CA 只把匹配当作“有 accelerator”，真正的卡点在显示模式数据
+  （`GetBlock(79)` / `SupportedFrameInfo(74)` 目前都是“成功+清零”）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
