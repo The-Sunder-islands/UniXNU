@@ -5863,6 +5863,45 @@ H145 boot:    fb9ee488756eab69f7b982e294690b7b5156f5c9784b705f6e1f5322430d1e99
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H145.img`（已核对）、
 Mac `~/h103/boot-H145.img`、仓库 `out/cheeseburger/boot/boot-H145.img`。
 
+### H145 结果：IOCoreSurfaceRoot 没在 5 秒内出现（2026-11-07）
+
+`h145-log-20261107-115324.txt`：`flags=314960af`，解码：
+
+| 位 | 状态 |
+| --- | --- |
+| `0x00010000` IOSurface kext 加载返回 0 | ✅ |
+| `0x00400000` `PE_current_console` 成功 | ✅ |
+| `0x10000000 / 0x20000000 / 0x01000000` | ✅ |
+| `0x00200000` `IOCoreSurfaceRoot` 匹配到 | ❌ |
+
+即 `IOService::waitForMatchingService(nameMatching("IOCoreSurfaceRoot"), 5 s)`
+没等到服务，整个 nub 分支被跳过，显示永远不发布。日志里
+`IOSurfaceRoot::installMemoryRegions()` / `IOSurface status=0 found=1`（65.22 s）
+与旧启动时间戳相同，是残留。
+
+### H146：surface 等待重试 + 显示发布与 surface 解耦（2026-11-07）
+
+参考 ios-sweet：主显示的枚举只看 `/arm-io` 的 `display-subsystem` 节点与
+IOMobileFramebuffer 服务，**不依赖** IOSurface 是否就绪；surface 是 swap 期依赖。
+
+1. `waitForMatchingService` 改为最多 4 次 × 5 秒（共 20 秒），每次失败打印
+   `NATIVE_LEGACY: IOSurface wait attempt=N`；
+2. 显示发布条件去掉 surface 要求，只保留 `consoleOk` + GOP 参数校验；
+   未命中时置 `0x800000`，命中时仍置 `0x200000`/`0x40000000`。
+
+预期：若 surface 只是来得晚，这次能等到；若始终没有，显示仍会通过
+`nub->registerService()` 发布，`NATIVE_IOMFB_PROBE` 的 `IOMobileFramebuffer`
+应变成非 0，backboardd 也就能开始匹配。
+
+```text
+H146 kernel:  c0c0b160c8e42e22d00d8b12f3bf25b0d547fc19ed13fa67ab4a13fa13f88496
+H146 payload: ebcaabfc9bfef0e455606403f7b7bcba5934053fae06d0893474d26381baae37
+H146 boot:    fa20cd0ea2562b0f8ee752acaee37f6c898ccf96917f4ca4063cda24b8c6f6ea
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H146.img`（已核对）、
+Mac `~/h103/boot-H146.img`、仓库 `out/cheeseburger/boot/boot-H146.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
