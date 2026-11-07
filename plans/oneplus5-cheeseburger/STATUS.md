@@ -7022,6 +7022,65 @@ Mac `~/h103/boot-H169.img`、仓库 `out/cheeseburger/boot/boot-H169.img`。
 - 两者都没有 → CA 只把匹配当作“有 accelerator”，真正的卡点在显示模式数据
   （`GetBlock(79)` / `SupportedFrameInfo(74)` 目前都是“成功+清零”）。
 
+### H169 结果：CA 在要 Metal 插件名（2026-11-07）
+
+`h169-log-20261107-194703.txt`：
+
+```text
+367.620  op=match comm=backboardd d=IOAcceleratorES ok=1
+369.034  NATIVE_A540_ACCEL: read key=IOClassNameOverride
+369.034  NATIVE_A540_ACCEL: read key=IOUserServiceProperties
+369.718  NATIVE_A540_ACCEL: read key=MetalPluginName
+377.232  NATIVE_A540_ACCEL: read key=MetalPluginName     （7.5 秒一次，反复重试）
+384.420  NATIVE_A540_ACCEL: read key=IONameMatch
+384.443  NATIVE_A540_ACCEL: read key=IOUserServiceProperties
+```
+
+没有任何 `open request`，仍 `frames=0`；SpringBoard 全程存活，存储干净。
+对照 `scripts/audit-target-metal-discovery.py` 审计过的原始发现链：
+
+```text
+IOServiceMatching("IOAcceleratorES")
+  → 服务属性 MetalPluginName（+ 可选 MetalPluginClassName）
+  → "/System/Library/Extensions" + <name> + ".bundle"
+  → NSPrincipalClass 必须是 _MTLDevice 子类
+  → initWithAcceleratorPort: → IOGPUDeviceCreateWithAPIProperty → IOServiceOpen(type 1)
+```
+
+即 accelerator 匹配之后，CA 还需要一个 **Metal 驱动插件**；没有插件名它就每
+7.5 秒重试一次，永远不进入绘制。而 `NativeAdrenoMetalPlugin.mm` 的注释写明：
+插件返回 nil 时“**original software rendering keeps running unchanged**”——
+即 CA 有软件渲染路径，只是要被 Metal 发现流程“放行”。
+
+### H170：给 accelerator 一个 MetalPluginName（2026-11-07）
+
+1. `NativeA540AcceleratorProbe::start()`：解析 boot-arg
+   `_offline-accelerator-plugin=<name>`（下划线前缀在 `PE_parse_boot_argn` 里
+   强制字符串拷贝，上限 16 字符），非空时 `setProperty("MetalPluginName", name)`。
+2. payload args 追加 `_offline-accelerator-plugin=AGXMetalA10`——先指向目标
+   rootfs 里**原本就存在**的 Apple 插件（`AGXMetalA10.bundle`，
+   `NSPrincipalClass=AGXPrincipalDevice`，审计已确认）。若它在非 Apple GPU 上
+   初始化失败并返回 nil，CA 应回落到软件渲染。
+
+```text
+H170 kernel:  e9292f3e9eff58db2de0098c71385ee08b3591c75cf24aeda5227e6feb20bc88
+H170 payload: 9ca8e059cd2585ecb869405a129b61c34aecd86af9ba0ff216b35bd992929002
+H170 boot:    6593079d6ae4befb3c900b9bc06006921304b3adc8c74277cc3b44b207d3ea7d
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H170.img`（已核对）、
+Mac `~/h103/boot-H170.img`、仓库 `out/cheeseburger/boot/boot-H170.img`。
+
+判读：
+
+- `NATIVE_A540_ACCEL: MetalPluginName=AGXMetalA10` 出现；
+- 出现 `NATIVE_A540_ACCEL: open request type=1`（Metal 打开设备）→ Apple 插件被
+  真正加载并尝试使用我们的 accelerator；
+- 若 backboardd 崩溃/重启 → 换成“自己的最小插件，principal class 是
+  `_MTLDevice` 子类但直接返回 nil”，走既有的 Data seed 注入
+  （`add-gpu-plugin-data.py` + `sheng-gpu-addon=1`），不需要 Turnip；
+- 若出现 `frames>0` 或 `selector=3/4/5` → 软件渲染通路打通。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
