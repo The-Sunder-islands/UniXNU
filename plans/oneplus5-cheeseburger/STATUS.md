@@ -6456,6 +6456,62 @@ H159 boot:    9838468c5c54e51c9f6045341bda06c90f4771ced51003051dd3636f64118643
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H159.img`（已核对）、
 Mac `~/h103/boot-H159.img`、仓库 `out/cheeseburger/boot/boot-H159.img`。
 
+### H159 结果：backboardd 打开显示，SpringBoard 撞到 FBSDisplayMode（2026-11-07）
+
+`h159-log-20261107-152005.txt`（`boot_id 13330234246`，运行到 662 s）：
+
+1. **SystemOS 卷挂载成功**（`disk4s1 vol-uuid: 8846FE78-…`，37.9 s），H159 的有界重试
+   生效，之前的 EAUTH panic 未再出现。
+2. **显示服务已经可被匹配**（这轮首次出现）：
+
+```text
+NATIVE_IOMFB_PROBE: name=IOMobileFramebuffer … service=0xfffffff499435000 class=NativeLegacyDisplay
+NATIVE_DISPLAY_OPEN: service=NativeLegacyDisplay process=backboardd grant=backboardd match=1
+NATIVE_LEGACY: client enter pid=55 comm=backboardd type=0
+NATIVE_FRAME: event=5 flags=fd7f600f client=2 xfer=0 frames=0
+```
+
+   即“显示可见性”这一关通过：backboardd 找到并打开了 `IOMobileFramebuffer`。
+3. SpringBoard 的崩溃点前移到下一个已知关卡：
+
+```text
+NATIVE_TRAP_STR: pid=27 comm=SpringBoard
+  x0="FBSDisplayMode cannot be configured as requested :
+      <FBSDisplayMode: 0x301fa88c0; infxinf@0x (1242x2208/0) 60Hz p3 SDR>"
+```
+
+   与 ios-sweet NOTES:396 记录的一致：`FBSDisplayMode` 要求
+   `preferredScale > 0`、`refreshRate != 0` 等；当前 **scale = 0**。
+
+4. 残余：`liveactivitiesd` 仍在 `SessionSyncEngine + 0x1d4f8` BRK
+   （`x3/x5 = "T transaction_Purging_1"`），属次级问题；560 s 有一次
+   `NATIVE_PANIC flags=ef` 没有 `NATIVE_PANIC_STR`（panic 发生在禁用抢占上下文）。
+
+#### scale 的来源
+
+payload 里 `offline-legacy-unit-scale=0`，而
+`LegacyDisplayProbe.cpp:448` 的实现是：`enabled<1 || enabled>3` 时直接返回，
+**不会把 `display-scale` 写进 `/chosen`**。于是系统拿到的 UI scale 是 0，
+正好对上 `FBSDisplayMode (…/0)`。
+
+### H160：只改 payload，打开 unit-scale（2026-11-07）
+
+`offline-legacy-unit-scale=0` → **`=3`**（1080×1920 扫描、逻辑 360×640 pt）；
+内核/驱动沿用 H159，不重建。
+
+```text
+H160 kernel:  fa6af7c67878561cb68bea1ff5307f8f376fc0b1164b2e9d618e719c4046e82b（沿用 H159）
+H160 payload: e4b487212842a15f4554f5b42d4cbd1d21a08d0deb20e0155ed4e7b46625d03d
+H160 boot:    2c8c561089c61f53ef831d1a17e9b6e2bbdbfaae496a2dac33fcc4e91d38cb4a
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H160.img`（已核对）、
+Mac `~/h103/boot-H160.img`、仓库 `out/cheeseburger/boot/boot-H160.img`。
+
+判读：模式串应变成 `(…/3)`；若 `FBSDisplayMode` 断言消失、SpringBoard 继续运行，
+说明 scale 就是这一关；若像素尺寸仍是 1242×2208，则尺寸另有来源（MobileGestalt /
+getDisplaySize），下一轮再查。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
