@@ -8114,6 +8114,36 @@ H189 boot:    c5a3c3c55b9737a6df03a7e692b7e513be310df6100c1d4200be2000a3707005
 插件 CDHash:  0932f6fad2eae877f800cc5bdac14a78aec81bf0
 ```
 
+### H189 结果：设备请求确实被调用（2026-11-08）
+
+```text
+NATIVE_EXIT: pid=55 ppid=1 comm=backboardd status=0x2b00 ns=0 code=0x0
+```
+
+`0x2b00` 是 `initWithAcceleratorPort:` 里的 `_exit(43)`（共 12 次），而且这次启动
+**`backboardd exc=1` 为 0**。结合 H188（constructor 执行）可以确定链路：
+
+1. 镜像加载 ✔
+2. constructor 执行 ✔
+3. `initWithAcceleratorPort:` 被调用 ✔
+4. H184–H186 的 `sig=11` 在其后
+
+H189 在 `[self release]` 之前退出，所以剩下的可疑点是：`[self release]` 会调用
+`_MTLDevice` 的 `-dealloc`，而我们的实例从未执行 `[super init]`，Metal 的 dealloc
+可能访问未初始化的内部字段。
+
+### H190：返回 nil 但不释放对象（2026-11-08）
+
+`initWithAcceleratorPort:` 直接 `return nil;`，不调用 `[self release]`
+（每次泄漏一个实例，可接受）。若崩溃消失，则确认是 `_MTLDevice` 的 dealloc；
+随后观察 CA 是否继续执行、是否出现 `frames>0`。
+
+```text
+H190 payload: 9c0f8e772540f068cf90474d604048c73937612a82d511a1b6309324738d6897
+H190 boot:    83dee6404131b18a02d9ada579735c1cfcf97fbe6dd4ef3ef622b21a3196bfb9
+插件 CDHash:  efe1dc125d4a5b471ca02628017f806effb1266b
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
