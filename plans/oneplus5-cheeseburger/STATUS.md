@@ -5749,6 +5749,43 @@ H142 boot:    a5baef9d07af809994f0514241aa295f78b9b130a09876b60821ae0e8668dade
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H142.img`（已核对）、
 Mac `~/h103/boot-H142.img`、仓库 `out/cheeseburger/boot/boot-H142.img`。
 
+### H142 结果：无法判定，早期日志仍是上一轮残留（2026-11-07）
+
+`h142-log-20261107-111107.txt` 里所有 `NATIVE_LEGACY` 行仍是旧路径痕迹
+（`nub attach=1 start=1`、`phase=4 … attach=1 start=1 reg=1`），时间戳与之前几轮
+逐微秒相同，属于 msgbuf 尾巴；H142 新增的 `nub-registered` 一行都没有。本轮新鲜
+证据只有每 60 秒的探针：166 s / 227 s 仍是
+
+```text
+IOMobileFramebuffer=0  IOMobileFramebufferLegacy=0  NativeLegacyDisplay=0  IOPlatformExpertDevice=✓
+```
+
+因此无法判断这次显示模块是否运行、nub 是否注册、personality 是否匹配。
+
+### H143：用 boot flags 给显示链路打点（2026-11-07）
+
+显示模块新增 4 个位（`NATIVE_IRQ … flags=` 不会丢）：
+
+| 位 | 位置 | 含义 |
+| --- | --- | --- |
+| `0x1000000` | `native_legacy_display_late_probe()` 入口 | late probe 跑了 |
+| `0x2000000` | `nub->registerService()` 之后 | nub 已注册（触发匹配） |
+| `0x4000000` | `NativeLegacyDisplay::start()` 入口 | personality 匹配并实例化 |
+| `0x8000000` | `startDisplay()` 内 `IOService::registerService()` 之后 | 显示服务注册完成 |
+
+判读：只有 `0x1000000` → 前置条件没满足；`0x1000000|0x2000000` 无 `0x4000000`
+→ personality 没匹配；有 `0x4000000` 无 `0x8000000` → `startDisplay` 提前返回；
+四个都有而探针仍为 0 → 匹配/注册链路本身有问题。
+
+```text
+H143 kernel:  f994e5bace1211be9a9fa2da80f449d214c2030cd2b2801bb4a61c0afa816a53
+H143 payload: f2913aa21b1f9d7eedcf71841592f0af5fc9ba4f09460af6e1d2f5b648619fb4
+H143 boot:    49c5d6669b29f3502e6caccbbc5147ae5d7a173f219426a746bbffecc079e048
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H143.img`（已核对）、
+Mac `~/h103/boot-H143.img`、仓库 `out/cheeseburger/boot/boot-H143.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
