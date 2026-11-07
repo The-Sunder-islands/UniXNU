@@ -7528,6 +7528,52 @@ Mac `~/h103/boot-H178.img`、仓库 `out/cheeseburger/boot/boot-H178.img`。
 `read DMA low failed`（H170 的字符串）或 `NATIVE_BUILD: H169`；
 随后才能看到 `op=match … AGXAccelerator ok=?`、`open request type=?`、`frames=?`。
 
+### H178 结果：日志干净了，但出现“内容空洞”（2026-11-07）
+
+`H178-log-20261107-225812.txt`：
+
+```text
+40.075  NATIVE_UFS_LOG: base cursor=54388 size=131072
+40.118  NATIVE_BUILD: H178 boot=2de92930
+41.316  NATIVE_UFS_ACCEL: … MetalPluginName=AGXMetalA10 source=arg set=1
+255.039 NATIVE_DISPLAY_OPEN: … process=backboardd … match=1
+368.784 op=match comm=backboardd d=IOAcceleratorES ok=1
+369.718 NATIVE_A540_ACCEL: read key=MetalPluginName
+```
+
+- 证实了 H177 的推断：暖重启后消息环写游标在 **54388**（环大小 131072），
+  所以 `previous=0` 首次刷盘会把上一轮 boot 的整段文本写进槽；
+- H178 从 `base cursor` 起算后，全篇 **0 条** `read DMA low failed`、
+  0 条 `NATIVE_BUILD: H169`，旧文本问题解决；
+- 但日志出现**空洞**：mount（57–62 s）、display probe/accelerator publish（~230–250 s）
+  等整段缺失。原因是单个槽上限 32 块（128 KB），一次刷盘的 delta 超过上限时
+  只保留最后 128 KB，前面的内容被丢弃；
+- 因此仍看不到 `AGXAccelerator ok=?` / `open request`，`frames=0`。
+
+### H179：大 delta 拆成多个连续槽（2026-11-07）
+
+`NativeUfsProbe::h103SlotWrite()`：
+
+1. 计算 `delta` 后按每槽 `chunkPayload = 32*4096 - 128` 分块，**依次写多个连续槽**
+   （每块写槽体 + 槽头，`gH103SlotCursor` 递增，`seq` 连续），不再截断；
+2. 保留 H178 的 `base cursor` 起点（只含本次 boot 产生的字节）；
+3. 槽体仍用 `SHLOGS v2 … bytes=` 精确长度，pull 工具按 `seq` 拼接；
+4. 构建标记 `NATIVE_BUILD: H179`。
+
+```text
+H179 kernel:  d6e14d3aac357a61214f450bf956641b92ee8fc2fd41f885be8c25ea2258a67a
+H179 payload: 3bacd002715aaac57722d8e5999bf815b0ee4cc6258ac85ed2dee14fdc007319
+H179 boot:    cd2bf397dad5aa20b3b397cb98e327661b904c03ff92921f521d3615c025f11d
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H179.img`（已核对）、
+Mac `~/h103/boot-H179.img`、仓库 `out/cheeseburger/boot/boot-H179.img`。
+手机在 TWRP，`adb reboot bootloader` → `fastboot boot` 启动（未写分区）。
+
+判读：日志应完整覆盖 mount、display probe、accelerator publish、backboardd 匹配；
+重点看 `op=match comm=backboardd d=AGXAccelerator ok=?`、`open request type=?`、
+`frames=?`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

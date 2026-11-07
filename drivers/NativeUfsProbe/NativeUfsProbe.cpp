@@ -59,7 +59,7 @@ static uint32_t gH103SlotCursor;
 // boot wrote it.  The header alone is not enough: it is written after the
 // slot, and a late header write failure leaves a stale slots_written behind,
 // which made earlier logs mix slots from several boots.
-#define H103_BUILD "H178"
+#define H103_BUILD "H179"
 static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
@@ -528,37 +528,6 @@ h103CopyMsgbuf (uint8_t *out)
   return n;
 }
 
-static uint32_t
-h103CopyMsgbufDelta (uint8_t *out, uint32_t cap, uint32_t previous, uint32_t cursor)
-{
-  memset (out, 0, cap);
-  struct H103MsgBuf *m = msgbufp;
-  if (!m || !m->msg_bufc || m->msg_size <= 0 || !cap) {
-    return 0;
-  }
-  const uint32_t size = static_cast<uint32_t> (m->msg_size);
-  previous %= size;
-  cursor %= size;
-  // H177: copy exactly the bytes produced since the previous successful flush.
-  // The old "last cap bytes of the ring" copy reached backwards into whatever
-  // the previous boot had left in the (cleared-but-not-zeroed) ring, which is
-  // how finished boots kept leaking lines with identical timestamps into every
-  // slot and hiding the window we needed.
-  uint32_t delta = cursor >= previous ? cursor - previous : size - previous + cursor;
-  if (delta > cap) {
-    // A jump larger than one slot means the ring was re-initialised (or the
-    // cursor reset); the newest bytes are still valid, so keep the last cap.
-    delta = cap;
-  }
-  if (!delta) {
-    return 0;
-  }
-  const uint32_t start = (cursor + size - delta) % size;
-  for (uint32_t i = 0; i < delta; ++i) {
-    out[i] = static_cast<uint8_t> (m->msg_bufc[(start + i) % size]);
-  }
-  return delta;
-}
 
 #define UFS_REG_IS 0x20U
 #define UFS_REG_IE 0x24U
@@ -2194,56 +2163,57 @@ NativeUfsProbe::h103SlotWrite (void)
     }
     return;
   }
-  // H106: ios-sweet 0069's delta write. Only the bytes produced since the
-  // previous flush are copied and written, capped at one 32-block slot. A
-  // quiet kernel therefore writes nothing but the header.
+  // H106/H179: write only the bytes produced since the previous flush.  A
+  // delta larger than one 32-block slot is split across consecutive slots
+  // instead of dropping its older half (that is how the mount and display
+  // probe lines disappeared from earlier logs).
   struct H103MsgBuf *m = msgbufp;
   uint32_t size = (m && m->msg_size > 0) ? static_cast<uint32_t> (m->msg_size) : 0;
   uint32_t cursor = (m && m->msg_bufx >= 0 && m->msg_bufx < m->msg_size) ?
       static_cast<uint32_t> (m->msg_bufx) : 0;
   uint32_t previous = gH103LastSlotMsgX < 0 ? 0 : static_cast<uint32_t> (gH103LastSlotMsgX);
   uint32_t delta = size ? (cursor + size - previous) % size : 0;
-  uint32_t blocks = (delta + 4095U) / 4096U + 1U;
-  if (blocks > 32U) {
-    blocks = 32U;
-  }
-  if (blocks < 1U) {
-    blocks = 1U;
-  }
-  const uint32_t bodyBytes = blocks * 4096U;
+  const uint32_t stampBytes = 128;
+  const uint32_t chunkPayload = 32U * 4096U - stampBytes;
   const uint32_t uptime = gH103StartTicks ?
       static_cast<uint32_t> ((mach_absolute_time () - gH103StartTicks) / 19200000ULL) : 0;
-  // H167: only `blocks` blocks of the 32-block slot are written, so the rest
-  // of the slot still holds an older boot's text and the reader used to append
-  // it to this record.  Use a fixed 128-byte stamp line that records the exact
-  // payload length and put the payload right behind it, so a v2 reader can
-  // slice precisely and never look at the un-written remainder.
-  const uint32_t stampBytes = 128;
-  uint32_t payloadCap = bodyBytes > stampBytes ? bodyBytes - stampBytes : 0;
-  uint32_t n = payloadCap ?
-      h103CopyMsgbufDelta (body + stampBytes, payloadCap, previous, static_cast<uint32_t> (cursor)) : 0;
-  char stamp[128];
-  int stampLen = snprintf (stamp, sizeof stamp,
-      "SHLOGS v2 boot=%llx seq=%u build=%s uptime=%u bytes=%u",
-      (unsigned long long) gH103BootId, (unsigned) gH103SlotCursor, H103_BUILD,
-      (unsigned) uptime, (unsigned) n);
-  if (stampLen < 0 || static_cast<uint32_t> (stampLen) >= stampBytes) {
-    stampLen = 0;
-  }
-  memset (body, ' ', stampBytes);
-  memcpy (body, stamp, static_cast<size_t> (stampLen));
-  body[stampBytes - 1] = '\n';
-  uint32_t slot = gH103SlotCursor % slotCount;
-  bool ok = logWrite (257U + slot * 32U, blocks, body);
-  if (!ok) {
-    gH103SlotWriteErrors = gH103SlotWriteErrors + 1;
-  }
-  if (attempts++ < 8) {
-    IOLog ("NATIVE_UFS_SLOT: attempt=%u slot=%u lba=%llx body=%u blocks=%u delta=%u n=%u fires=%u\n",
-           attempts, slot, (unsigned long long) (fLogFirst + 257U + slot * 32U),
-           ok ? 1 : 0, blocks, delta, n, gH103TimerFires);
-  }
-  if (ok) {
+  uint32_t offset = size ? previous % size : 0;
+  uint32_t remaining = delta;
+  do {
+    uint32_t n = remaining < chunkPayload ? remaining : chunkPayload;
+    uint32_t blocks = (stampBytes + n + 4095U) / 4096U;
+    if (!blocks) {
+      blocks = 1;
+    }
+    char stamp[128];
+    int stampLen = snprintf (stamp, sizeof stamp,
+        "SHLOGS v2 boot=%llx seq=%u build=%s uptime=%u bytes=%u",
+        (unsigned long long) gH103BootId, (unsigned) gH103SlotCursor, H103_BUILD,
+        (unsigned) uptime, (unsigned) n);
+    if (stampLen < 0 || static_cast<uint32_t> (stampLen) >= stampBytes) {
+      stampLen = 0;
+    }
+    memset (body, ' ', stampBytes);
+    memcpy (body, stamp, static_cast<size_t> (stampLen));
+    body[stampBytes - 1] = '\n';
+    for (uint32_t i = 0; i < n; ++i) {
+      body[stampBytes + i] =
+          static_cast<uint8_t> (m->msg_bufc[(offset + i) % size]);
+    }
+    uint32_t slot = gH103SlotCursor % slotCount;
+    bool wrote = logWrite (257U + slot * 32U, blocks, body);
+    if (!wrote) {
+      gH103SlotWriteErrors = gH103SlotWriteErrors + 1;
+    }
+    if (attempts++ < 8) {
+      IOLog ("NATIVE_UFS_SLOT: attempt=%u slot=%u lba=%llx body=%u blocks=%u "
+             "delta=%u n=%u fires=%u\n",
+             attempts, slot, (unsigned long long) (fLogFirst + 257U + slot * 32U),
+             wrote ? 1 : 0, blocks, delta, n, gH103TimerFires);
+    }
+    if (!wrote) {
+      break;
+    }
     H103LogHeader h;
     memset (&h, 0, sizeof h);
     memcpy (h.magic, "SHLOG001", 8);
@@ -2272,25 +2242,28 @@ NativeUfsProbe::h103SlotWrite (void)
     h.state = 3;
     strlcpy (h.tag, "cheeseburger-H103", sizeof h.tag);
     uint8_t *head = static_cast<uint8_t *> (IOMallocAligned (4096, 4096));
-    if (head) {
-      memset (head, 0, 4096);
-      memcpy (head, &h, sizeof h);
-      bool headOk = logWrite (0, 1, head);
-      if (attempts < 8) {
-        IOLog ("NATIVE_UFS_SLOT: header=%u cursor=%u\n",
-               headOk ? 1 : 0, gH103SlotCursor);
-      }
-      if (headOk) {
-        gH103SlotCursor++;
-        gH103LastMsgBytes = n;
-        gH103LastHeaderTicks = mach_absolute_time ();
-        native_h103_slot_state = 2;
-      } else {
-        gH103SlotWriteErrors = gH103SlotWriteErrors + 1;
-      }
-      IOFreeAligned (head, 4096);
+    if (!head) {
+      break;
     }
-  }
+    memset (head, 0, 4096);
+    memcpy (head, &h, sizeof h);
+    bool headOk = logWrite (0, 1, head);
+    if (attempts < 8) {
+      IOLog ("NATIVE_UFS_SLOT: header=%u cursor=%u\n",
+             headOk ? 1 : 0, gH103SlotCursor);
+    }
+    IOFreeAligned (head, 4096);
+    if (!headOk) {
+      gH103SlotWriteErrors = gH103SlotWriteErrors + 1;
+      break;
+    }
+    gH103SlotCursor++;
+    gH103LastMsgBytes = n;
+    gH103LastHeaderTicks = mach_absolute_time ();
+    native_h103_slot_state = 2;
+    offset = size ? (offset + n) % size : 0;
+    remaining -= n;
+  } while (remaining);
   IOFreeAligned (body, 32U * 4096U);
 }
 
