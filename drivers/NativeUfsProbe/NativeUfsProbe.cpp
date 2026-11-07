@@ -31,6 +31,26 @@
 #include <libkern/c++/OSNumber.h>
 #include <libkern/c++/OSString.h>
 
+// H183: addon/owner-data state from bsd/kern/kern_exec.c. The boot's own console lines for the Data
+// mount are not reliably captured by the log slots (the writer re-copies large stale regions), so the
+// heartbeat samples these globals instead: the ALIVE lines appear in every capture.
+extern "C" {
+extern volatile int native_owner_data_stage;
+extern volatile int native_owner_data_status;
+extern volatile int native_gpu_addon_calls;
+extern volatile int native_gpu_addon_files;
+extern volatile int native_gpu_addon_written;
+extern volatile int native_gpu_addon_same;
+extern volatile int native_gpu_addon_failed;
+extern volatile int native_gpu_addon_error;
+extern volatile int native_gpu_addon_stage;
+extern volatile int native_gpu_addon_status;
+extern volatile int native_gpu_addon2_stage;
+extern volatile int native_gpu_addon2_status;
+extern volatile int native_gpu_addon3_stage;
+extern volatile int native_gpu_addon3_status;
+}
+
 static volatile uint64_t gUfsCommands;
 static volatile uint64_t gUfsInFlight;
 static volatile uint64_t gUfsLastLba;
@@ -59,7 +79,7 @@ static uint32_t gH103SlotCursor;
 // boot wrote it.  The header alone is not enough: it is written after the
 // slot, and a late header write failure leaves a stale slots_written behind,
 // which made earlier logs mix slots from several boots.
-#define H103_BUILD "H182b"
+#define H103_BUILD "H183"
 static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
@@ -347,7 +367,8 @@ heartbeatThread (void *, wait_result_t)
     beat++;
     if (beat == 1 || (beat % 10) == 0) {
     IOLog ("NATIVE_UFS_ALIVE: winFlight=%llu ufsFlight=%llu cmds=%llu "
-           "winReq=%llu winBytes=%llu lastCmd=%llx/%llu req=%llx/%llu\n",
+           "winReq=%llu winBytes=%llu lastCmd=%llx/%llu req=%llx/%llu "
+           "addon=%d/%d/%d/%d/%d/%d owner=%d/%d ext=%d/%d dm=%d/%d wp=%d/%d\n",
            (unsigned long long) gWindowInFlight,
            (unsigned long long) gUfsInFlight,
            (unsigned long long) gUfsCommands,
@@ -356,7 +377,21 @@ heartbeatThread (void *, wait_result_t)
            (unsigned long long) gUfsLastLba,
            (unsigned long long) gUfsLastBytes,
            (unsigned long long) gWindowLastReqBlock,
-           (unsigned long long) gWindowLastReqCount);
+           (unsigned long long) gWindowLastReqCount,
+           (int) native_gpu_addon_files,
+           (int) native_gpu_addon_written,
+           (int) native_gpu_addon_same,
+           (int) native_gpu_addon_failed,
+           (int) native_gpu_addon_error,
+           (int) native_gpu_addon_calls,
+           (int) native_owner_data_stage,
+           (int) native_owner_data_status,
+           (int) native_gpu_addon_stage,
+           (int) native_gpu_addon_status,
+           (int) native_gpu_addon2_stage,
+           (int) native_gpu_addon2_status,
+           (int) native_gpu_addon3_stage,
+           (int) native_gpu_addon3_status);
     }
     // H128: the process dumps and the persistent-log flush run here, in thread
     // context with no storage lock held.  They used to run from the UFS

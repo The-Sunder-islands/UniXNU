@@ -7857,6 +7857,49 @@ NATIVE_GPU_ADDON: plugin=NilMetal info=0 files=3 written=3 same=0 failed=0 error
 
 之后看 CA 是否继续读 `MetalPluginClassName`、是否出现 `frames>0` / `selector=3/4/5`。
 
+### H182b 结果：日志窗口本身不可靠（2026-11-08）
+
+H182b 的 `probe` 行同样没有出现，但这次逐槽核对后发现**不能据此下结论**：
+
+- 窗口里 `mount-complete volume OwnerData` 出现 118 次，大量文本逐字节重复；
+- header 的 `msg` 区（blocks 1..256）与 H182 的窗口**完全一致**（722 个时间戳、
+  首尾 `467.819743`/`527.258917` 都相同），说明该区没有随这次启动重写；
+- H182b 的 22 个槽中，槽 0..20 是本次启动的增量（含本次独有的
+  `service=0xfffffff60dd00ac0`），但**没有任何 OwnerData/H82 行**；槽 21 的
+  97 KB 大块只含旧文本（不含本次独有指针），却被并入报告——报告里的
+  “61.78 s H82”就是这类旧数据；
+- 槽 0..20 一路到 508 s 都有 launchd 子进程、backboardd、SpringBoard，
+  说明系统确实起来了，但 Data mount 那一刻的 console 输出没有被增量捕获。
+
+结论：`h103-log-pull.py` 的增量槽在这几次启动里会漏掉 Data mount 附近的整段
+console（同时把旧槽当成本次启动），所以“没有 `NATIVE_GPU_ADDON`”**不能**证明
+addon 代码没跑。需要一条不依赖 mount 时 console 的通道。
+
+### H183：用 UFS 心跳读取 addon 状态（2026-11-08）
+
+- 内核补丁 `zzz-native-gpu-addon-log.patch` 增加 `native_gpu_addon_calls`，
+  在 `native_gpu_addon_prepare()` 入口自增（其余诊断保留）；
+- UFS 驱动 `NativeUfsProbe` 的心跳行 `NATIVE_UFS_ALIVE` 追加：
+
+```text
+addon=<files>/<written>/<same>/<failed>/<error>/<calls>
+owner=<stage>/<status>
+ext=<stage>/<status> dm=<stage>/<status> wp=<stage>/<status>
+```
+
+心跳行在每次抓取里都稳定出现（43 s 起约每 10–60 s 一条），不再依赖 Data mount
+时刻的 console 是否被写入槽。
+
+```text
+H183 kernel:  c6143f2df39ebb0c1602195e7a04face0ecc7711875b5bc0e2fa8bfbeba6433d
+H183 payload: 830cb0cf16e7b8ef9061a8741e5dcaddb2f47adbaaee6253968d12d975fc6681
+H183 boot:    01d72c8f1b38477f0043c79ce1bcafbbea67c022955abc66a8a60e1809761722
+```
+
+判读：`calls=0` → 函数没被调用；`calls≥1, files=-2` → loader handoff 断了；
+`files=3, written=3` → addon 落地；`ext=4/2` → union 生效（2 是
+`NativeAdrenoMetal` 自检路径，属预期）；`files=3` 且 `ext=2/...` → mount 失败。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
