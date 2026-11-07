@@ -6275,6 +6275,53 @@ H155 boot:    39c9f94e5c043e368ad670a41bde0cd36e5aea3123a30c3dec9ff0d21232626c
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H155.img`（已核对）、
 Mac `~/h103/boot-H155.img`、仓库 `out/cheeseburger/boot/boot-H155.img`。
 
+### H155 结果：日志仍然为空，因为刷盘被 h107 gate 挡住（2026-11-07）
+
+`h155-log-20261107-135905.txt` 的 header 仍与 H151 相同（`boot_id: 8958133734`、
+`slots_written: 1`），但屏幕上明明有 `NATIVE_UFS_HB: slotMode=1`、
+`NATIVE_UFS_LOG: setup …`、`NATIVE_UFS_HB: enter`。
+
+原因在 `h103SlotTick()`：
+
+```c
+  if (!h107GateOpen ()) return;    // 没有 backboardd/SpringBoard exec 就直接返回
+  …按 h103-log-secs 刷 slot
+```
+
+`h107GateOpen()` 需要 `native_boot_flags & 4`（backboardd exec）。这几轮都是
+launchd 的 shared region 映射失败 → backboardd 从未 exec → gate 永不打开 →
+周期刷盘一次也没发生；而 panic 时刻的 `native_panic_flush()` 又因为这次 data abort
+发生在禁用抢占的上下文里，被 H154 的保护跳过。
+
+### H156：gate 之前也按间隔刷盘（2026-11-07）
+
+`h103SlotTick()` 中在 `h107GateOpen()` 之前加：
+
+```c
+  if (!h107GateOpen ()) {
+    static uint64_t lastEarlyFlush;
+    uint64_t now = mach_absolute_time ();
+    uint64_t interval = (uint64_t) gH103LogSecs * 19200000ULL;
+    if (interval && (!lastEarlyFlush || now - lastEarlyFlush >= interval)) {
+      lastEarlyFlush = now;
+      h103FlushNow ();
+    }
+    return;
+  }
+```
+
+即“gate 之前”也按 `h103-log-secs`（当前 10 秒）刷一次 slot。这样 launchd 阶段就崩
+的启动至少能留下最后 10 秒的完整日志。
+
+```text
+H156 kernel:  e396a99f3a2fdad009a7d77eb208caf0fd9bb94f17014d2b3eebb607c16416ef
+H156 payload: 535c2463876fd77571d46a50f9ecc3f99c8d930b429ff5c3eb42dd8deb19667b
+H156 boot:    b7c58a8c08eb5771e8c7e095777af1e90dd2b53ab86b13c30762a0f9083c5cc7
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H156.img`（已核对）、
+Mac `~/h103/boot-H156.img`、仓库 `out/cheeseburger/boot/boot-H156.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

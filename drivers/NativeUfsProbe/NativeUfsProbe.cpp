@@ -795,6 +795,20 @@ h103SlotTick (void)
   }
   h103ReportMetaSerialize ();
   h103ProbeIomfb ();
+  // H156: a boot that dies in launchd never reaches backboardd, so the h107
+  // gate would keep the persistent log empty (H153-H155 all died there and
+  // left the H151 slots untouched).  Flush on the normal interval even before
+  // the gate opens.
+  if (!h107GateOpen ()) {
+    static uint64_t lastEarlyFlush;
+    uint64_t now = mach_absolute_time ();
+    uint64_t interval = (uint64_t) gH103LogSecs * 19200000ULL;
+    if (interval && (!lastEarlyFlush || now - lastEarlyFlush >= interval)) {
+      lastEarlyFlush = now;
+      h103FlushNow ();
+    }
+    return;
+  }
   h103MaybeLoadIogpu ();
   h103MaybePublishIogpu ();
   // H104f/H107: no slot/header writes before backboardd actual exec. When
@@ -3025,7 +3039,7 @@ NativeUfsProbe::start (IOService *provider)
   PE_parse_boot_argn ("h103-load-iogpu", &loadIogpu, sizeof loadIogpu);
   gH103LoadIogpu = loadIogpu ? 1 : 0;
   gH103StartTicks = mach_absolute_time ();
-  IOLog ("NATIVE_BUILD: H154\n");
+  IOLog ("NATIVE_BUILD: H156\n");
   IOLog ("NATIVE_UFS_HB: slotMode=%d logSecs=%u hbTimer=%d loadIogpu=%d\n",
          gH103SlotMode, gH103LogSecs, gH103HbTimerOn, gH103LoadIogpu);
   thread_t heartbeat = nullptr;
