@@ -8031,6 +8031,35 @@ trust bundle: 701bebaa4d2cc324b88ba06e882c2db6af91d2ef3cecbefa5c2f72ba26dde023
 principalClass/类检查；两条都没有 → 需要改用自建 daemon 从 APFS 路径 dlopen 同一
 bundle 做对照（排除 bindfs 只读联合挂载的 mmap 问题）。
 
+### H186 结果：仍无 ctor，但 stderr 不可见（2026-11-08）
+
+H186 换成 4 KiB 页签名后，backboardd 的崩溃位置不变（260.82 s、`sig=11`，紧跟在
+`NATIVE_CACHE_SIG: blob=66384 size=18816` 之后），日志里仍没有 `NILMETAL` 字样。
+但这里有一个观测陷阱：launchd 默认把作业的 stderr 丢到 `/dev/null`，所以
+“没有 ctor”**不能**证明镜像没加载。需要把轨迹写到内核控制台。
+
+### H187：插件直接写 /dev/console（2026-11-08）
+
+插件改为 `fopen("/dev/console","w")` 输出：
+
+```text
+NILMETAL: ctor pid=…
+NILMETAL: init port=… self=…
+```
+
+这样输出必然进入启动日志。签名仍是 4 KiB 页（CDHash
+`91c0b2df6af26eb0575b2953160b431c410d428a`），trustcache/addon 已重建，内核未变。
+
+```text
+H187 payload: 0511c0976bdeb3d2c379d96d994d9f31f70037459f24f84cf67ebc8e6bcffbc1
+H187 boot:    200caf5076f5e68ed401377e830aaca4d1e2c80bfd190f0abef5ad56248ad948
+插件 CDHash:  91c0b2df6af26eb0575b2953160b431c410d428a
+```
+
+判读：有 `ctor` → 镜像加载成功，崩溃在返回 nil 之后（CA/Metal 侧）；有 `ctor` 没有
+`init` → 崩溃在 principalClass/类检查；两者都没有 → dyld/mmap 阶段失败，下一步用
+自建 daemon 分别从 APFS 路径和 union 路径 dlopen 同一 bundle 做对照。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
