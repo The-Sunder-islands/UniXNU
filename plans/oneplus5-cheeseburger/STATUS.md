@@ -6553,6 +6553,41 @@ H161 boot:    d7b934bc1c314c525977ed7681b4d14355a2d2e10ee7f174a29febbc4bb05ecd
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H161.img`（已核对）、
 Mac `~/h103/boot-H161.img`、仓库 `out/cheeseburger/boot/boot-H161.img`。
 
+### H161 结果：日志正文是旧的，头部是新的（2026-11-07）
+
+`h161-log-20261107-155803.txt` 里：
+
+- **没有 `NATIVE_BUILD`**（H148 起才有），也没有任何 `unit-scale` 行；
+- 心跳行是 `NATIVE_UFS_HB: slotMode=1 hbTimer=0 loadIogpu=0`，**缺 `logSecs=` 字段**
+  —— 写这段内容的 kernel 比当前源码旧；
+- 显示相关行的时间戳（`28.044186`、`35.756568`、`214.163440`）与 H159/H160 **逐微秒相同**。
+
+而 header 是新的（`boot_id 7578000580`、`slots_written 195`、`uptime_s 371`）。
+这说明 **slot 正文写入失败、header（单块 4 KB）偶尔成功**，与日志里已有的
+`NATIVE_UFS_LOCK: logWrite timeout` 一致：UFS 锁竞争严重时刷盘写被判超时。
+所以 H161 的 unit-scale 日志没能落盘，之前的判断依据全部失效。
+
+### H162：恢复存储的干净基线（2026-11-07）
+
+1. payload：`h103-log-secs` 10 → **60**；
+2. `readWindowBulk()` 的锁上限 `38400000`（2 s）→ `UFS_DATA_LOCK_TICKS`（6 s），
+   与 5.2 s 的 UFS 命令超时对齐（H128 之后只改了 readBlocks 与窗口锁，漏了这里）；
+3. 刷盘前检查 `gWindowInFlight`：有窗口请求在飞就跳过本次写，下一拍再试；
+   门未开时的早期刷盘也从“每 1 秒”改为“每 10 秒”；
+4. 构建标记 `NATIVE_BUILD: H162`。
+
+```text
+H162 kernel:  90a7117f1f83a04244499eb04d54ea690d7c90e1660b35bf704888179595d9cc
+H162 payload: 47476b7ac26c96be0c8bfe281bd0ef433fe863df272210243dcdc2dad743956f
+H162 boot:    4809fc8b31d239c4e37ab4b0f41baf4ef7e6a500abab1e46e760089fa0c4a3ae
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H162.img`（已核对）、
+Mac `~/h103/boot-H162.img`、仓库 `out/cheeseburger/boot/boot-H162.img`。
+
+判读：`NATIVE_UFS_LOCK` / `err 60` 应回到 H128–H135 的零水平；随后日志正文才会更新，
+届时 H161 的 `unit-scale …` 行会随早期启动一起落盘。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

@@ -807,9 +807,17 @@ h103SlotTick (void)
   // left the H151 slots untouched).  Flush on the normal interval even before
   // the gate opens.
   if (!h107GateOpen ()) {
-    // H157: flush on every (1 s) beat while the gate is closed; the delta is
-    // small and a boot that dies in launchd otherwise leaves nothing behind.
-    h103FlushNow ();
+    // H157 kept the pre-gate log alive; H162 caps it at one write per 10 s and
+    // never writes while a window request is in flight, because the slot write
+    // takes the same fLock and UFS queue as the data path (this is what turned
+    // H155-H161 into err 60 storms).
+    static uint64_t lastEarlyFlush;
+    uint64_t now = mach_absolute_time ();
+    if (!gWindowInFlight &&
+        (!lastEarlyFlush || now - lastEarlyFlush >= 10 * 19200000ULL)) {
+      lastEarlyFlush = now;
+      h103FlushNow ();
+    }
     return;
   }
   h103MaybeLoadIogpu ();
@@ -901,7 +909,11 @@ h103SlotTick (void)
   }
   // H108: h103FlushNow owns the busy flag and the cursor update; the writer
   // leaves gH103LastSlotMsgX at the previous value until the delta is written.
-  h103FlushNow ();
+  // H162: skip the write while the block-storage path is busy; the next beat
+  // retries.  This keeps the log from stalling SystemOS reads.
+  if (!gWindowInFlight) {
+    h103FlushNow ();
+  }
 }
 
 // H109: the timer interrupt fires this every second. It flips the 16x16 cell
@@ -1771,7 +1783,7 @@ NativeUfsProbe::readWindowBulk (uint64_t lba, uint32_t blocks, void *out)
     return false;
   }
   uint64_t lockStart = mach_absolute_time ();
-  if (!lockWithTimeout (fLock, "readWindowBulk", 38400000ULL)) {
+  if (!lockWithTimeout (fLock, "readWindowBulk", UFS_DATA_LOCK_TICKS)) {
     IOLog ("NATIVE_UFS_LOCK: readWindowBulk blocked lba=%llx blocks=%u wait=%llu\n",
            lba, blocks, (unsigned long long) (mach_absolute_time () - lockStart));
     return false;
@@ -3073,7 +3085,7 @@ NativeUfsProbe::start (IOService *provider)
   PE_parse_boot_argn ("h103-load-iogpu", &loadIogpu, sizeof loadIogpu);
   gH103LoadIogpu = loadIogpu ? 1 : 0;
   gH103StartTicks = mach_absolute_time ();
-  IOLog ("NATIVE_BUILD: H159\n");
+  IOLog ("NATIVE_BUILD: H162\n");
   IOLog ("NATIVE_UFS_HB: slotMode=%d logSecs=%u hbTimer=%d loadIogpu=%d\n",
          gH103SlotMode, gH103LogSecs, gH103HbTimerOn, gH103LoadIogpu);
   thread_t heartbeat = nullptr;
