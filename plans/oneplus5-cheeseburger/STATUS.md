@@ -7081,6 +7081,71 @@ Mac `~/h103/boot-H170.img`、仓库 `out/cheeseburger/boot/boot-H170.img`。
   （`add-gpu-plugin-data.py` + `sheng-gpu-addon=1`），不需要 Turnip；
 - 若出现 `frames>0` 或 `selector=3/4/5` → 软件渲染通路打通。
 
+### H170 结果：每次启动都在 APFS 里 trap（2026-11-07）
+
+屏幕照片：
+
+```text
+userdata_ios 1014f40..1c627fa 50392M
+partitions=32 listed=4
+NATIVE_UFS_ROOT: userdata_ios LBA 1014f40..1c627fa
+vm_page_find_contiguous(num=32,low=1048575): found 0 pages … wired count is 36997
+vm_page_find_contiguous: zone_gc called … wired count is 36997
+vm_page_find_contiguous(num=32,low=1048575): found 0 pages … wired count is 36999
+NATIVE_PANIC_STR: Undefined kernel instruction: pc=0xfffffff00b6bd000 instr=807ff000 @sleh.c:1874
+…
+panic(cpu 0 caller 0xfffffff007a19774): Undefined kernel instruction … @sleh.c:1874
+```
+
+1. `pc=0xfffffff00b6bd000` 落在 **`com.apple.filesystems.apfs` 的
+   `__TEXT_EXEC`**（段基址 `0xfffffff00b640000`，偏移 `0x7d000`）；该地址在镜像里
+   是 `0x52800008`（`mov w8,#0`），与报告的 `instr=807ff000` 不符，属于运行时
+   取指错误（野跳/坏数据），不是静态代码问题。
+2. **不是**旧的 userdata/userdata_ios 分区 bug：`userdata_ios LBA
+   1014f40..1c627fa`、`partitions=32 listed=4` 与 H167/H169 的正常启动完全一致。
+3. 真正的线索是紧随其后的
+   `vm_page_find_contiguous(num=32, low=1048575): found 0 pages`：这正是
+   `NATIVE_UFS_ROOT: userdata_ios LBA …` 之后那次 **128 KB（32 页）低 4 GB
+   物理连续 DMA 分配**（`readDma`，`UFS_DATA_MAX=0x20000`）失败。旧代码失败后
+   回退到 `inTaskWithOptions(…, 4096)`（可能落在 4 GB 以上），而控制器这里按
+   `0xffffffff` 掩码寻址；随后 APFS 读到坏数据并 trap。
+4. 对照：H169（同一份 accelerator/display 代码，只少 `MetalPluginName` 和约
+   40 字节 args）稳定启动；H170 每次都失败——差异是 payload/args 变化带来的
+   低内存布局，不是分区或时序。
+
+### H171：低内存 DMA 分级回退，绝不越过 4 GB（2026-11-07）
+
+`drivers/NativeUfsProbe/NativeUfsProbe.cpp`：
+
+1. 新增 `allocLowContiguous()`：按 128K→64K→32K→16K→8K→4K 依次尝试
+   `inTaskWithPhysicalMask(kernel_task, kIOMemoryPhysicallyContiguous, size,
+   0xffffffff)`，每次都校验 `phys < 4 GB`、4K 对齐、`contiguous >= size`，
+   并打印 `NATIVE_UFS_DMA: low size=… phys=… cont=…`；
+2. `readDma` 用它，`queue.dataCapacity` 设为**实际**容量（`readBlocks` /
+   `readWindowBulk` 本来就按 `dataCapacity/blockSize` 分块）；全部失败则
+   `panic("no low read DMA buffer")`，不再使用 4 GB 以上的缓冲；
+3. `logDma` 同样用它，新增 `fLogCapacity`；`logWrite` 把 `blocks` 截到
+   `fLogCapacity/4096` 并把 `fQueue.dataCapacity` 设为实际容量；
+4. 构建标记 `NATIVE_BUILD: H171`。
+
+```text
+H171 kernel:  b04829d1b0eb5e0da7bb7121f5d67b55984d14855630c48bfbe81b558b05c5ca
+H171 payload: f8e8e32133c6bdcc880ee2e73377bf6417de9e2a87d896ce71d812ea25e1f7d9
+H171 boot:    24533d499f86124334583f8adde5e70faa2dc042b517a73436bb21d018af6732
+```
+
+payload 仍带 `offline-accelerator=1` 与 `_offline-accelerator-plugin=AGXMetalA10`。
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H171.img`（已核对）、
+Mac `~/h103/boot-H171.img`、仓库 `out/cheeseburger/boot/boot-H171.img`。
+
+判读：
+
+- `NATIVE_UFS_DMA: low size=20000 unavailable` 后出现较小的
+  `low size=10000/8000/…` → 分级回退生效，挂载应能通过；
+- `NATIVE_UFS_GPT: read DMA cap=…` 显示实际容量；
+- 若出现 `no low read DMA buffer` panic → 低内存确实耗尽，下一步在 display
+  probe 之前预留缓冲。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

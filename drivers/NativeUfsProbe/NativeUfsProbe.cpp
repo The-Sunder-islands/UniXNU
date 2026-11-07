@@ -59,7 +59,7 @@ static uint32_t gH103SlotCursor;
 // boot wrote it.  The header alone is not enough: it is written after the
 // slot, and a late header write failure leaves a stale slots_written behind,
 // which made earlier logs mix slots from several boots.
-#define H103_BUILD "H170"
+#define H103_BUILD "H171"
 static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
@@ -390,6 +390,46 @@ h103SlotThread (void *, wait_result_t)
 #define UFS_FW_DATA_MAX 0x700U
 #define UFS_DATA_MAX 0x20000U
 
+// H171: the UFS read/log buffers must be physically contiguous below 4 GB (the
+// controller here is addressed with a 32-bit physical mask).  A 128 KB request
+// can fail once low memory is fragmented, and the old high-memory fallback
+// then handed the controller an address it cannot use - APFS read garbage and
+// trapped.  Retry with smaller contiguous runs and never exceed the mask.
+static IOBufferMemoryDescriptor *
+allocLowContiguous (IOOptionBits options, uint32_t wanted, uint32_t *capacity,
+                    uint64_t *phys, IOByteCount *contiguous)
+{
+  static const uint32_t shares[] = {1, 2, 4, 8, 16, 32};
+  for (unsigned i = 0; i < sizeof (shares) / sizeof (shares[0]); ++i) {
+    uint32_t size = wanted / shares[i];
+    if (size < 4096U) {
+      break;
+    }
+    IOBufferMemoryDescriptor *dma =
+        IOBufferMemoryDescriptor::inTaskWithPhysicalMask (
+            kernel_task, options, size, 0x00000000ffffffffULL);
+    if (!dma) {
+      IOLog ("NATIVE_UFS_DMA: low size=%x unavailable\n", size);
+      continue;
+    }
+    IOByteCount cont = 0;
+    uint64_t where = dma->getPhysicalSegment (0, &cont, kIOMemoryMapperNone);
+    if (!where || (where & 0xfffU) || cont < size) {
+      IOLog ("NATIVE_UFS_DMA: low size=%x invalid phys=%llx cont=%llx\n", size,
+             (unsigned long long) where, (unsigned long long) cont);
+      dma->release ();
+      continue;
+    }
+    IOLog ("NATIVE_UFS_DMA: low size=%x phys=%llx cont=%llx\n", size,
+           (unsigned long long) where, (unsigned long long) cont);
+    *capacity = size;
+    *phys = where;
+    *contiguous = cont;
+    return dma;
+  }
+  return nullptr;
+}
+
 // H103 persistent log snapshot: SHLOG001 v3 header + 1 MiB kernel msgbuf in the
 // last 32 MiB of userdata_ios. Written once after root; the boot log ring holds
 // the early NATIVE_LEGACY lines. TWRP reads the window back read-only.
@@ -622,6 +662,7 @@ class NativeUfsProbe : public IOService {
   IOBufferMemoryDescriptor *fLogDma = nullptr;
   uint8_t *fLogData = nullptr;
   uint64_t fLogDataPhys = 0;
+  uint32_t fLogCapacity = 0;
   IOWorkLoop *fHbLoop = nullptr;
   IOTimerEventSource *fHbTimer = nullptr;
   uint64_t fHbNext = 0;
@@ -1860,6 +1901,12 @@ NativeUfsProbe::logWrite (uint64_t rel, uint32_t blocks, const void *src)
   if (!fLogDma || !fLogData || !fLogDataPhys) {
     return false;
   }
+  if (blocks > fLogCapacity / 4096U) {
+    blocks = fLogCapacity / 4096U;
+    if (!blocks) {
+      return false;
+    }
+  }
   const unsigned bytes = blocks * 4096U;
   if (!lockWithTimeout (fLock, "logWrite", 38400000ULL)) {
     return false;
@@ -1885,7 +1932,7 @@ NativeUfsProbe::logWrite (uint64_t rel, uint32_t blocks, const void *src)
   uint32_t savedCapacity = fQueue.dataCapacity;
   fQueue.data = fLogData;
   fQueue.dataPhys = fLogDataPhys;
-  fQueue.dataCapacity = UFS_DATA_MAX;
+  fQueue.dataCapacity = fLogCapacity;
   bool ok = ufsWriteCommand (&fQueue, 0, cdb, bytes, fLogData);
   fQueue.data = savedData;
   fQueue.dataPhys = savedPhys;
@@ -2960,51 +3007,50 @@ NativeUfsProbe::start (IOService *provider)
   IOOptionBits readOptions = static_cast<IOOptionBits> (kIODirectionInOut) |
                              static_cast<IOOptionBits> (kIOMemoryPhysicallyContiguous) |
                              static_cast<IOOptionBits> (kIOMemoryMapperNone);
-  IOBufferMemoryDescriptor *readDma = IOBufferMemoryDescriptor::inTaskWithPhysicalMask (
-    kernel_task, readOptions, UFS_DATA_MAX, 0x00000000ffffffffULL);
+  uint32_t readCapacity = 0;
+  uint64_t readPhys = 0;
+  IOByteCount readContiguous = 0;
+  IOBufferMemoryDescriptor *readDma = allocLowContiguous (
+    readOptions, UFS_DATA_MAX, &readCapacity, &readPhys, &readContiguous);
   if (!readDma) {
-    IOLog ("NATIVE_UFS_GPT: read DMA low failed; high fallback\n");
-    readDma = IOBufferMemoryDescriptor::inTaskWithOptions (
-      kernel_task, readOptions, UFS_DATA_MAX, 4096);
-  }
-  if (!readDma) {
-    panic ("NATIVE_UFS_GPT: read DMA allocation failed");
+    panic ("NATIVE_UFS_GPT: no low read DMA buffer (wanted %x)", UFS_DATA_MAX);
   }
   uint8_t *readData = static_cast<uint8_t *> (readDma->getBytesNoCopy ());
-  IOByteCount readContiguous = 0;
-  uint64_t readPhys = readDma->getPhysicalSegment (0, &readContiguous, kIOMemoryMapperNone);
-  if (!readData || !readPhys || (readPhys & 0xfff) ||
-      readContiguous < UFS_DATA_MAX) {
-    panic ("NATIVE_UFS_GPT: read DMA invalid phys=%llx cont=%llx", readPhys,
-           uint64_t (readContiguous));
+  if (!readData) {
+    panic ("NATIVE_UFS_GPT: read DMA mapping missing phys=%llx",
+           (unsigned long long) readPhys);
   }
+  IOLog ("NATIVE_UFS_GPT: read DMA cap=%x phys=%llx cont=%llx\n",
+         readCapacity, (unsigned long long) readPhys,
+         (unsigned long long) readContiguous);
   queue.data = readData;
   queue.dataPhys = readPhys;
-  queue.dataCapacity = UFS_DATA_MAX;
+  queue.dataCapacity = readCapacity;
   queue.poisoned = false;
   fQueue = queue;
 
   IOOptionBits logOptions = static_cast<IOOptionBits> (kIODirectionIn) |
                             static_cast<IOOptionBits> (kIOMemoryPhysicallyContiguous) |
                             static_cast<IOOptionBits> (kIOMemoryMapperNone);
-  IOBufferMemoryDescriptor *logDma = IOBufferMemoryDescriptor::inTaskWithPhysicalMask (
-    kernel_task, logOptions, UFS_DATA_MAX, 0x00000000ffffffffULL);
-  if (!logDma) {
-    logDma = IOBufferMemoryDescriptor::inTaskWithOptions (
-      kernel_task, logOptions, UFS_DATA_MAX, 4096);
-  }
+  uint32_t logCapacity = 0;
+  uint64_t logPhys = 0;
+  IOByteCount logContiguous = 0;
+  IOBufferMemoryDescriptor *logDma = allocLowContiguous (
+    logOptions, UFS_DATA_MAX, &logCapacity, &logPhys, &logContiguous);
   if (logDma) {
     fLogDma = logDma;
     fLogData = static_cast<uint8_t *> (logDma->getBytesNoCopy ());
-    IOByteCount logContiguous = 0;
-    fLogDataPhys = logDma->getPhysicalSegment (0, &logContiguous, kIOMemoryMapperNone);
-    if (!fLogData || !fLogDataPhys || (fLogDataPhys & 0xfff) ||
-        logContiguous < UFS_DATA_MAX) {
-      IOLog ("NATIVE_UFS_LOG: log DMA invalid data=%p phys=%llx cont=%llx\n",
-             fLogData, (unsigned long long) fLogDataPhys,
-             (unsigned long long) logContiguous);
+    fLogDataPhys = logPhys;
+    fLogCapacity = logCapacity;
+    IOLog ("NATIVE_UFS_LOG: log DMA cap=%x phys=%llx cont=%llx\n",
+           logCapacity, (unsigned long long) logPhys,
+           (unsigned long long) logContiguous);
+    if (!fLogData) {
+      IOLog ("NATIVE_UFS_LOG: log DMA mapping missing phys=%llx\n",
+             (unsigned long long) logPhys);
       fLogData = nullptr;
       fLogDataPhys = 0;
+      fLogCapacity = 0;
     }
   } else {
     IOLog ("NATIVE_UFS_LOG: log DMA allocation failed\n");
