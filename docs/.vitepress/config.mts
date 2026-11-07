@@ -115,6 +115,12 @@ export default withMermaid(defineConfig({
                 { text: '小米平板 6S Pro（sheng）', link: '/zh/devices/sheng' },
                 { text: '无人值守测试', link: '/zh/devices/sheng-unattended-test' },
                 {
+                  text: '一加 5（cheeseburger）',
+                  items: [
+                    { text: '测试图案颜色含义', link: '/zh/devices/cheeseburger/display-colors' },
+                  ],
+                },
+                {
                   text: '社区移植',
                   collapsed: true,
                   items: [
@@ -295,6 +301,12 @@ export default withMermaid(defineConfig({
             { text: 'Supported devices', link: '/devices/' },
             { text: 'Xiaomi Pad 6S Pro (sheng)', link: '/devices/sheng' },
             { text: 'Unattended test cycle', link: '/devices/sheng-unattended-test' },
+            {
+              text: 'OnePlus 5 (cheeseburger)',
+              items: [
+                { text: 'Display test pattern colors', link: '/devices/cheeseburger/display-colors' },
+              ],
+            },
             {
               text: 'Community ports',
               collapsed: true,

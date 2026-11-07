@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="736" height="252" viewBox="0 0 736 252" role="img" aria-label="NativeLegacyDisplay test pattern colours">
+  <title>NativeLegacyDisplay test pattern colours (0xAARRGGBB)</title>
+  <desc>Colour swatches used by the cheeseburger legacy display test pattern. The hexadecimal value is written to the framebuffer as an opaque 0xAARRGGBB pixel.</desc>
+  <text x="16" y="20" font-size="13" fill="#333333" font-family="PingFang SC,Hiragino Sans GB,Microsoft YaHei,Noto Sans CJK SC,sans-serif">NativeLegacyDisplay 测试图案色卡</text>
+  <g font-family="PingFang SC,Hiragino Sans GB,Microsoft YaHei,Noto Sans CJK SC,sans-serif">
+    <g transform="translate(16,36)">
+      <rect width="128" height="52" fill="#FF0000" stroke="#C8C8C8" stroke-width="1"/>
+      <text x="0" y="68" font-size="12" fill="#333333">红</text>
+      <text x="0" y="84" font-size="11" fill="#666666" font-family="monospace">#FF0000</text>
+    </g>
+    <g transform="translate(160,36)">
+      <rect width="128" height="52" fill="#00FF00" stroke="#C8C8C8" stroke-width="1"/>
+      <text x="0" y="68" font-size="12" fill="#333333">绿</text>
+      <text x="0" y="84" font-size="11" fill="#666666" font-family="monospace">#00FF00</text>
+    </g>
+    <g transform="translate(304,36)">
+      <rect width="128" height="52" fill="#0000FF" stroke="#C8C8C8" stroke-width="1"/>
+      <text x="0" y="68" font-size="12" fill="#333333">蓝</text>
+      <text x="0" y="84" font-size="11" fill="#666666" font-family="monospace">#0000FF</text>
+    </g>
+    <g transform="translate(448,36)">
+      <rect width="128" height="52" fill="#0080FF" stroke="#C8C8C8" stroke-width="1"/>
+      <text x="0" y="68" font-size="12" fill="#333333">天蓝</text>
+      <text x="0" y="84" font-size="11" fill="#666666" font-family="monospace">#0080FF</text>
+    </g>
+    <g transform="translate(592,36)">
+      <rect width="128" height="52" fill="#FFFF00" stroke="#C8C8C8" stroke-width="1"/>
+      <text x="0" y="68" font-size="12" fill="#333333">黄</text>
+      <text x="0" y="84" font-size="11" fill="#666666" font-family="monospace">#FFFF00</text>
+    </g>
+    <g transform="translate(16,132)">
+      <rect width="128" height="52" fill="#FF00FF" stroke="#C8C8C8" stroke-width="1"/>
+      <text x="0" y="68" font-size="12" fill="#333333">品红</text>
+      <text x="0" y="84" font-size="11" fill="#666666" font-family="monospace">#FF00FF</text>
+    </g>
+    <g transform="translate(160,132)">
+      <rect width="128" height="52" fill="#FF8000" stroke="#C8C8C8" stroke-width="1"/>
+      <text x="0" y="68" font-size="12" fill="#333333">橙</text>
+      <text x="0" y="84" font-size="11" fill="#666666" font-family="monospace">#FF8000</text>
+    </g>
+    <g transform="translate(304,132)">
+      <rect width="128" height="52" fill="#8000FF" stroke="#C8C8C8" stroke-width="1"/>
+      <text x="0" y="68" font-size="12" fill="#333333">紫</text>
+      <text x="0" y="84" font-size="11" fill="#666666" font-family="monospace">#8000FF</text>
+    </g>
+    <g transform="translate(448,132)">
+      <rect width="128" height="52" fill="#FFFFFF" stroke="#C8C8C8" stroke-width="1"/>
+      <text x="0" y="68" font-size="12" fill="#333333">白</text>
+      <text x="0" y="84" font-size="11" fill="#666666" font-family="monospace">#FFFFFF</text>
+    </g>
+    <g transform="translate(592,132)">
+      <rect width="128" height="52" fill="#404040" stroke="#C8C8C8" stroke-width="1"/>
+      <text x="0" y="68" font-size="12" fill="#333333">深灰</text>
+      <text x="0" y="84" font-size="11" fill="#666666" font-family="monospace">#404040</text>
+    </g>
+  </g>
+  <text x="16" y="240" font-size="11" fill="#666666" font-family="PingFang SC,Hiragino Sans GB,Microsoft YaHei,Noto Sans CJK SC,sans-serif">面板以 0xAARRGGBB（不透明）写入 framebuffer；色块下方即该像素的十六进制值。</text>
+</svg>
