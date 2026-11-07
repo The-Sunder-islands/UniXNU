@@ -7995,6 +7995,42 @@ trust bundle: 5653a354b2ea82cae14a4700b6faf82edd75a1c00407e3b69bdf074734cb89b1
 方法被调用。若只有 ctor、没有 init → 崩溃在 `principalClass`/类检查；
 若两条都没有 → 崩溃在 dlopen/mmap（bindfs 加载可执行文件的问题）。
 
+### H185 结果：插件在进入代码前就崩了（2026-11-08）
+
+`h103log-h185.bin`：整份日志里 **`NILMETAL: ctor` / `NILMETAL: init` 都没有**
+（连 constructor 都没跑），但 backboardd 仍有 5 次 `sig=11`，`MetalPluginClassName`
+读到 1 次。说明崩溃发生在 dlopen/mmap/AMFI 阶段，既不是我们的方法，也不是“返回 nil”。
+
+对照 `build-adreno-metal-plugin.py` 找到差异：参考脚本签名时带
+`--pagesize 4096` 并断言 `Page size=4096`；`build-nil-metal-plugin.py` 当时只用了
+`codesign -s -`。签名页大小不匹配时，AMFI 会判定代码页无效并在入口前让进程崩，
+正好对应“没有 ctor、只有 SIGSEGV”。
+
+### H186：插件按 4 KiB 页签名（2026-11-08）
+
+`build-nil-metal-plugin.py` 改为：
+
+```sh
+codesign --force --sign - --pagesize 4096 --identifier org.blu-sharky.NilMetal NilMetal.bundle
+codesign --verify --strict NilMetal.bundle
+# 断言 codesign -d --verbose=4 输出 Page size=4096
+```
+
+新 CDHash `d25aceb59a2fd6420a0f49209f3ec0dde574b696`；trustcache 与 addon 随之重建。
+内核未变（标记仍是 H184）。
+
+```text
+H186 payload: 59edbb4e42f4cf0018ba1224d58a5ac079f098df61ddf42c9cf62c6b71925e35
+H186 boot:    c61ab9ef38bec63dda88b8558d2dbf651b4d210d51d04d2944c6f29dbf8b622a
+GPU addon:    a4358d9574507640b6671e727d8ae78386336bcb837d018e7e5c54d361857a60
+trust bundle: 701bebaa4d2cc324b88ba06e882c2db6af91d2ef3cecbefa5c2f72ba26dde023
+插件 CDHash:  d25aceb59a2fd6420a0f49209f3ec0dde574b696
+```
+
+判读：出现 `NILMETAL: ctor` → 页大小就是原因；只有 ctor 没有 init → 崩溃在
+principalClass/类检查；两条都没有 → 需要改用自建 daemon 从 APFS 路径 dlopen 同一
+bundle 做对照（排除 bindfs 只读联合挂载的 mmap 问题）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

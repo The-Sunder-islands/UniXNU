@@ -51,9 +51,16 @@ shutil.rmtree(BUNDLE / 'NilMetal.dSYM', ignore_errors=True)
     'MinimumOSVersion': '17.0',
 }, fmt=plistlib.FMT_BINARY))
 
-subprocess.run(['codesign', '-s', '-', '--force', '--timestamp=none', str(BUNDLE)], check=True)
+# The target validates code with 4 KiB pages (see build-adreno-metal-plugin.py): an ad-hoc signature
+# with the default page size leaves AMFI invalidating the first page, and backboardd crashes with
+# SIGSEGV before the bundle's constructor runs (H185).
+subprocess.run(['codesign', '--force', '--sign', '-', '--pagesize', '4096',
+                '--identifier', 'org.blu-sharky.NilMetal', str(BUNDLE)], check=True)
+subprocess.run(['codesign', '--verify', '--strict', str(BUNDLE)], check=True)
 details = subprocess.run(['codesign', '-d', '--verbose=4', str(BUNDLE)],
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True).stdout
+if not re.search(r'^Page size=4096$', details, re.M):
+    raise SystemExit('the signature must use 4 KiB pages:\n' + details)
 match = re.search(r'CDHash=([0-9a-f]{40})', details)
 if not match:
     raise SystemExit('no CDHash in codesign output:\n' + details)
