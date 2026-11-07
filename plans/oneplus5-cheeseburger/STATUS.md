@@ -5690,6 +5690,65 @@ H141 boot:    94faa47ef6bc9281ed93d66ca575fa02920011b9065fd33844f1f6b0c3ae593c
 镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H141.img`（已核对）、
 Mac `~/h103/boot-H141.img`、仓库 `out/cheeseburger/boot/boot-H141.img`。
 
+### H142：把显示改成 personality 驱动（2026-11-07，依据参考项目与 XNU）
+
+#### 根因（XNU 源码 + 参考项目一致）
+
+`iokit/Kernel/IOService.cpp`：
+
+```c
+IOService::getMatchingServices( matching )   // 用户态 IOServiceGetMatchingServices
+{ iter = copyExistingServices( matching, kIOServiceMatchedState ); }
+
+IOService::copyMatchingService( matching )   // 内核探针
+{ service = copyExistingServices( matching, kIOServiceMatchedState, kIONotifyOnce ); }
+```
+
+两者都只返回 **`kIOServiceMatchedState`** 的服务；该状态只有在服务被**驱动
+personality 匹配并启动**时才会置上（`registerService()` 末尾是
+`startMatching(options)`）。H103 起的 `NativeLegacyDisplay` 是
+`LegacyDisplayProbe` 里 `new`/手工 `attach`+`start`+`registerService` 出来的：
+**registered 但从未 matched**，所以内核探针和 backboardd 都看不见它。
+H141 的 `metaCast` 自检本来就通过（`init=1 … parent=1`），不是类层级问题。
+
+参考项目用的是正确姿势：
+
+- **ios-sweet**（`NOTES.md:396/408/428`、`xnu/patches/0046-sweet-iosurface-iomfb.patch`）：
+  逆向确认“框架不匹配 AppleCLCD 这个名字，任何已注册的 IOMobileFramebuffer
+  子类都行”；`CAWindowServer _detectDisplays` 只认
+  `IOMobileFramebufferCreateDisplayList()`；显示数量 = `/arm-io` 下
+  `device_type` 以 `display-subsystem` 开头的子节点数；显示以 KernelConfigTable
+  personality 发布（`IOClass=AppleCLCD; IOProviderClass=IOPlatformDevice;
+  IONameMatch='sweet,display'`），nub 由平台专家 `createNubs()` 生成。
+- **sagit-ios-port**：`QcomDisplay : IOMobileFramebufferLegacy` 同样是 personality
+  驱动，`start()` 里 `registerService()`。
+- XNU 自己的 `IODTPlatformExpert::createNubs()` 结尾就是 `nub->registerService()`。
+
+#### 改动
+
+1. `patches/xnu/zzzzzzzzzzzzzzzzzzzzzzzzz-h142-display-personality.patch`：新增
+   personality
+   `IOClass=NativeLegacyDisplay; IOProviderClass=IOPlatformDevice;
+   IONameMatch='NativeGOPFramebuffer'; IOProbeScore=1000`。
+2. `LegacyDisplayProbe`：不再手工创建/启动显示对象；保留 nub（GOP 内存段、
+   `IOFBDependentID/Index`、`/arm-io` 的 `device_type=display-subsystem` 节点），
+   改为 `nub->registerService()` 让 IOKit 匹配并实例化。
+3. `NativeLegacyDisplay::probe()` 重写：对有设备内存的 provider 直接返回 `this`，
+   避免继承来的 Apple 检查否决。
+4. 移除已不再使用的 `activeLegacyDisplay`。
+
+预期：`NATIVE_IOMFB_PROBE` 的 `IOMobileFramebuffer`/`NativeLegacyDisplay` 非 0；
+backboardd 匹配到并 `open` 显示服务，`NATIVE_FRAME … client=` 非 0。
+
+```text
+H142 kernel:  3e14159a73e26e5d2c393e3926cfe35b7d5589f422dab33b09e74af3acc14b5c
+H142 payload: 123cbd3d427d959318455e6c81d62e1c2362bd5c42bc7a9721c867f2dfc70596
+H142 boot:    a5baef9d07af809994f0514241aa295f78b9b130a09876b60821ae0e8668dade
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H142.img`（已核对）、
+Mac `~/h103/boot-H142.img`、仓库 `out/cheeseburger/boot/boot-H142.img`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
