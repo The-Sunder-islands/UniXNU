@@ -7675,11 +7675,68 @@ Mac `~/h103/boot-H181.img`、仓库 `out/cheeseburger/boot/boot-H181.img`。
 
 判读：
 
-- `NATIVE_GPU_ADDON*`（`sheng-gpu-addon` 的挂载状态）与
-  `NATIVE_UFS_ACCEL: MetalPluginName=NilMetal`；
+- `NATIVE_UFS_ACCEL: MetalPluginName=NilMetal`，以及 CA 之后是否读到插件
+  （`read key=MetalPluginName` / principal class）；
 - 若插件按预期返回 nil → CA 回退软件渲染，出现 `frames>0` / `selector=3/4/5`；
 - 若加载失败（AMFI/签名）→ 日志会出现对应拒绝；若仍无帧 → 软件渲染路径也不可用，
   转 Turnip 主线。
+- 注意：`zzy-native-gpu-addon-mount.patch` 只维护 `native_gpu_addon_*` 全局量，
+  **不打印任何日志**，所以日志里不会有 `NATIVE_GPU_ADDON*` 行；addon 是否落地只能
+  间接判断（插件是否被 CA 加载）。
+
+### H181 上机：停在 UEFI，loader 拒绝 payload（2026-11-08）
+
+`fastboot boot boot-H181.img` 返回 `Booting OKAY`，但进不了内核，停在 UEFI
+（edk2）界面。日志窗口未写出，属于 loader 阶段拒绝，不是内核崩溃。
+
+根因：ADT 的 `/chosen/memory-map` 里没有 `GpuAddon` 占位符，而 payload 里新增了
+`Payloads/kernel.macho.gpuaddon`。`DarwinBoot.c` 的校验是：
+
+```c
+ReadFile(<kernel>.gpuaddon, ...);
+if (Addon != NULL) {
+  if ((AddonOffset == MAX_UINTN) || ...) { Status = EFI_COMPROMISED_DATA; goto Fail; }
+}
+Fail: Print(L"DARWINBOOT: boot refused: %r; firmware retained\n", Status);
+```
+
+即“文件存在但 ADT 没有占位符”= `EFI_COMPROMISED_DATA`，直接回到 UEFI 菜单。
+H180 能启动是因为当时 payload 里还没有 addon 文件（`Addon == NULL` 走另一分支）。
+占位符由设备仓库 `make-cheeseburger-adt.py --gpu-addon` 生成（提交 `9ad41b0`），
+但投放用的 ADT 是在该选项之前生成的，从未重新生成过。
+
+已核对（不是猜测）：
+
+- 现有 ADT `kernel.macho.adt` 只有 `PackedRAMDisk`/`TrustCache` 占位符；
+- 用 `--dram-size 0x200000000 --owned-memory-size 0x100000000 --cpu-regs
+  0,1,2,3,0x100,0x101,0x102,0x103 --ipad-identity --packed-data-ramdisk
+  --trust-cache --gpu-addon --root-match-volume-uuid 04769D26-...` 重新生成后，
+  与旧 ADT 的结构化 diff **只有** `/chosen/memory-map` 新增 `GpuAddon`
+  （random-seed 保留旧值，其余字节一致）；
+- 新 trustcache 用 loader 的 `ValidTrustCaches` 规则逐条验证通过（3 模块，
+  模块内 hash 严格升序）；addon 头部 `NGPUADD2`/总长/条目也符合 loader 与内核的校验。
+
+顺带修正：之前 H96a 也出现过“停在 UEFI Shell”，原因是 `mcopy -o` 覆盖文件丢了
+VFAT 长名；这次用 `mdir -/` 检查过 `kernel.macho`、`kernel.macho.adt`、
+`kernel.macho.gpuaddon`、`kernel.macho.trustcache`、`unixnu.toml` 长名都在，
+不是同一个问题。
+
+### H181a：补上 GpuAddon 占位符（2026-11-08）
+
+payload/ADT 重新打包（kernel 未变）：
+
+```text
+H181a ADT:        ce338d45ab863b17b5528fe39c0d6bb153ee4ffaf76f1f509063fdef99185703
+H181a payload:    7398546624e659aeb06313de1d26e15430c4327692bf8f0b189f0c736ae52b6c
+H181a boot:       61d825160ec21384220c197fed17af19d951819a00634b46320a833b7ed2ad8a
+```
+
+设备仓库同时加了防回归检查：
+
+- `scripts/check-adt.py --require PackedRAMDisk --require TrustCache --require GpuAddon`
+  检查 `/chosen/memory-map` 占位符；
+- `README.md` 的 ADT 步骤改为实际使用的参数（含 `--gpu-addon`），并注明缺占位符
+  会让 DarwinBoot 报 `boot refused: Compromised Data`。
 
 ## 更新规则
 
