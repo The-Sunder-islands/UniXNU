@@ -8144,6 +8144,38 @@ H190 boot:    83dee6404131b18a02d9ada579735c1cfcf97fbe6dd4ef3ef622b21a3196bfb9
 插件 CDHash:  efe1dc125d4a5b471ca02628017f806effb1266b
 ```
 
+### H190 结果：崩溃消失，但仍无帧（2026-11-08）
+
+按本次启动（boot id `28a79573`，uptime 5–756 s）的**新鲜槽**统计：
+
+```text
+addon=3/3/0/0/0/1 owner=4/0 ext=4/2 dm=1/2 wp=1/2
+comm=backboardd exc=1 : 0
+status=0x2b00          : 0     （日志里的 0x2b00 全部来自 H189 的旧槽）
+MetalPluginClassName   : 1
+NATIVE_FRAME           : 1  → event=5 flags=fd7f600f client=1 xfer=0 frames=0
+NATIVE_DISPLAY_OPEN    : 13（backboardd match=1）
+NATIVE_LEGACY: client enter pid=55 comm=backboardd type=0
+selector=3/4/5         : 0
+frames>0               : 0
+```
+
+结论：
+
+1. **崩溃根因确认**：`[self release]` 会调用 `_MTLDevice` 的 `-dealloc`，而我们的实例
+   从未执行 `[super init]`；改为直接 `return nil`（不释放）后 backboardd 不再崩溃，
+   系统稳定跑到 1000 s 以上。
+2. 路线 B 到此为止：插件返回 nil 后 CA 保持存活、能拿到显示 provider 的用户客户端，
+   但 `frames=0`、没有 `selector=3/4/5`。**nil 设备并不会让 CA 回退到能出帧的软件
+   渲染路径**。
+3. 仍然有效的成果：GPU addon 安装、`/System/Library/Extensions` union mount、
+   4 KiB 页 ad-hoc 签名 + trust cache 注入、插件在 backboardd 内的加载与类调用，
+   这条链路已经全部打通，可直接用于真正的 Metal 驱动。
+
+后续方向：路线 C —— 用仓库里已有的 `NativeAdrenoMetalPlugin` + Turnip/Mesa 构建真实
+的 Metal 设备（`build-adreno-metal-plugin.py` 已有完整流程），通过同一条 addon/union
+通道投放。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
