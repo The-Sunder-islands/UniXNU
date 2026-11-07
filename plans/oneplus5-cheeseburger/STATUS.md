@@ -7353,6 +7353,52 @@ Mac `~/h103/boot-H175.img`、仓库 `out/cheeseburger/boot/boot-H175.img`。
   `open request type=1`；
 - `frames>0` / `selector=3/4/5` 或 backboardd 崩溃。
 
+### H175 结果：MetalPluginName 生效，CA 转而找 AGXAccelerator（2026-11-07）
+
+`H175-log-20261107-220639.txt`：
+
+```text
+50.608  NATIVE_UFS_ACCEL: service=0xfffffff3a82fa3e0 MetalPluginName=AGXMetalA10 source=arg set=1
+266.477  NATIVE_A540_ACCEL: read key=MetalPluginName
+266.505  NATIVE_A540_ACCEL: read key=MetalPluginClassName
+816.171  op=match comm=backboardd d=AGXAccelerator ok=0
+816.456  op=match comm=backboardd d=AGXAccelerator ok=0
+```
+
+1. UFS 心跳注入生效，`source=arg` 说明 boot-arg 解析成功（H173 的 panic 与参数无关）；
+2. CA 读到了非空的 `MetalPluginName`，并且 **Apple 的 AGX 插件被加载**（否则不会有
+   后面的 `AGXAccelerator` 查询）；
+3. 插件按类名找 `AGXAccelerator`，而桩类名是 `NativeA540AcceleratorProbe`，
+   `metaCast("AGXAccelerator")` 失败 → `ok=0`，Metal 拿不到设备，仍 `frames=0`，
+   也没有软件渲染回退。
+
+### H176：桩类改名为 AGXAccelerator（2026-11-07）
+
+`drivers/NativeMobileDisplay/NativeA540AcceleratorProbe.cpp`：
+
+1. 类 `NativeA540AcceleratorProbe` → **`AGXAccelerator`**（仍是 `IOAcceleratorES`
+   子类，宏/方法作用域/`new`/`gMetaClass` 全部同步）；
+2. 实例名改为 `AGXAccelerator`；
+3. `native_iogpu_accel_probe()` 的候选类列表去掉 `"AGXAccelerator"`，避免它把
+   我们这个类再分配/发布一次；
+4. `NATIVE_BUILD: H176`。
+
+```text
+H176 kernel:  89c2bfd722ed82b269b406579e75fe9775ef710ef576c47913f446bad034307e
+H176 payload: 56775c7f6a063bed1447b9f20e4b5ef5d0c296db26c98bacb574beeffa4c0c84
+H176 boot:    8551b71ad86f595f982c51e091f06ecdc83c26b18634be03da39da8163e13f77
+```
+
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H176.img`（已核对）、
+Mac `~/h103/boot-H176.img`、仓库 `out/cheeseburger/boot/boot-H176.img`。
+手机在 TWRP，`adb reboot bootloader` → `fastboot boot` 启动（未写分区）。
+
+判读：
+
+- `op=match … AGXAccelerator ok=1`；
+- `NATIVE_A540_ACCEL: open request type=1`（Apple 的 AGX 用户态打开桩）；
+- 之后若返回 nil → CA 可能回退软件渲染（`frames>0`）；若崩溃 → 改为自写 nil 插件。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
