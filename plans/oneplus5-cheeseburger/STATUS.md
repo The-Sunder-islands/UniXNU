@@ -6904,6 +6904,69 @@ Mac `~/h103/boot-H167.img`、仓库 `out/cheeseburger/boot/boot-H167.img`。
 判读：报告里每一行都应属于本次 boot（不再出现缺 `logSecs=` 的心跳行、也不会出现
 与 slot 戳 uptime 不一致的正文），`NATIVE_BUILD: H167 boot=…` 与 slot 戳一致。
 
+### H167 结果：日志终于干净，CADisplay 断言消失（2026-11-07）
+
+`h167-log-20261107-185716.txt`：
+
+```text
+header: slot_boot=18469fd43 slot_build=H167 slot_seq_max=15
+P11 PMGR: prelink fn=1 sect=76000 parse=1 kexts=38 load=0
+NATIVE_BUILD: H167 boot=18469fd43
+NATIVE_UFS_HB: slotMode=1 logSecs=60 hbTimer=0 loadIogpu=0      （仅一条）
+NATIVE_UFS_LOG: setup …                                        （仅一条）
+```
+
+1. 时间戳 335–628 s 连续，没有旧内核的行；`write_errors=1`；
+   存储 `NATIVE_UFS_LOCK` **1** 次、`err 60` **0** 次。
+2. **整个日志 `NATIVE_TRAP_STR` 计数为 0**：SpringBoard 426.5 s exec 后一直存活
+   （526 s 还在做 AppleKeyStore / IOPMrootDomain 查询），不再有
+   `"failed to find the main CADisplay"`。H164 的“未实现选择器返回成功并清零”
+   加上 `canvas=1080×1920`、`dotpitch=401`（`dims 1080x1920 canvas=1:1080,1:1920
+   dotpitch=1:401`）让 CA 接受了这个显示。
+3. 新的卡点：`op=match comm=backboardd d=IOAcceleratorES ok=0` 共 **257** 次，
+   `AGXAccelerator ok=0` 2 次，`NATIVE_FRAME` 只有 `event=1 client=0 frames=0`，
+   没有 `event=5`、没有 swap。
+4. 屏幕诊断面板与日志一致：右上 2×2 = 白（backboardd+SpringBoard 均已 exec 且未退出）
+   / 品红（最后客户端非 backboardd/FDR）/ 蓝（客户端 <10 次）/ 深灰（无 swap）
+   / 橙（backboardd 在查其他 IOKit 类，即 accelerator）。
+
+### H168：可被匹配的 IOAcceleratorES 桩（2026-11-07）
+
+`drivers/NativeMobileDisplay/NativeA540AcceleratorProbe.cpp`：
+
+1. 由 `IOService` 改为 **真正的 `IOAcceleratorES` 子类**（`OriginalAcceleratorABI.h`，
+   基类构造/析构/metaclass 用 `original-accelerator-bindings.o` 的
+   `private_extern` 绝对绑定）。`IOServiceMatching("IOAcceleratorES")` 按
+   IOProviderClass 的类层次匹配，属性 `IOClass` 是无效的（H103fs 的教训）。
+2. 实现 `newUserClient`（4 参数与 5 参数两个重载）+ 最小
+   `NativeAcceleratorClient : IOUserClient`，打开成功即返回（H103 的结论是桩缺
+   的正是这一项）。
+3. `LegacyDisplayProbe.cpp`：boot-arg `offline-accelerator=1` 时，
+   在 `preModLoad` 前先 `OSKextLoadKextWithIdentifier("com.apple.iokit.IOGPUFamily")`
+   （父类 metaclass 必须已存在），把它加入同一批静态构造注册，然后
+   `native_a540_accelerator_probe()` 把实例 attach 到 resource service 并发布。
+   失败只记录，不影响显示路径。
+
+```text
+H168 kernel:  55586fe826b967e1a5ad9e251400ec31943a11f40a5484dd6dad42b260d411b9
+H168 payload: 513818fd216970eeb250cb329ac530483dd70677fd79d03e6066c8b7a5368b7e
+H168 boot:    3893902a39295d1266e85125653138ab5664f8d61cabcf22139d30cc401e9b41
+```
+
+payload 的 args 末尾加了 `offline-accelerator=1`（其余不变）。
+镜像：Windows `D:\\Users\\ls\\Documents\\OnePlus5_ios\\boot-H168.img`（已核对）、
+Mac `~/h103/boot-H168.img`、仓库 `out/cheeseburger/boot/boot-H168.img`。
+
+判读：
+
+- `NATIVE_LEGACY: iogpu load status=0` / `postModLoad status=0` /
+  `NATIVE_A540_ACCEL: published IOAcceleratorES` 出现 → 类注册与发布成功；
+- backboardd 的 `op=match … IOAcceleratorES` 变为 `ok=1` → 匹配这关通过；
+- 随后看是否出现 `NATIVE_A540_ACCEL: user client … granted`，以及
+  `NATIVE_FRAME … frames>0` / `selector=3/4/5`；
+- 若 `iogpu load status≠0`，说明 pre-root 阶段仍不能加载 IOGPUFamily，需要把
+  accelerator 的注册挪到 post-root（后续版本）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
