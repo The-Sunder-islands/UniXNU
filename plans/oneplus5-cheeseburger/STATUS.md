@@ -8552,6 +8552,39 @@ H200 boot:    35b435d8cb3bf286ca4c6e401a1c5b59e3c8ec04d2f8dc7b029bc351ff2370c0
 （说明：同一次取到的 `msg`/旧槽里仍有 H199 的 347/358/368/380 s 打开记录，
 分析时必须按 boot id 取新鲜槽。）
 
+### H200 第二次启动结果：主连接、探测、Query 全部打通（2026-11-08）
+
+新鲜槽（boot `2abcf390`，uptime 到 1047 s）：
+
+```text
+262.100  open request type=0x41470003       （主连接 0x4147 成功）
+262.100  open request type=0x41471100       （probe 完成，admitted=256）
+262.100  NATIVE_A540_ABI: method=4294967295 selector=0..23 in=8 comm=backboardd
+262.100  open request type=0x41473001       （Query 成功，step=1）
+NATIVE_A540_ABI: report : 0
+backboardd traps : 0
+```
+
+也就是说：
+
+- `IOServiceOpen(0x4147)` 成功（沙箱授权生效）；
+- 用户态 selector 探测通过（256 个 selector 全部被承认）；
+- 隧道头 `'NTNL'` 被识别，**Query 返回成功**（step=1）。
+
+但之后没有 step=2 的标记、也没有 `SetMetadata` 的 report 行。ABI 入口日志的前 24 条
+被探测本身消耗，后续真实方法没有日志可看。
+
+### H201：只记录真实 ABI 方法（2026-11-08）
+
+入口日志改为：探测只记一行（`probe selector=…`），非探测方法最多记 32 条。用于确认
+`GetDeviceInfo`/`BoAlloc`/`SetMetadata` 是否被调用、返回值如何。
+
+```text
+H201 kernel:  c2753c728154a7c8973b3fd8dde184fa6cc407c2e1eaa96a7df7758dc1d7327a
+H201 payload: 5124c133c2445089813000ce2b0ec9cbc62c0cf7cca594e85aa8049dffe0da08
+H201 boot:    ebafa20f49333c227b8e9474ee88aa0b1c650ef18ca397f26220ad0aeb09624b
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
