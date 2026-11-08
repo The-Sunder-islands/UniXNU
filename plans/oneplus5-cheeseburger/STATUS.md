@@ -9812,6 +9812,34 @@ GPU 的 `vdd`（第二路供电）就是 `pm8005_s1`；路线 C 计划 §4.2 也
 
 这一步不依赖 SMEM/RPM，是当前唯一可推进的 GX 供电路径。
 
+### H235：SPMI arbiter 可访问（C1e-1，2026-11-08）
+
+只读探测 `qcom,spmi@800f000`（core）与 `0x800a000`（cnfg）各 4 个字：
+
+```text
+gc=70 (core+0x0) = 30000000
+gc=77 (cnfg+0xc) = 0000ffff
+```
+
+- 读到的是**非零、非 0xffffffff** 的值 → SPMI PMIC arbiter 在本启动路径下**可访问**，
+  不需要额外的 GCC 时钟使能就能读；
+- 其余 6 个字被日志窗口吞掉（beat 丢失），但"控制器存在且可读"这一点已经确定；
+- 后续写入需要 **APID 通道 + CMD/DATA**（`chnls` = 0x8400000，SID=5 的通道页），
+  并遵守 EE/channel 仲裁与 TID 完成握手（参考主线 `drivers/spmi/spmi-pmic-arb.c`）。
+
+C1e-2 的计划：
+
+1. 由 SID=5、PMIC 地址 0x1400（pm8005_s1）算 APID；
+2. 通过通道页写 CMD/DATA，读回校验（先写一个已使能位或已知的 CTRL 寄存器验证通路）；
+3. 设定 S1 电压（515 mV 起步）→ 重试 GX GDSC（`0x1094` bit31 应置位）；
+4. 成功后回到 GPUCC：Fabia PLL → 257 MHz → gfx3d 根/分支 → 读 RBBM → 进 C2。
+
+```text
+H235 kernel:  a6f3f5127141dad084e674586f06f0684f143957b6e4254154dafa6ce02d1780
+H235 payload: c0afd4fd20192f159e0db44602376c68450a6f60d9f2d67b2a9f85a02bc48f1e
+H235 boot:    19f1160d9f0bb48f19681d0a3e9176c0892f2f1267ab8fcf5a8382e0ca027da3
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
