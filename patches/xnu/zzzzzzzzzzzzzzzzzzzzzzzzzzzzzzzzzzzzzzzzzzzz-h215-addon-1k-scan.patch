@@ -1,0 +1,23 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7756,12 +7756,13 @@
+ 			printf("NATIVE_GPU_ADDON: late m%llu %08x\n", (unsigned long long)(c >> 20),
+ 			    native_gpu_addon_fnv(native_gpu_addon_bad_source + c, length));
+ 		}
+-		for (uint64_t c = 0x7b0000; c < 0x7c0000 && c < native_gpu_addon_bad_bytes; c += 0x1000) {
+-			printf("NATIVE_GPU_ADDON: late b%llu", (unsigned long long)(c - 0x7b0000));
+-			for (uint64_t k = 0; k < 32 && c + k < native_gpu_addon_bad_bytes; ++k) {
+-				printf(" %02x", native_gpu_addon_bad_source[c + k]);
+-			}
+-			printf("\n");
++		/* H215: 1 KiB pieces over the 64 KiB piece the earlier boots damaged. The 32-byte
++		 * samples at every 4 KiB boundary matched the file, so the write is smaller than a
++		 * page and starts inside one; 64 hashes pin it down without overflowing the log. */
++		for (uint64_t c = 0x7b0000; c < 0x7c0000 && c < native_gpu_addon_bad_bytes; c += 0x400) {
++			uint64_t length = native_gpu_addon_bad_bytes - c < 0x400 ? native_gpu_addon_bad_bytes - c : 0x400;
++			printf("NATIVE_GPU_ADDON: late k%llu %08x\n", (unsigned long long)c,
++			    native_gpu_addon_fnv(native_gpu_addon_bad_source + c, length));
+ 		}
+ 	}
+ }
