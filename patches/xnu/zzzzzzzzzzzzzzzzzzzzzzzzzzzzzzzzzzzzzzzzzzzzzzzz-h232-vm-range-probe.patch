@@ -1,0 +1,30 @@
+diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -339,6 +339,8 @@
+ SECURITY_READ_ONLY_LATE(vm_offset_t)     static_memory_end;
+ SECURITY_READ_ONLY_LATE(pmap_paddr_t)    avail_start;
+ SECURITY_READ_ONLY_LATE(pmap_paddr_t)    avail_end;
++/* C1d-3: physical memory range handed to the VM, for the heartbeat probe. */
++uint64_t native_vm_range[4];
+ SECURITY_READ_ONLY_LATE(pmap_paddr_t)    real_avail_end;
+ SECURITY_READ_ONLY_LATE(unsigned long)   real_phys_size;
+ SECURITY_READ_ONLY_LATE(vm_map_address_t) physmap_base = (vm_map_address_t)0;
+@@ -2376,6 +2378,17 @@
+ 	pmap_static_allocations_done();
+ #endif
+ 	first_avail = avail_start;
++	/* C1d-3 probe: the VM owns one contiguous [avail_start, avail_end) range, so a carveout such
++	 * as Qualcomm SMEM (0x86000000, 2 MiB) is ordinary free RAM unless it is excluded here.
++	 * These four numbers are exported for the heartbeat (the boot log is not captured that early). */
++	native_vm_range[0] = gPhysBase;
++	native_vm_range[1] = mem_size;
++	native_vm_range[2] = avail_start;
++	native_vm_range[3] = avail_end;
++	printf("NATIVE_VM_RANGE: gPhysBase=%lx mem_size=%lx avail_start=%lx avail_end=%lx smem_inside=%d\n",
++	    (unsigned long)gPhysBase, (unsigned long)mem_size, (unsigned long)avail_start,
++	    (unsigned long)avail_end,
++	    (avail_start <= 0x86000000UL && avail_end >= 0x86200000UL) ? 1 : 0);
+ 	patch_low_glo_static_region(args->topOfKernelData, avail_start - args->topOfKernelData);
+ 	enable_preemption();
+ }
