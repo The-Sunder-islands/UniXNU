@@ -54,6 +54,11 @@ extern volatile int native_a540_abi_calls;
 extern volatile int native_a540_abi_last_method;
 extern volatile int native_a540_abi_reports;
 extern char native_a540_abi_report[64];
+// H210: addon source CRC failures and the addon block's physical address. The
+// per-entry crc printf can fall inside the log writer's snapshot window and be
+// lost, so the heartbeat carries the verdict as well.
+extern volatile uint32_t native_gpu_addon_crc_bad;
+extern uint64_t native_ram_block_gpu_addon_physical;
 }
 
 static volatile uint64_t gUfsCommands;
@@ -84,7 +89,7 @@ static uint32_t gH103SlotCursor;
 // boot wrote it.  The header alone is not enough: it is written after the
 // slot, and a late header write failure leaves a stale slots_written behind,
 // which made earlier logs mix slots from several boots.
-#define H103_BUILD "H209"
+#define H103_BUILD "H210"
 static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
@@ -378,7 +383,7 @@ heartbeatThread (void *, wait_result_t)
     IOLog ("NATIVE_UFS_ALIVE: winFlight=%llu ufsFlight=%llu cmds=%llu "
            "winReq=%llu winBytes=%llu lastCmd=%llx/%llu req=%llx/%llu "
            "addon=%d/%d/%d/%d/%d/%d owner=%d/%d ext=%d/%d dm=%d/%d wp=%d/%d "
-           "abi=%d/%d/%d rep=%.31s\n",
+           "abi=%d/%d/%d rep=%.31s gpup=%llx crcbad=%u\n",
            (unsigned long long) gWindowInFlight,
            (unsigned long long) gUfsInFlight,
            (unsigned long long) gUfsCommands,
@@ -405,7 +410,9 @@ heartbeatThread (void *, wait_result_t)
            (int) native_a540_abi_calls,
            (int) native_a540_abi_last_method,
            (int) native_a540_abi_reports,
-           native_a540_abi_report);
+           native_a540_abi_report,
+           (unsigned long long) native_ram_block_gpu_addon_physical,
+           (unsigned) native_gpu_addon_crc_bad);
     }
     // H128: the process dumps and the persistent-log flush run here, in thread
     // context with no storage lock held.  They used to run from the UFS

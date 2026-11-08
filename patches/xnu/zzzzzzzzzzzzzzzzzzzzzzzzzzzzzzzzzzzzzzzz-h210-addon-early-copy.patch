@@ -1,0 +1,47 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7432,6 +7432,12 @@
+ volatile int native_gpu_addon_same = 0;
+ volatile int native_gpu_addon_failed = 0;
+ volatile int native_gpu_addon_error = 0;
++/* H210: the per-entry crc printf can fall inside the log writer's snapshot window (H206-H209
++ * never reached the log), so the verdict also goes to the heartbeat and is reprinted after
++ * the install, when the writer is done. */
++volatile uint32_t native_gpu_addon_crc_bad = 0;
++static const uint8_t *native_gpu_addon_bad_source;
++static uint64_t native_gpu_addon_bad_bytes;
+ /* One write of at most 1 MiB at an absolute offset. */
+ static int
+ native_gpu_addon_pwrite(vnode_t vp, const uint8_t *data, uint64_t length, uint64_t offset, vfs_context_t ctx)
+@@ -7478,6 +7484,9 @@
+ 	if ((uint32_t)crc != want_crc) {
+ 		printf("NATIVE_GPU_ADDON: crc %s got=%08x want=%08x packed=%llu\n", path, (uint32_t)crc, want_crc,
+ 		    (unsigned long long)packed_size);
++		native_gpu_addon_crc_bad++;
++		native_gpu_addon_bad_source = packed;
++		native_gpu_addon_bad_bytes = packed_size;
+ 		return EILSEQ;
+ 	}
+ 	vnode_t vp = NULLVP;
+@@ -7698,6 +7707,20 @@
+ 			kfree_data(probe, largest);
+ 		}
+ 	}
++	/* H210: reprinted here, after the log writer finished its snapshot, so the values survive. */
++	printf("NATIVE_GPU_ADDON: late blob=%p paddr=%llu bytes=%llu crc_bad=%u largest=%llu\n", addon,
++	    (unsigned long long)native_ram_block_gpu_addon_physical, (unsigned long long)bytes,
++	    (unsigned) native_gpu_addon_crc_bad, (unsigned long long)largest);
++	if (native_gpu_addon_crc_bad && native_gpu_addon_bad_source) {
++		printf("NATIVE_GPU_ADDON: late crc_bad source=%p bytes=%llu off=%llu\n",
++		    native_gpu_addon_bad_source, (unsigned long long)native_gpu_addon_bad_bytes,
++		    (unsigned long long)(native_gpu_addon_bad_source - addon));
++		for (uint64_t c = 0; c < native_gpu_addon_bad_bytes; c += 1 << 20) {
++			uint64_t length = native_gpu_addon_bad_bytes - c < (1 << 20) ? native_gpu_addon_bad_bytes - c : (1 << 20);
++			printf("NATIVE_GPU_ADDON: late c%llu %08x\n", (unsigned long long)(c >> 20),
++			    native_gpu_addon_fnv(native_gpu_addon_bad_source + c, length));
++		}
++	}
+ }
+ static void
+ native_gpu_addon_prepare(proc_t p, user_addr_t scratch)

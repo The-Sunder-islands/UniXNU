@@ -8905,6 +8905,52 @@ H209 boot:    e80d60f952668c009a54220873ee8e50725facf239075a757c489d62f755eea2
 判读：这是**决定性一次**——`crc got == want` 说明交接块数据完好（问题在内核 zlib
 使用环境），`got != want` 说明数据在被读取前已被改写（下一步按 `paddr` 处理）。
 
+### H209 结果：CRC 不匹配，交接块数据在安装前已被改写（2026-11-08）
+
+```text
+addon=8/7/0/1/92/1        ← 92 = EILSEQ
+plugin=NativeAdreno info=0 files=8 written=7 same=0 failed=1 error=92
+```
+
+- `error=92` 是 `EILSEQ`，由 H208 新增的 CRC 校验返回：插件条目的**存储字节与
+  打包文件不一致**；
+- Turnip 条目（紧跟其后、off≈9.04 MB）CRC **通过**，小文件全部通过；
+- 主机核对 `adreno-h209.gpuaddon` 的 8 条 CRC 全部正确 → 问题不在打包；
+- 结论：**内核读到的 addon 块前 ~9 MB 在安装前已被改写**，与 H205–H207 的
+  `Z_DATA_ERROR`（多解出 32 字节）完全吻合。
+
+日志行丢失的原因也定位了：安装发生在日志写入器做快照（`deferred snapshot to
+window read`）后的 ~150 ms 内，这段时间内 `printf` 的行不会进入日志环
+（H206/H207 的 `src` 行、H209 的 `crc`/`blob` 行都是这样丢的）。
+
+### H210：addon 早期副本 + 实时 CPU 频率格（2026-11-08）
+
+投送修复：
+
+- `NativeRamBlock::start()` 一开始就调用 `native_ram_block_gpu_addon_snapshot()`：
+  用 `IOMalloc` 复制整个 addon 块并缓存，之后 `native_ram_block_gpu_addon`
+  返回这份副本；内核安装时不再读可能已被改写的 loader 交接块；
+- 打印 `NativeRamBlock: gpu addon snapshot bytes=.. paddr=..`；
+- 心跳新增 `gpup=<物理地址> crcbad=<次数>`（`NATIVE_UFS_ALIVE` 行长不受快照影响）；
+- 安装结束后补打 `NATIVE_GPU_ADDON: late blob=.. paddr=.. crc_bad=..`，若 CRC
+  失败再补打该条目的每 1 MiB 校验和（快照窗口之后，行不会再丢）。
+
+显示：
+
+- `sheng_cpufreq_probe()` 只映射一次 OSM 窗口，新增 `sheng_cpufreq_tick()`；
+- 1 Hz 心跳在重绘心跳格前先 `sheng_cpufreq_tick()`，并按最新状态重绘**左上 CPU 格**
+  ——CPU 频率指示从"开机一次性采样"变为**实时**（红 <1 GHz/未使能，绿 ≥1 GHz）。
+
+```text
+H210 kernel:  f9351c7f40e5d4c52644a7ca03a6848cd8bf7eb82f3f73450612052e3c0ad830
+H210 payload: 466a9df1833e174b2ad8a25cbf8e0270951ea8ed8151dfaabbe29bc3b951002d
+H210 boot:    0f1cef6a5e28bed003b1bb8def1d9ea4c2eb68de2b62c796723911aaa1b78f6e
+              81,147,904 B
+```
+
+判读：`crcbad=0` 且 `addon=8/8/0/0` → 早期副本完好，C0 完成；若 `crcbad>0`，
+说明副本也已被改写，`late c*` 行会指出被改写的位置。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
