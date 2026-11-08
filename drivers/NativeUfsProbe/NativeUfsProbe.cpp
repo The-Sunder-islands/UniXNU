@@ -94,7 +94,7 @@ static uint32_t gH103SlotCursor;
 // boot wrote it.  The header alone is not enough: it is written after the
 // slot, and a late header write failure leaves a stale slots_written behind,
 // which made earlier logs mix slots from several boots.
-#define H103_BUILD "H222"
+#define H103_BUILD "H227"
 static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
@@ -185,6 +185,11 @@ extern "C" void native_proc_wait_graph(void);
 // The heartbeat and the dump wakeup now come from a timer_call, which runs
 // from the timer interrupt and needs no thread timer at all.
 extern "C" void native_legacy_heartbeat_cell(void);
+// H223: the GPUCC survey runs at the late probe (~35 s), before the persistent log ring starts
+// capturing (~40 s); repeat it once from the heartbeat so the values reach the pulled log.
+extern "C" int sheng_gpucc_next(unsigned *index, uint32_t *value);
+// C1b: one GPU power-up step per beat, gated by sheng-gpu-power=1 inside the callee.
+extern "C" int sheng_gpu_power_step(void);
 // H115: display-side event counters and the first-frame content scan. The
 // client frame is scanned (nonblack count and bounding box) while the CPU copy
 // runs, so a black screen can be attributed to a black client frame.
@@ -386,11 +391,20 @@ heartbeatThread (void *, wait_result_t)
     beat++;
     // H220: the long ALIVE line can be truncated inside a log slot, and its abi=/accel= fields
     // are the ones that matter here. This short line carries them alone, once per beat.
-    IOLog ("NATIVE_ACCEL_HB: accel=%u/%u/%u/%u abi=%d/%d/%d rep=%.31s\n",
+    // H225: two GPUCC registers per beat, inside the line that always survives the log window
+    // (order: gpupll0 L/config/config_ctl/user_ctl/user_ctl_u/state/status, gx_clamp_io,
+    // cx_bcr/cx_gdscr/cx_gds_hw_ctrl, cxo_branch, rbcpr_rcg/bcr/branch,
+    // gfx3d_rcg, gx_bcr/gx_gdscr/gfx3d_branch, rbbmtimer_rcg/branch, isense_rcg/bcr/branch).
+    sheng_gpu_power_step ();
+    unsigned gpucc_index = 0;
+    uint32_t gpucc_value = 0;
+    int gpucc_got = sheng_gpucc_next (&gpucc_index, &gpucc_value);
+    IOLog ("NATIVE_ACCEL_HB: accel=%u/%u/%u/%u abi=%d/%d/%d rep=%.31s gc=%d:%08x\n",
            (unsigned) native_a540_open_count, (unsigned) native_a540_open_type,
            (unsigned) native_a540_sel_count, (unsigned) native_a540_sel_last,
            (int) native_a540_abi_calls, (int) native_a540_abi_last_method,
-           (int) native_a540_abi_reports, native_a540_abi_report);
+           (int) native_a540_abi_reports, native_a540_abi_report,
+           gpucc_got ? (int) gpucc_index : -1, gpucc_value);
     if (beat == 1 || (beat % 10) == 0) {
     IOLog ("NATIVE_UFS_ALIVE: winFlight=%llu ufsFlight=%llu cmds=%llu "
            "winReq=%llu winBytes=%llu lastCmd=%llx/%llu req=%llx/%llu "
