@@ -8419,6 +8419,39 @@ H196 payload: 55e4b26546a9cc38072647975056bedd34ef6f8d3307c2f35542de7fbd574c9d
 H196 boot:    12d4de02c7c514a6007a3098482bfd66726b50d3d5dfe9ede32e05dc9e465eff
 ```
 
+### H196 结果：open 到了内核，但 MACF 仍拒绝 backboardd（2026-11-08）
+
+新入口日志（boot？H196，日志窗口）：
+
+```text
+268.126  NATIVE_A540_ACCEL: open request type=1095229440 comm=backboardd
+268.250  IOUC AGXDeviceUserClient failed MACF in process pid 55, backboardd
+340.502  open request type=16711 comm=backboardd          （主连接，0x4147）
+340.502  IOUC AGXDeviceUserClient failed MACF … backboardd
+NATIVE_A540_ABI: method= : 0
+```
+
+- backboardd 的 open **确实到达内核并创建了客户端**；
+- 但 MACF `iokit-open-user-client` 仍然拒绝（14 次），用户态 open 返回失败，
+  `externalMethod` 一次都没被调用。
+
+名字本身不是充分条件；仓库里已有 `patches/xnu/zzw-native-adreno-sandbox-grant.patch`：
+服务带 `NativeSandboxGrantProcess` 属性且进程名匹配时绕过该 MACF 判定。
+
+### H197：accelerator 服务授予 backboardd 用户客户端（2026-11-08）
+
+stub 的 `start()` 增加 `setProperty("NativeSandboxGrantProcess", "backboardd")`
+（与上游 render server 授权一致）。
+
+```text
+H197 kernel:  7085d8b6b89bac3c33418428bd625e8ca5fe492e60c7dca0c03e3dbd1bb197fe
+H197 payload: b5bb0e193c78a4a9d806805f925837de1c67dc8a2580ef0f9488f2c61748ca95
+H197 boot:    6a190864c2f795f38c61fb7179f97dacd4b5f0d45db3f762e004db7e7527d64c
+```
+
+判读：`failed MACF … backboardd` 应消失，`NATIVE_A540_ABI: method=…` 应出现，
+随后是 `NATIVE_A540_ABI: report …`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
