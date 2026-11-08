@@ -9212,6 +9212,48 @@ H217 boot:    a22deeef19b7ce7a1a0e315cb7ea2e3f4041553de6dc172c285fb8129e0602ba
               81,147,904 B
 ```
 
+### H217 判读：插件测试确实在 backboardd 里跑起来了，但卡在 H202 的服务重查（2026-11-08）
+
+C0 投送成功后第一次真正跑到了插件路径。H217 日志里的两次/三次打开是**我们自己测试的
+进度标记**，不是插件的真实 ABI：
+
+```text
+open request type=0x41470001 (mark 1)   → granted
+open request type=0x41470001 (mark 1)   → granted   （第二次实例）
+open request type=0x41470002 (mark 2)   → granted
+NATIVE_IOKIT: op=match comm=backboardd d=IOAcceleratorES ok=1   ← 到此为止
+```
+
+- `adrenoUserTest()` 只在插件里被调用（`NativeAdrenoMetalPlugin.mm` 的
+  `-initWithAcceleratorPort:` 内联执行），所以**插件确实被加载并在 backboardd 里运行**；
+- `mark(1)`、`mark(2)` 都到了，说明 dlsym 全部成功；
+- 之后再也没有 `open request type=16711`（真实 ABI 的 `0x4147` 打开），也没有失败标记
+  `0x4f01` → 卡在 `mark(2)` 与真实 open 之间，也就是 H202 新增的
+  `IOServiceGetMatchingService(IOAcceleratorES)` 预查。
+
+死锁原因：匹配过程会持有 IOKit 注册表锁并调用 `AGXAccelerator::copyProperty`
+（H169 为观察渲染器而加的日志），而该 override 在锁内直接 `IOLog` → 与日志锁
+形成死锁。H200 当时没有这段预查，所以能走到 Query。
+
+### H218：去掉锁内日志 + 记录真实 ABI selector（2026-11-08）
+
+- `notePropertyRead()` 不再 `IOLog`，只保留计数（避免注册表锁内的日志死锁）；
+- `AGXDeviceUserClient::externalMethod` 顶部新增 selector 记录：每个**不同**的
+  selector 打一行
+  `NATIVE_A540_ABI: sel=<n> in=<scalar>/<struct> out=<scalar>/<struct> comm=<进程>`，
+  并附前 4 个 scalar 与前 2 个结构体字；最多 32 个不同 selector；
+- 插件二进制未改，因此不需要重建信任缓存/插件。
+
+```text
+H218 kernel:  a9708e384cf6001854ae3c10c12f25a3d443ed21c4e8cb4ff1c5d321c8a21e67
+H218 payload: ab758206d24d14d3a508e8e96bd1fc012ad9862c213bacb92fac7f45e843e48a
+H218 boot:    e78cacaa6286976fc1210b6f5577d0a6a01f374bc807be839b94532d48b69835
+              81,147,904 B
+```
+
+判读：若死锁解除，应看到 `open request type=16711` → `user client type=16711 granted`
+→ 随后 `NATIVE_A540_ABI: sel=…` 行（插件真正调用的 selector 及其参数形状）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
