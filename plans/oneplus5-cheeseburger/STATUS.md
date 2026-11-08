@@ -10061,6 +10061,44 @@ gc=17 a0282000    GX GDSCR PWR_ON
 → gfx3d 根 257 MHz → 分支使能 → RBBM 可读。RBBM 身份为 `0x00010042 /
 0xb5f00000`。下一步 C3：从 RBBM/GMU 读 GPU ID，启动 GMU/CP。
 
+### H236h：C3 第一步，只读 A5xx CP/GPMU survey（2026-11-09）
+
+新增 `sheng-gpu-power=5`：先跑完 C2（S1→GX→PLL→根/分支），再只读 A5xx 的
+CP/GPMU/RBBM 寄存器。寄存器偏移按 `a5xx_reg.h` 的 **dword 索引 ×4**：
+
+```text
+0x2000 cp_rb_base        0x2008 cp_rb_cntl      0x2018 cp_rb_rptr
+0x201c cp_rb_wptr        0x20c8 cp_me_cntl      0x20d4 cp_pfp_instr_base
+0x1384 rbbm_int0_status  0x13d4 rbbm_status      0x14c0 rbbm_status3
+0x2a360 gpmu_cm3_sysreset 0x2a380 gpmu_general0  0x2a384 gpmu_general1
+0x22000 gpmu_inst_ram0
+```
+
+结果接在 C2 的 `gc=113` 之后：`gc=114..126`，每个心跳一个寄存器。没有写任何
+CP/GPMU 寄存器；如果某块未授时钟，读会挂住，最后一个 `gc` 就是停点。
+
+产物（未上机；手机已断开）：
+
+```text
+H236h kernel  f9f4e043c0ee32a0a82e3de099e55920b4c14f5bbf49ef6d1511df38845edd02
+H236h payload fd190a4269fd89e4d99d57a85f3df1a91960babdf7824010aadc0532c334220d
+H236h boot    bf2faa24f2ac892dbb2213549a907535d2c2ada81b5e950b4e1e8bb7afb3f298
+```
+
+镜像已放到 Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H236h.img` 和
+Mac `~/h103/boot-H236h.img`，明天直接 `fastboot boot`。
+
+C3 后续（已查厂商 kgsl）：
+
+- A540 的 chip ID 来自 DT `qcom,chipid = <0x05040000>`；固件为
+  `a540_gpmu.fw2`（GPMU 3.0）、`a530_pm4.fw`、`a530_pfp.fw`、`a540_zap`；
+- GPMU 固件不是 CPU 直接写入，而是由 **CP** 用 type4 包写进
+  `A5XX_GPMU_INST_RAM_BASE`；所以顺序必须是 RBBM/CP 复位 → PM4/PFP 微码 →
+  ringbuffer → GPMU 固件 → `GPMU_CM3_SYSRESET=0`，等
+  `GPMU_GENERAL_0 == 0xBABEFACE`；
+- 这比 C1/C2 大一个量级，下一步先看 H236h 的 13 个读数确认 CP/GPMU 窗口可访问，
+  再写 RBBM/CP 复位。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
