@@ -9840,6 +9840,81 @@ H235 payload: c0afd4fd20192f159e0db44602376c68450a6f60d9f2d67b2a9f85a02bc48f1e
 H235 boot:    19f1160d9f0bb48f19681d0a3e9176c0892f2f1267ab8fcf5a8382e0ca027da3
 ```
 
+### H236：C1e-2 的 SPMI 传输与 PM8005 S1 实现（2026-11-08）
+
+H235 读到 `core+0x0 = 0x30000000`，按厂商 `spmi-pmic-arb.c` 的版本判定这是 **v3**
+（`>= PMIC_ARB_VERSION_V3_MIN`）。v3 的 PPID 映射、通道偏移和 CMD 格式与 v2 共用同一套
+实现，因此下面按 v2 数据通路实现：
+
+```text
+PPID       = (sid << 8) | (addr >> 8)        sid=5, addr=0x1400 -> 0x514
+通道页     = 0x8000 * apid                   (EE 0；EE n 再加 0x1000*n)
+CMD        = (opcode << 27) | ((addr & 0xff) << 4) | (byte_count - 1)
+             opcode 14 = 写，15 = 读
+读         = obsrvr + 页 + {CMD 0x00, STATUS 0x08, RDATA0 0x18}
+写         = chnls  + 页 + {WDATA0 0x10, CMD 0x00, STATUS 0x08}
+STATUS     = bit0 DONE；bit1 FAILURE，bit2 DENIED，bit3 DROPPED
+APID 映射  = core + 0x800 + 4*apid，PPID 位于 [19:8]（掩码 0xfff）
+写拥有者   = cnfg + 0x700 + 4*apid，[2:0] 必须等于 EE 0
+```
+
+PM8005 S1（SID 5，外设基址 0x1400，`qcom,qpnp-regulator` 的公共寄存器布局）：
+
+```text
+0x1401 REV      0x1404 TYPE      0x1405 SUBTYPE
+0x1440 RANGE    0x1441 VSET      0x1445 MODE (bit7=HPM)
+0x1446 ENABLE (bit7=1)           0x1461 STEP_CTRL
+电压 = 375000 + 12500 * VSET      (RANGE 0；RANGE 1 为 1550000 + 25000*VSET)
+```
+
+板级下限 `regulator-min-microvolt = <524000>`，12.5 mV 网格上第一个可选点是 **525000 µV
+（RANGE 0 / VSET 12）**。`PM8005 S1 + S4 = 2 phase VDD_GFX`，本轮只驱动 S1 这一相。
+
+新增的 `sheng-gpu-power` 取值（原有 `=1` 的 C1b/C1c 序列保持逐字节不变）：
+
+| 值 | 行为 |
+| --- | --- |
+| 2 | 只读：APID/owner + S1 的 8 个身份/电压寄存器 |
+| 3 | 在 2 的基础上，把 ENABLE 原值写回一次（验证 CMD/DATA 通路） |
+| 4 | 在 3 的基础上，写 RANGE/VSET=525 mV → MODE HPM → ENABLE → GX GDSC → gfx3d 根/分支 → RBBM |
+
+安全闸门：只有 8 个 S1 寄存器全部读成功、APID 的 owner 为 EE 0、TYPE/SUBTYPE 为
+SMPS（0x03/0x08 或 0x09）、且 GX GDSC 仍处于 collapse 时，才会写 PMIC。任一条件不满足
+都会在 `gc` 里留下 `0xdea000xx` 标记并停止。
+
+结果从心跳行的 `gc=<index>:<value>` 输出，索引 **80..111**，按产生顺序优先于 GPUCC
+的 24 个读数，因此即使日志窗口只保留心跳也能看到本次结果。索引分配：
+
+```text
+80 版本        81 PPID        82 APID        83 owner
+84 clamp       85 cx_gdscr
+86 rev         87 type        88 subtype     89 range
+90 vset        91 mode        92 enable      93 step
+94 当前电压µV    95 写通路状态    96 写回 enable
+97 电压写/保持    98 range|vset<<8 99 mode写状态
+100 enable写状态 101 enable回读  102 vset回读   103 mode回读
+104 GX GDSCR    105 rcg 0x1070  106 cfg 0x1074 107 branch 0x1098
+108 GX BCR      109 RBBM 0x0000 110 RBBM 0x0004 111 RBBM 0x0210
+```
+
+判读：`gc=80:30000000`、`gc=81:00000514`、`gc=83:00000000` 是通路成立的前提；
+`gc=87:00000003`、`gc=88:00000008` 确认 PM8005 SMPS；`gc=104` 的 bit31 为 1 才表示
+GX 真正上电。
+
+本会话在 Linux 上完成源码与离线语法检查（clang++/g++ `-fsyntax-only` 均无告警）。
+**内核镜像未在本机构建**：kernel/prelink 步骤需要 macOS + Xcode，构建与实测哈希待回填。
+
+构建沿用设备仓库 README 的 kernel → payload → `scripts/make-bootimg.py` 流程（本机为
+Linux，未执行）。启动参数分别用：
+
+```text
+第一轮  sheng-gpu-power=2    只读 survey
+第二轮  sheng-gpu-power=3    写通路验证
+第三轮  sheng-gpu-power=4    525 mV + S1 使能 + GX 重试
+```
+
+每轮只改 payload 的 `unixnu.toml`（`kernel_args`）并重新打包 payload，不需要重新构建内核。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

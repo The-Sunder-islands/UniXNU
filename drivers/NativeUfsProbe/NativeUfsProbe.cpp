@@ -94,7 +94,7 @@ static uint32_t gH103SlotCursor;
 // boot wrote it.  The header alone is not enough: it is written after the
 // slot, and a late header write failure leaves a stale slots_written behind,
 // which made earlier logs mix slots from several boots.
-#define H103_BUILD "H234"
+#define H103_BUILD "H236"
 static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
@@ -395,6 +395,8 @@ heartbeatThread (void *, wait_result_t)
     // (order: gpupll0 L/config/config_ctl/user_ctl/user_ctl_u/state/status, gx_clamp_io,
     // cx_bcr/cx_gdscr/cx_gds_hw_ctrl, cxo_branch, rbcpr_rcg/bcr/branch,
     // gfx3d_rcg, gx_bcr/gx_gdscr/gfx3d_branch, rbbmtimer_rcg/branch, isense_rcg/bcr/branch).
+    // H236: sheng-gpu-power=2/3/4 runs the C1e-2 PM8005 S1 SPMI sequence; its results use
+    // gc indices 80 and up and are emitted before the GPUCC survey.
     sheng_gpu_power_step ();
     unsigned gpucc_index = 0;
     uint32_t gpucc_value = 0;

@@ -52,7 +52,7 @@
 | `sheng-touch-mode=<n>` | 强制触控 SPI 模式 |
 | `sheng-touch-hid=1` | 把触控点发布到 HID |
 | `sheng-aks=1` | 启用 AKS 路径 |
-| `sheng-gpu-power=<n>` | 选择 GPU 电源序列 |
+| `sheng-gpu-power=<n>` | 选择 GPU 电源序列：1 为原 GPUCC 步骤；2 只读探测 PM8005 S1 的 SPMI 寄存器；3 追加同值写通路验证；4 设 525 mV、使能 S1 并重试 GX |
 | `sheng-gpu-metal=1` | 启用 Metal 路径 |
 | `sheng-gpu-addon=1` | 挂载 GPU addon 内容 |
 | `sheng-data-persist=<n>` | 1 只验证 Data store 窗口，2 打开写窗口 |
