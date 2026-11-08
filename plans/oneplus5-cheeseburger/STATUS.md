@@ -3,10 +3,18 @@
 - 计划：`plans/oneplus5-cheeseburger/PLAN.md`
 - 线路：B — UniXNU / 4K
 - 路线/目标：iPad7,1 / iPadOS 17.7.11（21H461）
-- 当前阶段：**H103/H103b/H103c Preboot/Cryptex 布局审计、构建与上机推进（2026-11-01）。H91 仍是最佳 Probe 基线；H101/H102 快照仍未工作；审计确认 OS 根 `/System/Cryptexes/OS` 指向 `/private/preboot/Cryptexes/OS`，而当前 `/private/preboot` 为空，SystemOS 被挂到 `/` 或 `/private/preboot` 后都没有命中该路径。首次上机证明 Preboot overlay 和 SystemOS 挂载生效；失败点为 owner cache carrier 的旧路径硬编码，H103b 已修复并构建，等待第二次上机。**
-- 当前 gate：**G1 通过（2026-10-22）；B3 已到 BSD/IOKit；B5 root 已挂载（bring-up）；H91/H96a18 过 mount-phase-1；H99 停在 driverkitd active；H100 停在 pfd/accountsd/nsurlsessiond/routined；H101/H102 快照未触发；H103 布局审计完成；H103 boot `aed7e8d8...` 上机确认挂载生效但 shared region 路径检查失败；H103b 已越过 dyld cache 和 launchd boot task 序列；新停点 `tzinit` 缺 Data 时区目录；H103c 上机确认 Data UUID 与内核不匹配（`NATIVE_H82_DATA status=2 stage=0`）；H103d 已修复 UUID 并上机，`tzinit` 变为 EROFS；H103d 的 tzinit 变为 EROFS；H103f 已通过 tzinit，回到 `driverkitd active`；H103g 进程日志显示 driverkitd + 多个 daemon 后停在 FileSet KC；H103h 快照未输出，停在 UFS/SystemOS 读；H103i 证明跳过 driverkitd 会继续启动但无 cryptexd；H103j root union 因 Data UUID 又回旧值失败；H103k APFS root union 仍停在 driverkitd；H103l bindfs root union 破坏 launchd/libSystem，已回退；H103m2 确认 `driverkitd/62` 在读 SystemOS 并加载 FileSet KC；无 UFS stall。H103m3 首次到达 SpringBoard（`caller=SpringBoard/27`）；H103aa 显示后端已完整工作（GOP 自检色块 + calls=1）；H103af 正在确认 pid 70 是否为 IOMFB_FOR_Loader，当前阻塞是 backboardd/SpringBoard 未提交第一帧。userdata 已拆为 Android 64 GiB + userdata_ios 49.2 GiB；iOS SHNGROOT 已恢复，Android 已成功启动；Legacy display 后端已完成（GOP 自检色块 + start=1），backboardd 启动后不打开 display，下一步转向 CoreAnimation/IOGPU/Metal**
-- 基线提交：H91 构建提交未记录；本地 UniXNU `main` `e4539ae`（H100 文档提交），设备仓库 `main` `5ad54e2`
-- 当前代码提交：本地 `e4539ae`；H99/H100/H101/H102 干净构建树为 XNU `d8b8029` + 原始 patches + 远程诊断插桩；H96 脏源码保留在 `.cache/xnu-work.h96dirty-20261031`；设备仓库 `5ad54e2`；关键子模块见 `BASELINE.md`
+- 当前阶段：**C1/C2 完成（2026-11-09）——A540 的供电和时钟链路已打通。**
+  PM8005 S1（FTS426）经 SPMI 在 752 mV 使能 → GX GDSCR PWR_ON → Fabia PLL
+  1028 MHz 锁定 → gfx3d 根 257 MHz → 分支使能 → RBBM 可读
+  （`0x00010042 / 0xb5f00000`）。基线、寄存器序列和产物见
+  `plans/oneplus5-cheeseburger/diagnostics/A540-C1-C2-baseline-2026-11-09.md`。
+  下一步 C3：GPU 身份/GMU/CP 冷启动。
+- 当前 gate：**用户态仍以 H103 线的 SpringBoard/display 状态为背景；GPU 线已从 C0
+  （插件投送）推进到 C2（GX 供电+257 MHz 时钟）。C3 的第一步是只读 GPU ID/GMU/CP
+  survey，随后才做 GMU 固件加载。**
+- 基线提交：C1/C2 基线 kernel `8147dc53…`、boot `4dd225e2…`（见 H236g）
+- 当前代码提交：本地 UniXNU `main` `e277de9`；NativeMobileDisplay `ce9001d`（C2）；
+  设备仓库 `main` 未变；关键子模块见 `BASELINE.md`
 - 远程仓库：
   - UniXNU `https://github.com/lss717/UniXNU`（`main`）
   - UEFI fork `https://github.com/lss717/edk2-msm8998`（分支 `unixnu-cheeseburger`）
@@ -14,7 +22,7 @@
   - NativeRamBlock fork `https://github.com/lss717/RamBlock`（submodule 路径仍为
     `drivers/NativeRamBlock`，fork 提交 `bc079a5`；`upstream` 指回 `UniXNU/RamBlock`）
 - UEFI 分支：`edk2-msm8998` 的 `unixnu-cheeseburger`，提交 `0471194`、`708fa06`、`7f34479`、`91e17a8`、`8ef28f1`、`1ffb934`
-- 最近更新：2026-11-01
+- 最近更新：2026-11-09
 
 > 本文件是 B 线（UniXNU / 4K）唯一的计划与状态记录。A 线（在 OP5 上用
 > 自建 shim 引导 16K XNU）是另一个独立项目，与本线没有代码依赖。
