@@ -53,10 +53,31 @@ def main() -> int:
             packed = data
         body += struct.pack('<IIQQII', len(encoded), mode, len(data), len(packed),
                             zlib.crc32(packed) & 0xffffffff, 1 if stored else 0) + pad(encoded) + pad(packed)
-    blob = b'NGPUADD2' + struct.pack('<IIQ', len(files), 0, 24 + len(body)) + body
+    # H217: this port's boot window loses exactly 8 bytes at a fixed addon offset. H214-H216
+    # narrowed it to addon+0x7b9aa0 becoming 00 f0 7f 80 00 00 00 00 (8-byte aligned store,
+    # physical 0x186711aa0) while the payload file itself is byte-identical and every other
+    # byte matches. The repair table travels with the addon: it records the observed wrong
+    # bytes and the original ones, and the kernel restores them only when the current bytes
+    # match the record, so a changed layout can never be "repaired" blindly.
+    REPAIRS = [(0x7b9800, bytes.fromhex('00f07f8000000000'))]
+    repairs = b''
+    for offset, wrong in REPAIRS:
+        if offset + len(wrong) > len(body):
+            sys.exit('repair offset past the addon body')
+        original = body[offset - 24:offset - 24 + len(wrong)]
+        repairs += struct.pack('<QII', offset, len(wrong), 0) + wrong + original
+    if repairs:
+        repairs = struct.pack('<I', len(REPAIRS)) + repairs
+    repair_off = 24 + len(body) if repairs else 0
+    blob = (b'NGPUADD2' + struct.pack('<IIQ', len(files), repair_off, 24 + len(body) + len(repairs)) +
+            body + repairs)
     output.write_bytes(blob)
     for name, mode, data in files:
         print(f'{mode:o} {len(data):>10} {name}')
+    if repairs:
+        for offset, wrong in REPAIRS:
+            print(f'repair {offset:#x}: {wrong.hex()} <- '
+                  f'{body[offset - 24:offset - 24 + len(wrong)].hex()}')
     print(f'{output}: {len(files)} files, {len(blob)} bytes')
     return 0
 

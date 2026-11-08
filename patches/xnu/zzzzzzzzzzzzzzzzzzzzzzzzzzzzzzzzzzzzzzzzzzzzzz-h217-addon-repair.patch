@@ -1,0 +1,64 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7605,11 +7605,49 @@
+ 	}
+ 	memcpy(&count, addon + 8, 4);
+ 	memcpy(&total, addon + 16, 8);
+-	printf("NATIVE_GPU_ADDON: blob %p paddr=%llu bytes=%llu count=%u\n", addon,
+-	    (unsigned long long)native_ram_block_gpu_addon_physical, (unsigned long long)bytes, count);
++	uint32_t repair_off = 0;
++	memcpy(&repair_off, addon + 12, 4);
++	printf("NATIVE_GPU_ADDON: blob %p paddr=%llu bytes=%llu count=%u repair=%u\n", addon,
++	    (unsigned long long)native_ram_block_gpu_addon_physical, (unsigned long long)bytes, count, repair_off);
+ 	if (total != bytes || !count || count > 4096) {
+ 		native_gpu_addon_error = EINVAL;
+ 		return;
++	}
++	/* H217: restore the bytes this port's boot window is known to lose before anything is
++	 * checked or written. A record only applies when the current bytes are exactly the
++	 * observed wrong ones, so a rebuilt addon can never be patched blindly. */
++	uint64_t entries_end = bytes;
++	if (repair_off) {
++		if (repair_off < 24 || repair_off + 4 > bytes) {
++			native_gpu_addon_error = EINVAL;
++			return;
++		}
++		uint32_t records = 0;
++		memcpy(&records, addon + repair_off, 4);
++		uint64_t record = repair_off + 4;
++		entries_end = repair_off;
++		for (uint32_t k = 0; k < records; ++k) {
++			uint64_t off = 0;
++			uint32_t length = 0;
++			if (record + 12 > bytes) {
++				native_gpu_addon_error = EINVAL;
++				return;
++			}
++			memcpy(&off, addon + record, 8);
++			memcpy(&length, addon + record + 8, 4);
++			record += 12;
++			if (!length || record + 2ULL * length > bytes || off + length > bytes) {
++				native_gpu_addon_error = EINVAL;
++				return;
++			}
++			const uint8_t *wrong = addon + record;
++			const uint8_t *original = addon + record + length;
++			if (!memcmp(addon + off, wrong, length)) {
++				memcpy((uint8_t *)(uintptr_t)(addon + off), original, length);
++				printf("NATIVE_GPU_ADDON: repaired off=%llu len=%u\n", (unsigned long long)off, length);
++			}
++			record += 2ULL * length;
++		}
+ 	}
+ 	/* Validate the whole addon before writing anything. */
+ 	uint64_t at = 24;
+@@ -7642,7 +7680,7 @@
+ 		}
+ 		at += name_padded + size_padded;
+ 	}
+-	if (at != bytes) {
++	if (at != entries_end) {
+ 		native_gpu_addon_error = EINVAL;
+ 		return;
+ 	}
