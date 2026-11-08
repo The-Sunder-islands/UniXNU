@@ -1,0 +1,76 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7717,48 +7717,48 @@
+ 		printf("NATIVE_GPU_ADDON: late crc_bad source=%p bytes=%llu off=%llu\n",
+ 		    native_gpu_addon_bad_source, (unsigned long long)native_gpu_addon_bad_bytes,
+ 		    (unsigned long long)(native_gpu_addon_bad_source - addon));
+-		/* H211: 64 KiB pieces, so the host can pinpoint the rewritten range. */
+-		for (uint64_t c = 0; c < native_gpu_addon_bad_bytes; c += 1 << 16) {
+-			uint64_t length = native_gpu_addon_bad_bytes - c < (1 << 16) ? native_gpu_addon_bad_bytes - c : (1 << 16);
+-			printf("NATIVE_GPU_ADDON: late f%llu %08x\n", (unsigned long long)c,
+-			    native_gpu_addon_fnv(native_gpu_addon_bad_source + c, length));
+-		}
+-	}
+-	/* H211: is the loader block itself already wrong, or did the copy get rewritten? */
+-	if (native_gpu_addon_crc_bad) {
++		/* H213: the loader block against the early copy: identical means the block was already
++		 * wrong when the snapshot was taken, otherwise the copy was rewritten afterwards. */
+ 		uint64_t copy_virt = 0, copy_phys = 0, copy_bytes = 0;
+ 		const uint8_t *block = NULL;
+ 		uint64_t block_bytes = 0;
+ 		if (native_ram_block_gpu_addon_copy_info &&
+ 		    native_ram_block_gpu_addon_copy_info(&copy_virt, &copy_phys, &copy_bytes) &&
+ 		    native_ram_block_gpu_addon_block && native_ram_block_gpu_addon_block(&block, &block_bytes)) {
+-			uint64_t diff = bytes < block_bytes ? bytes : block_bytes, at = 0;
+-			for (uint64_t k = 0; k < diff; ++k) {
++			uint64_t width = bytes < block_bytes ? bytes : block_bytes, at = width;
++			for (uint64_t k = 0; k < width; ++k) {
+ 				if (block[k] != addon[k]) {
+ 					at = k;
+ 					break;
+ 				}
+-				if (k + 1 == diff) {
+-					at = diff;
+-					break;
+-				}
+ 			}
+-			printf("NATIVE_GPU_ADDON: late copyvirt=%llx copyphys=%llx copybytes=%llu block=%p blockbytes=%llu diff=%llu\n",
+-			    (unsigned long long)copy_virt, (unsigned long long)copy_phys, (unsigned long long)copy_bytes,
+-			    block, (unsigned long long)block_bytes, (unsigned long long)at);
+-			if (at < diff) {
+-				printf("NATIVE_GPU_ADDON: late copy ");
+-				for (uint64_t k = 0; k < 16 && at + k < diff; ++k) {
++			printf("NATIVE_GPU_ADDON: late copyvirt=%llx copybytes=%llu block=%p blockbytes=%llu diff=%llu\n",
++			    (unsigned long long)copy_virt, (unsigned long long)copy_bytes, block,
++			    (unsigned long long)block_bytes, (unsigned long long)at);
++			if (at < width) {
++				printf("NATIVE_GPU_ADDON: late copy");
++				for (uint64_t k = 0; k < 16 && at + k < width; ++k) {
+ 					printf(" %02x", addon[at + k]);
+ 				}
+-				printf("\n");
+-				printf("NATIVE_GPU_ADDON: late block");
+-				for (uint64_t k = 0; k < 16 && at + k < diff; ++k) {
++				printf("\nNATIVE_GPU_ADDON: late block");
++				for (uint64_t k = 0; k < 16 && at + k < width; ++k) {
+ 					printf(" %02x", block[at + k]);
+ 				}
+ 				printf("\n");
+ 			}
+ 		}
++		/* 1 MiB pieces to find the bad megabyte, then 64 KiB pieces over the 7-8 MiB window the
++		 * earlier boots failed in. H212 printed all 144 pieces and lost every line past 0x520000. */
++		for (uint64_t c = 0; c < native_gpu_addon_bad_bytes; c += 1 << 20) {
++			uint64_t length = native_gpu_addon_bad_bytes - c < (1 << 20) ? native_gpu_addon_bad_bytes - c : (1 << 20);
++			printf("NATIVE_GPU_ADDON: late m%llu %08x\n", (unsigned long long)(c >> 20),
++			    native_gpu_addon_fnv(native_gpu_addon_bad_source + c, length));
++		}
++		for (uint64_t c = 0x700000; c < 0x800000 && c < native_gpu_addon_bad_bytes; c += 1 << 16) {
++			uint64_t length = native_gpu_addon_bad_bytes - c < (1 << 16) ? native_gpu_addon_bad_bytes - c : (1 << 16);
++			printf("NATIVE_GPU_ADDON: late f%llu %08x\n", (unsigned long long)c,
++			    native_gpu_addon_fnv(native_gpu_addon_bad_source + c, length));
++		}
+ 	}
+ }
+ static void

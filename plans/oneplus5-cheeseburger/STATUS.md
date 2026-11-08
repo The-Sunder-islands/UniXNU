@@ -9018,6 +9018,44 @@ H212 boot:    e16725f483fdb76473a9b4b0dec95caf84ff655fca563d91ae6b6281d515de9c
 判读：`diff=identical` 或很小的偏移 → 交接块在快照时就已经是坏的；
 `diff` 指向 `copy` 与 `block` 不同的位置 → 副本之后又被写过。
 
+### H212 结果：捕获窗口不够，但已确认 0–5 MiB 完全一致（2026-11-08）
+
+- `late f*` 共打印 144 行（64 KiB 粒度），但日志窗口只保留了前 82 行（到 0x510000）；
+- 这 82 个分块与主机**逐块一致**，因此 0–5 MiB 未被改写；
+- 出问题的 7–8 MiB 段与最后的 `diff=` 行都被截断 → 需要**减少输出**。
+
+### H213：精简诊断 + CPU 频率格不再误报红（2026-11-08）
+
+投送诊断（`zzzz…h213-addon-diff-report.patch`）：
+
+- 先打印 `diff=`（副本 vs 交接块首个不同字节）和两侧 16 字节；
+- 只打印 9 行 1 MiB 校验和 + 16 行 64 KiB（`0x700000..0x800000`），
+  总共 ~28 行，避免再被日志窗口截断。
+
+CPU 频率格（`NativeLegacyProbeSupport.cpp` / `NativeLegacyDisplay.cpp`）：
+
+- H211/H212 的 console 显示两组 cluster 全是 `enable=0 desired=0 raw=0`、
+  APCS 时钟 `cmd/cfg=0 status=00100000` → OSM 在本内核里根本没有被初始化，
+  旧逻辑因此永远 `any=false` → 判红；
+- 改为：**只有确实读到"已使能 cluster 且 <1 GHz"才红**；一个都没读到 → 新状态
+  6（灰 0xff808080），不再是误导性的红；
+- 新增一次性寄存器转储 `NATIVE_CPUFREQ_OSM`（cluster 0/1 的 0x0/0x4/0x1000/
+  0x1004/0x1f10/0x1f14）与 `NATIVE_CPUFREQ_APCS`（PLL L 值、CFG_RCGR），
+  用于下一步推导真正的当前频率来源；
+- 厂商 DTS 已提供 OSM/APCS 的权威布局：
+  `qcom,cpu-clock-8998@179c0000`（osm/pwrcl_pll/perfcl_pll/apcs_common）、
+  `qcom,apcs-cmd-rcgr=<0x17911050 0x17811050>`、
+  `qcom,apcs-cfg-rcgr=<0x17911054 0x17811054>`、
+  `qcom,apm-ctrl-status=<0x179d000c 0x179d0018>`、
+  以及 pwrcl/perfcl 的 speedbin0 频率表。
+
+```text
+H213 kernel:  8d4b3a0ca8d1bd5727f9c80a4d022db8de3c4277eb04e4d6ef7f635990910462
+H213 payload: f79214be3704272f9b23742a9f4ea38984dc841a8670412cd98917bf15ad2a2a
+H213 boot:    1967ddb4dfd8994f8679a6156a97d0ae029bdcbc9601bd5cecc92bcb65937010
+              81,147,904 B
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
