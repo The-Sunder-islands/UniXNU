@@ -8510,6 +8510,39 @@ H199 payload: 0e165694a5450f78ede122eaec93d65d3ea4c07ba83a310796fdae35d1917e5f
 H199 boot:    9a63913e2c5bcbf896b0a4d3833779bffc549bb54497c8dfa043d8a3c7782581
 ```
 
+### H199 结果：backboardd 不再被 MACF 拒绝，但主连接卡在服务检查（2026-11-08）
+
+```text
+MACF by process: backboardd 0, mediaserverd 8
+347.491  op=open comm=backboardd cls=AGXAccelerator
+347.491  NATIVE_DISPLAY_OPEN: service=AGXAccelerator process=backboardd grant=backboardd match=1
+347.491  open request type=0x41470001 → granted
+347.492  open request type=0x41470002 → granted
+347.492  op=open comm=backboardd cls=AGXAccelerator   ← 主连接（type 0x4147）
+         （没有 grant 日志、没有 open request、没有 MACF 日志）
+NATIVE_A540_ABI: method= : 0
+```
+
+mark 打开成功、grant 匹配；但主连接的打开命中了**没有授权属性的服务实例**，卡在
+`mac_iokit_check_open_service` 这一层（既没有 grant 日志也没有 newUserClient）。
+服务会被重复发布，逐个实例补属性不稳定。
+
+### H200：沙箱授权加服务类回退（2026-11-08）
+
+新增补丁 `zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-h200-sandbox-grant-class.patch`
+（在 `zzw-native-adreno-sandbox-grant.patch` 之后应用）：`native_sandbox_grant()`
+在属性缺失时，若服务类名是 `AGXAccelerator` 且调用进程是 `backboardd`，同样放行，
+并打印 `grant=class match=1`。只影响这一个类与这一个进程。
+
+```text
+H200 kernel:  11862b03a85aaeaecc314b9a67431ef77f5076a6e3f0e79b0ab6bd03d14776d1
+H200 payload: bb8e354183805ba5832720b3f4037469d611bc311989c1155ee3646c22945b7a
+H200 boot:    35b435d8cb3bf286ca4c6e401a1c5b59e3c8ec04d2f8dc7b029bc351ff2370c0
+```
+
+判读：主连接应出现 `open request type=16711 comm=backboardd` 与
+`NATIVE_A540_ABI: method=1/15/9 …`，随后是 `report …`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
