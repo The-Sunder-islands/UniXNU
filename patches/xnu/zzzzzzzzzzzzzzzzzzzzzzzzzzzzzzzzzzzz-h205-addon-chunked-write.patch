@@ -1,0 +1,59 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7466,22 +7466,40 @@
+ 	}
+ 	error = vnode_open(path, O_CREAT | O_TRUNC | FWRITE | O_NOFOLLOW, mode, 0, &vp, ctx);
+ 	if (error) {
++		printf("NATIVE_GPU_ADDON: open %s error=%d\n", path, error);
+ 		return error;
+ 	}
+ 	int resid = 0;
+-	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)(uintptr_t)data, (int)size, 0, UIO_SYSSPACE, IO_NOAUTH | IO_UNIT, vfs_context_ucred(ctx),
+-	    &resid, vfs_context_proc(ctx));
+-	if (!error && resid) {
+-		error = EIO;
++	error = 0;
++	const uint64_t chunk = 1 << 20;
++	for (uint64_t at = 0; at < size; at += chunk) {
++		int length = (int)(size - at < chunk ? size - at : chunk);
++		resid = 0;
++		error = vn_rdwr(UIO_WRITE, vp, (caddr_t)(uintptr_t)(data + at), length, (off_t)at, UIO_SYSSPACE,
++		    IO_NOAUTH, vfs_context_ucred(ctx), &resid, vfs_context_proc(ctx));
++		if (error || resid) {
++			if (!error) {
++				error = EIO;
++			}
++			printf("NATIVE_GPU_ADDON: write %s at=%llu/%llu error=%d resid=%d\n", path,
++			    (unsigned long long)at, (unsigned long long)size, error, resid);
++			break;
++		}
+ 	}
+ 	if (!error) {
+ 		struct vnode_attr va;
+ 		VATTR_INIT(&va);
+ 		VATTR_SET(&va, va_mode, mode);
+ 		error = vnode_setattr(vp, &va, ctx);
++		if (error) {
++			printf("NATIVE_GPU_ADDON: chmod %s error=%d\n", path, error);
++		}
+ 	}
+ 	if (!error) {
+ 		error = VNOP_FSYNC(vp, MNT_WAIT, ctx);
++		if (error) {
++			printf("NATIVE_GPU_ADDON: fsync %s error=%d\n", path, error);
++		}
+ 	}
+ 	int close_error = vnode_close(vp, FWRITE, ctx);
+ 	return error ? error : close_error;
+@@ -7583,6 +7601,10 @@
+ 		snprintf(path, sizeof(path), "/private/var/ngpu/%s", name);
+ 		uint8_t *data = kalloc_data(size ? size : 1, Z_WAITOK);
+ 		int error = data ? native_gpu_addon_inflate(addon + at, packed, data, size) : ENOMEM;
++		if (error) {
++			printf("NATIVE_GPU_ADDON: inflate %s size=%llu packed=%llu error=%d\n", path,
++			    (unsigned long long)size, (unsigned long long)packed, error);
++		}
+ 		if (!error) {
+ 			error = native_gpu_addon_write(path, data, size, mode, ctx);
+ 			if (error == ENOENT && !(error = native_gpu_addon_parents(p, scratch, path))) {

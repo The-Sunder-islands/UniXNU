@@ -8728,6 +8728,26 @@ H204 boot:    1dc626feab3665f5230c2c7a47a50c6e7fa010f4f9d585569a4f336166a59e5e
 
 固件不提交仓库，放本地 cache，运行时经 GPU addon 投放并由驱动做 SHA-256 校验。
 
+### H205：addon 分块写入 + 分步错误日志（C0，2026-11-08）
+
+新增补丁 `zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-h205-addon-chunked-write.patch`：
+
+- `native_gpu_addon_write` 改为 **1 MiB 分块写入**，去掉 `IO_UNIT`
+  （H204 的 21.7 MB 插件可执行文件在整块写入路径返回 `EINVAL`）；
+- 每个失败步骤单独打印：`open/chmod/fsync` 与
+  `write <path> at=<off>/<size> error=<errno> resid=<n>`；
+- `install` 里 inflate 失败单独打印 `inflate <path> size=… packed=… error=…`，
+  用于区分“解压失败”和“写入失败”。
+
+```text
+H205 kernel:  aa3ccd05a252150e9043445dc6f927d8b173541798b9160ac416046f85c887fa
+H205 payload: 001cce791c8c1b9c7ea46da68615c4caf1648f974ec0fa9d0bcd5142f2298d79
+H205 boot:    56f27d938c2bea324a0e6ebd05201f47bfebb9f11b3d13cc4020000e10548b19
+```
+
+判读：心跳 `addon=8/8/0/0` 表示修复成功，随后看 `abi=`/`rep=`；
+若仍失败，新的分步日志会给出确切步骤与 errno。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
