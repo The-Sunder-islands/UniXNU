@@ -8710,6 +8710,24 @@ H204 boot:    1dc626feab3665f5230c2c7a47a50c6e7fa010f4f9d585569a4f336166a59e5e
 路线 C 的完整计划：`plans/oneplus5-cheeseburger/diagnostics/A540-route-C-plan-2026-11-08.md`
 （内核侧上电、原生 IOGPU 服务与 type-1 客户端、entitlement 准入、C0–C6 里程碑）。
 
+### 原厂 ROM 提取（2026-11-08）
+
+来源：`cheeseburger_rom/OnePlus5Hydrogen_23_OTA_065_all_2012030353_f743fd2428a00.zip`。
+
+- `boot.img`（页 4096）里的 kernel 在偏移 13,179,047 处带单一 DTB（421,383 B），
+  `dtc` 解出完整设备树；
+- `vendor.new.dat` + `vendor.transfer.list`（v4，范围 `[start,end)`）重建出
+  1,004,351,488 B 的 ext4 `vendor.img`，`/firmware/` 内含全部 A540 固件；
+- 关键设备树数据已写入路线 C 计划 §4.5：
+  - `kgsl-3d0@5000000`：chipid `0x5040001`、IRQ 300、`a540_gpmu.fw2`、`a540_zap`、
+    7 档 OPP（710/670/596/515/414/342/257 MHz）、8 个时钟、vddcx + PM8005 S1；
+  - `gfxcc@5065000` 的 `gfxfreq-speedbin0`/`mx-speedbin0`（频率-角-电压）；
+  - `smmu-kgsl@5040000`：`qcom,smmu-v2`、三个中断、三个时钟、完整
+    `attach-impl-defs` 寄存器表；
+  - 固件清单与 SHA-256（a530_pm4/pfp、a540_gpmu.fw2、a540_zap.mdt/b00/b01/b02/elf）。
+
+固件不提交仓库，放本地 cache，运行时经 GPU addon 投放并由驱动做 SHA-256 校验。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
