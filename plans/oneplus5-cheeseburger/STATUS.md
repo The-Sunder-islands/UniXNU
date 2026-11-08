@@ -9561,6 +9561,34 @@ H229 boot:    e164c98340cdac6998654a6220607aa58a623078d8a1fbd3cb8e3150fed413b4
               81,147,904 B
 ```
 
+### H229 结果：CX 域上电成功，GX 域缺电压投票（C1c-1，2026-11-08）
+
+```text
+start  clamp=00000001 cx=00222001 gx=00222001 gfx3d_rcg=80000000
+step1  clamp now=00000000
+step2  cx gdscr 00222001->a0282000 status[1008]=80001fe0 on=1   ← CX 真正上电
+step3  gfx3d_rcg=80000000 cfg=00000000
+step4  gfx3d_branch=80002621 running=0
+step5  gx gdscr 00222001->08282000 status[1094]=08282000 on=0   ← GX 未上电
+```
+
+按主线 `gdsc.c` 的 `PWR_ON = BIT(31)` 判读：
+
+- **CX 域成功**：`gds_hw_ctrl[0x1008]` 的 bit31 已置位（`0x80001fe0`），说明写序列
+  （等待字段 + 清 HW_CONTROL/SW_OVERRIDE + 清 SW_COLLAPSE）是正确的；
+- **GX 域失败**：`gdscr[0x1094]` 的 bit31 一直为 0，尽管 SW_COLLAPSE 已清。
+  这与 msm8998 的供电结构一致：GX 轨由 **RPM** 投票供电，本端口还没有 RPM 驱动，
+  所以 GDSC 的电源状态机等不到 "power up complete"。
+
+因此 C1 的剩余工作明确为：**实现 RPM（msm8998 的 RPM message RAM + SMD/SMEM）
+以完成 CX/GX 轨电压投票**，之后 gfx3d 根时钟（父时钟/ PLL）才有意义。
+
+```text
+H229 kernel:  90d86e92d3c9239a6539d4993edf44b5c3768b7117bc8d6d2d120754ce601a34
+H229 payload: 581b44bb359c9f9e6cffb4f9b7aa33c9c2301a19226cb40eff7c923ea2f4784e
+H229 boot:    e164c98340cdac6998654a6220607aa58a623078d8a1fbd3cb8e3150fed413b4
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
