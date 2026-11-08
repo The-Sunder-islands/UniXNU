@@ -9589,6 +9589,34 @@ H229 payload: 581b44bb359c9f9e6cffb4f9b7aa33c9c2301a19226cb40eff7c923ea2f4784e
 H229 boot:    e164c98340cdac6998654a6220607aa58a623078d8a1fbd3cb8e3150fed413b4
 ```
 
+### H230：SMEM 只读探测返回全 0（C1d 第一步，2026-11-08）
+
+按厂商 DTS 的 `qcom,smem@86000000`（2 MiB）做只读探测，结果经 `gc=30..35` 通道输出：
+
+```text
+gc=30/31/32 = 00000000    SMEM 头三字
+gc=33/34/35 = 00000000    未找到 "COMM" 分区表魔数
+```
+
+- 映射成功（`IODeviceMemory` + cache-inhibit + 只读），读回 0 而不是挂死 →
+  说明**该物理地址在本端口这次启动下没有 SMEM 内容**，而不是访问方式错误；
+- 同轮 `gc=25/26` 有值（RBBM 由 step6 读取），说明探测代码确实执行了；
+- 可能性：ABL 交给我们的 SMEM 基址与厂商内核看到的 `0x86000000` 不同，
+  或 `fastboot boot` + 自有 ADT 的启动路径下 SMEM 未被放置在该地址。
+
+下一步（C1d-2）：
+1. 先确认映射机制本身可靠——用同样的方法读一个**已知内容**的 RAM 地址
+   （例如 GPU addon 的 `0x185f58000`），若读出正确则说明 SMEM 地址确实不对；
+2. 从启动时由 ABL 传入的 device tree（`PE_state.deviceTreeHead` 指向的原始 DT）
+   里读 `qcom,smem` 节点，而不是用厂商 DTS 的静态值；
+3. 找到真正的 SMEM 基址后，再解析分区表、定位 `rpm_requests` 的 GLINK 通道。
+
+```text
+H230 kernel:  21daac83c29de8f03ef267e3c01972c9566a662494d387ac7c698b78b3c98209
+H230 payload: eaba1411c0be656423acbf03b9110b5966ccea0431263f6410bdf4c70540c9d1
+H230 boot:    4a1dc266fb61229a14324b7cd3cfcaa9159f1c941affc1d62f47272fa504f489
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
