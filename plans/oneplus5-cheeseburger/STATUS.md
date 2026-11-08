@@ -9321,6 +9321,41 @@ H220 boot:    a022b4404833621795eb40373d1a1217f4418710ce9322ac42d99dee24c2d0d3
 判读：`abi=` 的第二个数字即插件最后调用到的方法编号；`rep=` 是测试写入的报告文本
 （`s<step> e<error> v<verified>`）。
 
+### H220 结果：C0 完成（Query + GetDeviceInfo 均成功）（2026-11-08）
+
+本轮短心跳（boot `2c3dbc8f`，H220）首次把 ABI 状态完整写出来：
+
+```text
+NATIVE_ACCEL_HB: accel=57/1095192831/1300/0 abi=1300/9/5 rep=backboard s2 ee00002c7 v-1/-2 t…
+```
+
+- `accel=57/…/1300/0`：`newUserClient` 57 次、`externalMethod` 1300 次（selector 探测反复执行）；
+- `abi=1300/9/5`：隧道调用 1300 次，最后方法 9（`SetMetadata`，即报告本身），5 条报告；
+- `rep=backboard s2 ee00002c7 v-1/-2`：测试 **2 步成功**后失败，错误
+  `0x2c7 = kIOReturnUnsupported`。
+
+对照 `NativeAdrenoABI.h` 的方法编号，测试顺序与结果：
+
+| 步 | 方法 | 编号 | 结果 |
+| --- | --- | --- | --- |
+| 1 | Query | 1 | 成功 |
+| 2 | GetDeviceInfo | 15 | 成功 |
+| 3 | BoAlloc | 2 | `kIOReturnUnsupported`（驱动未实现） |
+
+**C0 的两个验收点全部达成**：
+1. `addon=8/8/0/0`（投送，H217 起稳定）；
+2. 插件在 backboardd 里建立真实 ABI 连接，并成功完成 Query + GetDeviceInfo。
+
+下一道门是 `BoAlloc`：它需要真正的 GPU 缓冲区/IOVA 分配，属于 C3（SMMU + CP）
+范畴，不是 ABI 层面的桩。
+
+```text
+H220 kernel:  ebaf460392b46893fe6a6fea7e985cec57f8e35d5a62d14183b283fcee039159
+H220 payload: d5d7fb5f4cee83df592c3631c83470957b7ca14b31811e030ebbab19d620953a
+H220 boot:    a022b4404833621795eb40373d1a1217f4418710ce9322ac42d99dee24c2d0d3
+              81,147,904 B
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
