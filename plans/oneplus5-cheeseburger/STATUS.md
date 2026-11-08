@@ -8652,6 +8652,37 @@ abi=0/0/0 rep=
 
 心跳已经持久化（`abi=`/`rep=`），下一次取日志只需让设备跑足够久（≥12 分钟）。
 
+### H203 第二次启动结果：ABI 未执行，addon 稳定少一个文件（2026-11-08）
+
+新鲜槽（boot `2b9ec64b`，到 1253 s）：
+
+```text
+addon=8/7/0/1/22/1 owner=4/0 ext=4/2 dm=5/0 wp=1/2
+abi=0/0/0 rep=
+```
+
+- 12 分钟以上 ABI 从未被调用；
+- addon 稳定为 `8/7`，一个文件写入失败 `EINVAL(22)`（主机侧验证 addon 8 个文件
+  全部可正常解压，所以是内核侧特定文件/写入路径的问题，不是打包问题）。
+
+失败的若是 bundle 的 `Info.plist`/可执行文件，CA 拿不到 principal class，
+自然永远不会进入 `initWithAcceleratorPort:` —— 与 `abi=0` 一致。
+
+### H204：记录 addon 安装失败的文件名（2026-11-08）
+
+新增补丁 `zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-h204-addon-fail-log.patch`：
+在 `native_gpu_addon_install` 的失败分支打印
+`NATIVE_GPU_ADDON: failed <path> error=<errno> size=<size>`。
+
+```text
+H204 kernel:  7b47e2421725d9744dd36c6c92ef135e63b7269bdd5a577145b3383f493b8748
+H204 payload: 239617ac426a7798ad28e16013f522d22280cb76ce13195f13b9e61696696c43
+H204 boot:    1dc626feab3665f5230c2c7a47a50c6e7fa010f4f9d585569a4f336166a59e5e
+```
+
+（本轮构建遇到一次 `prepare-xnu-source.py` 的 `http.client.RemoteDisconnected`，
+清掉 `.cache/xnu-work` 后重新构建即通过，属已知间歇问题。）
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

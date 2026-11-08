@@ -1,0 +1,11 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7597,6 +7597,7 @@
+ 		} else if (error) {
+ 			native_gpu_addon_failed++;
+ 			native_gpu_addon_error = error;
++			printf("NATIVE_GPU_ADDON: failed %s error=%d size=%llu\n", path, error, (unsigned long long)size);
+ 		} else {
+ 			native_gpu_addon_written++;
+ 		}
