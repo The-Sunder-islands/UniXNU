@@ -9743,6 +9743,40 @@ H233 payload: f0558a3a36754f32634317eb214f70604efefffb8c9591b664852b43c9df1353
 H233 boot:    e96c22c67f15cc76f67ffbf1eeb4a4c214b0a8adfa340c7f0d09cf1e612b17bd
 ```
 
+### H234：SMEM carveout 存在但全零（C1d-4b，2026-11-08）
+
+扫描 `0x80000000`–`0xA0000000`（2 MiB 步进，命中 4 个即停）：
+
+```text
+gc=60     = 4                                  命中数
+gc=61/62  = 80000000 / ffffffff
+gc=63/64  = 80200000 / ffffffff
+gc=65/66  = 80400000 / ffffffff
+gc=67/68  = 80600000 / ffffffff
+```
+
+判读（重要区别）：
+
+- `0x80000000` 一带读出 **`0xffffffff`** = 该段没有内存（未实现的 DRAM 窗口）；
+- `0x86000000`（厂商 DTS 的 SMEM 基址）读出的是 **`0`**，不是 `0xffffffff`
+  → 该段**有内存、内容全零**；
+- 结合 H233（framebuffer `0x9d400000` 读到我们自己画的像素）与 H232（VM 只拥有
+  `[6 GiB, 8 GiB)`）：SMEM carveout 存在，但在本启动路径下**没有被初始化**。
+
+结论：RPM/GLINK 需要 SMEM 里由 ABL 建立的分区表与 GLINK FIFO，而本启动路径下
+这份内容不存在（我们用的是自建 ADT，没有走 Android 内核那条 SMEM 初始化/握手的
+启动链）。因此：
+
+- D1（取 ABL DT 的 SMEM 信息）**不足以**解决问题——真正缺的是初始化；
+- **建议转为 D3**：绕开 RPM，用 GPUCC 的 votable GDSC 位 + **PM8005 S1 的 SPMI 直写**
+  给 GX 供电；SPMI 是纯寄存器接口，不依赖 SMEM。
+
+```text
+H234 kernel:  b26177e083e8462f881a6bb7aab84ea812e596dfeaf2ff7e9217a563bc174b56
+H234 payload: fc4aa30a1f26c42bc2d827bceaf9be09e5c8b87cf4c0fd0216e3a45a1f825a1e
+H234 boot:    173fd5448de0758485f8b17f5ca2147b5ce02a53b5420edb6ebb388f5aa3508c
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
