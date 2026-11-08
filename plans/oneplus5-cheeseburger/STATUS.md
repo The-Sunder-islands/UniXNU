@@ -9915,24 +9915,6 @@ Linux，未执行）。启动参数分别用：
 
 每轮只改 payload 的 `unixnu.toml`（`kernel_args`）并重新打包 payload，不需要重新构建内核。
 
-### 新增：设备与构建链路手册（2026-11-08）
-
-新会话不需要再问连接方式，直接读
-`plans/oneplus5-cheeseburger/diagnostics/DEVICE-AND-BUILD-ACCESS.md`，内容包括：
-
-- 三台机器的角色与固定路径（Linux 工作区 / Mac `lss@192.168.10.103` /
-  Windows `ls@192.168.10.225` 的 adb/fastboot 与镜像目录）；
-- `/tmp/opencode` 里的 SSH 辅助脚本（`rssh.sh`/`rscp.sh`/`askpass-win.sh`/
-  `known_hosts_win`）与完整命令行；
-- `fastboot boot` 的固定写法（含从 Android/TWRP 推到 bootloader）；
-- TWRP 里拉取日志的完整命令（`skip=12892347`、TWRP 不支持 `iflag=direct`）；
-- 日志解析与"按 boot 戳过滤"的可靠做法；
-- 构建链路：改动类型 → 需要重建什么（显示归档 / 单驱动 / 内核 / prelink）、
-  标准命令顺序、`prepare-xnu-source.py` 偶发失败的处置；
-- 打包：payload 76 MiB、boot args 在 `unixnu.toml`、镜像上限 81,147,904 B；
-- 上机节奏（2 分钟 vs 10 分钟）与日志窗口的四个坑（含 `gc=` 通道解法）；
-- 设备安全约束（只 `fastboot boot`、分区划分、挂死时强制重启）。
-
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
