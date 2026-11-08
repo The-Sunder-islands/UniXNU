@@ -8608,6 +8608,35 @@ H202 boot:    c9c47f94d4e14a7db04dbb867d842364b1ffdaa179b6ef317fac4361b162ded2
 
 内核沿用 H201（标记 H201）。
 
+### H202 结果：又是抓取时机（2026-11-08）
+
+新鲜槽（boot `2b9bd7cf`，到 514 s）里没有 `MetalPluginClassName`、没有 `blob=215`、
+没有 open 请求——这次启动到 514 s 还没到插件发现。按时间抓日志对这件事太脆弱。
+
+### H203：ABI 状态进入 UFS 心跳（2026-11-08）
+
+`NativeA540AcceleratorProbe.cpp` 导出：
+
+```c
+volatile int native_a540_abi_calls, native_a540_abi_last_method, native_a540_abi_reports;
+char native_a540_abi_report[64];
+```
+
+`externalMethod` 每次自增/记录 method，`SetMetadata` 把文本存进 `native_a540_abi_report`。
+`NATIVE_UFS_ALIVE` 心跳追加：
+
+```text
+abi=<calls>/<last method>/<reports> rep=<最近一次 SetMetadata 文本>
+```
+
+这样无论什么时候取日志，只要 ABI 被调用过就能看到，不再依赖发现时刻是否落在窗口里。
+
+```text
+H203 kernel:  a18224330a51dcf07064ac589283032a72bbd1f66fd02c76999040b95278000f
+H203 payload: 3d63ae5d5d943bf8ad04f6dc57c7ef5caeb23b1bb1fd72d1aba9706ea8ff7599
+H203 boot:    d612d2336ff65fbc4f13cf082c139639a83207b81549ad82a5df9a5e6df2e8ae
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

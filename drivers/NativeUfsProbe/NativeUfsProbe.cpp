@@ -49,6 +49,11 @@ extern volatile int native_gpu_addon2_stage;
 extern volatile int native_gpu_addon2_status;
 extern volatile int native_gpu_addon3_stage;
 extern volatile int native_gpu_addon3_status;
+// H203: A540 accelerator ABI state (NativeA540AcceleratorProbe.cpp), printed by the heartbeat.
+extern volatile int native_a540_abi_calls;
+extern volatile int native_a540_abi_last_method;
+extern volatile int native_a540_abi_reports;
+extern char native_a540_abi_report[64];
 }
 
 static volatile uint64_t gUfsCommands;
@@ -79,7 +84,7 @@ static uint32_t gH103SlotCursor;
 // boot wrote it.  The header alone is not enough: it is written after the
 // slot, and a late header write failure leaves a stale slots_written behind,
 // which made earlier logs mix slots from several boots.
-#define H103_BUILD "H201"
+#define H103_BUILD "H203"
 static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
@@ -372,7 +377,8 @@ heartbeatThread (void *, wait_result_t)
     if (beat == 1 || (beat % 10) == 0) {
     IOLog ("NATIVE_UFS_ALIVE: winFlight=%llu ufsFlight=%llu cmds=%llu "
            "winReq=%llu winBytes=%llu lastCmd=%llx/%llu req=%llx/%llu "
-           "addon=%d/%d/%d/%d/%d/%d owner=%d/%d ext=%d/%d dm=%d/%d wp=%d/%d\n",
+           "addon=%d/%d/%d/%d/%d/%d owner=%d/%d ext=%d/%d dm=%d/%d wp=%d/%d "
+           "abi=%d/%d/%d rep=%.31s\n",
            (unsigned long long) gWindowInFlight,
            (unsigned long long) gUfsInFlight,
            (unsigned long long) gUfsCommands,
@@ -395,7 +401,11 @@ heartbeatThread (void *, wait_result_t)
            (int) native_gpu_addon2_stage,
            (int) native_gpu_addon2_status,
            (int) native_gpu_addon3_stage,
-           (int) native_gpu_addon3_status);
+           (int) native_gpu_addon3_status,
+           (int) native_a540_abi_calls,
+           (int) native_a540_abi_last_method,
+           (int) native_a540_abi_reports,
+           native_a540_abi_report);
     }
     // H128: the process dumps and the persistent-log flush run here, in thread
     // context with no storage lock held.  They used to run from the UFS
