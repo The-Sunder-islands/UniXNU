@@ -9356,6 +9356,32 @@ H220 boot:    a022b4404833621795eb40373d1a1217f4418710ce9322ac42d99dee24c2d0d3
               81,147,904 B
 ```
 
+### H221：C1 起点，GPUCC 只读基线（2026-11-08）
+
+C0 已收尾（H220）。C1 的第一步是建立 GPU 时钟控制器的基线读数：
+
+- `sheng_gpu_power_probe()` 映射 `0x5065000`（GPUCC，0x9000，只读、cache-inhibit），
+  打印前 `0x1000` 范围内的非零寄存器（最多 48 行）并输出
+  `NATIVE_GPUCC: survey tested=… shown=…`；
+- 不写任何寄存器，也不读 GPU 内部 RBBM（未上电时可能挂总线）；
+- 与 sagit 的只读探测对齐（GPU 关闭时 GPUCC 可读：`gfx3d_clk_src` 9.6 MHz、
+  domain 1/2 关闭）。
+
+本端口没有 RPM/SPMI/GCC 驱动，因此 C1 的后续顺序确定为：
+
+1. 用本次 dump 定位 GPUCC 的 branch clock / GDSC / 状态寄存器；
+2. 实现 GPUCC 分支时钟与 GX 根时钟；
+3. 实现 GDSC（CX/GX）上电与 reset；
+4. 实现 RPM（msm8998 RPM message RAM）域/时钟投票与 PM8005 S1（SPMI）；
+5. 之后才读 RBBM 版本并进 C2（固件/ZAP）。
+
+```text
+H221 kernel:  1aa2acdbf5aa7ee1cdf66c8d2cddf422c57bc33877a00cf498d89b6776d98681
+H221 payload: 783b5d43c15b04f210bc62a553895c871f4778b64926d9127738e5071078e8b2
+H221 boot:    3fb008527f04ed2b3deae6d1660d512bfc4b318394636340bb99c393a3475b4d
+              81,147,904 B
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
