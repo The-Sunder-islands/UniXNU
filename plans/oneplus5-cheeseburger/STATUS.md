@@ -8264,6 +8264,36 @@ adrenoprobed           : 0   （daemon 无 IOLog，无法从内核日志判断�
 
 这是独立的大里程碑，不是本轮能顺手完成的改动。
 
+### H192：A540 路线里程碑 1 —— accelerator user client 应答 ABI（2026-11-08）
+
+按 A540（a5xx）重做的第一个里程碑：不改服务发布流程，只把
+`NativeA540AcceleratorProbe.cpp` 里的 `NativeAcceleratorClient` 从空壳换成能应答
+native-Adreno ABI 子集的实现：
+
+- `externalMethod()` 识别隧道头 `'NTNL'`（0x4e544e4c），对 `kProbe` 返回成功，
+  让用户态测试的 selector 探测通过（selector 0 被选中）；
+- `Query`：`abi_version=1`、GPU VA 32 位、PA 40 位、单 BO ≤ 256 MiB；
+- `GetDeviceInfo`：`chip_id=0x05040000`（A540/a5xx 族，占位值）、VA 窗口
+  `0x10000000`+`0x10000000`；
+- `GetStatus` / `GetTimestamp` / `SetMetadata`：`SetMetadata` 的文本直接
+  `IOLog("NATIVE_A540_ABI: report %s")`，这样用户态测试的每一步结果都能从启动日志读到；
+- `BoAlloc` 及之后的方法返回 `kIOReturnUnsupported`，让测试停在“已到驱动”的位置而不是
+  打开就失败。
+
+构建注意：accelerator 对象属于 legacy display 归档（H173 的敏感路径），本次
+`build-op5-legacy-display.py` 正常重建并通过归档哈希资格检查；为防 H173 式 PAC panic，
+保留 H191 镜像作为回退。
+
+```text
+H192 kernel:  a50fb8ff3ac8f28d3b48769f21a347d8e0b1fd1339e989e06d1daf9bbaad8e99
+H192 payload: ee0337eecda00c6cb0c389311226d065481f40246eca95b07ed65e543b76fa2a
+H192 boot:    e05516fd3475a7bb964ace5b6a67c6bb53eb13af4aebd0aeaabf0c0b5d50b01b
+```
+
+判读：日志应出现 `NATIVE_A540_ACCEL: user client type=16711 granted`
+（0x4147）与 `NATIVE_A540_ABI: report <进程> s<步骤> e<错误> …`；只要 report 行出现，
+就证明 `IOServiceOpen` + 隧道 + Query/GetDeviceInfo + SetMetadata 全线打通。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
