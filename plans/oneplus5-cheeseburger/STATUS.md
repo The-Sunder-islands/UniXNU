@@ -8452,6 +8452,33 @@ H197 boot:    6a190864c2f795f38c61fb7179f97dacd4b5f0d45db3f762e004db7e7527d64c
 判读：`failed MACF … backboardd` 应消失，`NATIVE_A540_ABI: method=…` 应出现，
 随后是 `NATIVE_A540_ABI: report …`。
 
+### H197 结果：授权只覆盖了部分实例（2026-11-08）
+
+`NativeSandboxGrantProcess=backboardd` 生效但只覆盖部分打开：
+
+```text
+256/260/401 s  NATIVE_DISPLAY_OPEN: service=AGXAccelerator process=backboardd grant=backboardd match=1
+260.100        open request type=1095172097 comm=backboardd → 无 MACF 拒绝
+340/349 s      IOUC AGXDeviceUserClient failed MACF … backboardd（这些时刻没有 grant 日志）
+```
+
+也就是被打开的是**另一个 AGXAccelerator 实例**（服务被重新发布过），它没有该属性；
+`NATIVE_A540_ABI: method=` 仍为 0。
+
+### H198：在 UFS 注入点同样设置授权（2026-11-08）
+
+UFS 驱动本来就会对 CA 会匹配到的 service 设置 `MetalPluginName`；同一处再设置
+`NativeSandboxGrantProcess=backboardd`，保证“实际被打开的那个实例”一定带授权。
+
+```text
+H198 kernel:  83d73118383b084b1da4d6ddfbb64f971e1c1819382bdc3b2f62541ac4c3eb5c
+H198 payload: 1db4a9445b9d4f4c63500e2ef8288fc661ed26c9ada69ef8a3376b3cd3f1eaa3
+H198 boot:    431c306d089fe1a9a071b6ecc22d6f93d60c20d065adc912bfe23ca1d79b584b
+```
+
+判读：backboardd 的 `failed MACF` 应完全消失，`NATIVE_A540_ABI: method=…` 与
+`report …` 应出现。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

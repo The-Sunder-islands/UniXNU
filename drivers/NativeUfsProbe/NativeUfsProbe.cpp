@@ -79,7 +79,7 @@ static uint32_t gH103SlotCursor;
 // boot wrote it.  The header alone is not enough: it is written after the
 // slot, and a late header write failure leaves a stale slots_written behind,
 // which made earlier logs mix slots from several boots.
-#define H103_BUILD "H197"
+#define H103_BUILD "H198"
 static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
@@ -344,6 +344,10 @@ h103MaybeSetAcceleratorPlugin (void)
   }
   h103NoteAcceleratorService ("inject", service);
   bool set = service->setProperty ("MetalPluginName", plugin);
+  // H198: the sandbox grant must be on the instance CoreAnimation actually opens. The display stub
+  // sets it in start(), but a service re-published later did not carry it (H197: grant matches at
+  // 260/401 s, backboardd MACF refusals at 340/349 s). Set it on the matched service as well.
+  service->setProperty ("NativeSandboxGrantProcess", "backboardd");
   IOLog ("NATIVE_UFS_ACCEL: service=%p MetalPluginName=%s source=%s set=%u\n",
          service, plugin, fromArg ? "arg" : "default", set ? 1 : 0);
   OSSafeReleaseNULL (service);
