@@ -8334,6 +8334,33 @@ H193 boot:    b340d85ae878317e37590782fe34fcf743d05c58538b075f65bb33a327190297
 `NATIVE_A540_ACCEL: open request type=16711`、`user client … granted` 以及
 `NATIVE_A540_ABI: report …`。
 
+### H193 结果：init 往下走了，但线程/端口保活崩溃（2026-11-08）
+
+去掉 `[super init]` 后（boot `2b9e96d3`）：
+
+- 插件镜像仍在 274.21 s 被 dlopen（`NATIVE_CACHE_SIG blob=21529520`）；
+- 但 **`backboardd exc=1` 出现 9 次**，首次在 274.226 s（镜像映射后约 16 ms），
+  `sig=11`；
+- 仍然没有 `IOServiceOpen`，也就是崩溃发生在上游测试路径的
+  `IOObjectRetain` + `pthread_create` + 线程内重新查找服务这一段，尚未到 `gpu.mark(1)`。
+
+### H194：测试改为在 init 内联运行（2026-11-08）
+
+我们的里程碑 1 驱动所有 ABI 方法立即返回、不会阻塞，所以不需要上游那套
+“后台线程 + 额外端口引用 + 线程内重新查找”结构。测试路径改为直接
+`adrenoUserTest(port, getprogname())`，published 路径不变。
+
+```text
+plugin  cea22be3cd1a0220dc7dd9c998b91e74ad266238
+daemon  38b3fd827565e631cd67270f0db76ff62fb98067
+H194 payload: 67696b84070f1bac06545bf277745902c61858fb4bb4af9c0f7da4aabd8c0597
+H194 boot:    7a6a40d485b6e23bf30b1654c9c3e951e3cc334784f9288f49bc9b68cc93c8be
+```
+
+内核沿用 H192（标记 H192）。判读：应出现 `NATIVE_A540_ACCEL: open request type=16711`
+与 `NATIVE_A540_ABI: report …`；若仍崩溃，崩溃点就已经进入测试本身（selector 探测/ABI
+调用），可从 ABI 行定位。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
