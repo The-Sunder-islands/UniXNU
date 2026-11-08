@@ -59,6 +59,11 @@ extern char native_a540_abi_report[64];
 // lost, so the heartbeat carries the verdict as well.
 extern volatile uint32_t native_gpu_addon_crc_bad;
 extern uint64_t native_ram_block_gpu_addon_physical;
+// H219: accelerator open/selector counts, written by NativeA540AcceleratorProbe.cpp.
+extern volatile uint32_t native_a540_open_count;
+extern volatile uint32_t native_a540_open_type;
+extern volatile uint32_t native_a540_sel_count;
+extern volatile uint32_t native_a540_sel_last;
 }
 
 static volatile uint64_t gUfsCommands;
@@ -89,7 +94,7 @@ static uint32_t gH103SlotCursor;
 // boot wrote it.  The header alone is not enough: it is written after the
 // slot, and a late header write failure leaves a stale slots_written behind,
 // which made earlier logs mix slots from several boots.
-#define H103_BUILD "H218"
+#define H103_BUILD "H219"
 static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
@@ -383,7 +388,7 @@ heartbeatThread (void *, wait_result_t)
     IOLog ("NATIVE_UFS_ALIVE: winFlight=%llu ufsFlight=%llu cmds=%llu "
            "winReq=%llu winBytes=%llu lastCmd=%llx/%llu req=%llx/%llu "
            "addon=%d/%d/%d/%d/%d/%d owner=%d/%d ext=%d/%d dm=%d/%d wp=%d/%d "
-           "abi=%d/%d/%d rep=%.31s gpup=%llx crcbad=%u\n",
+           "abi=%d/%d/%d rep=%.31s gpup=%llx crcbad=%u accel=%u/%u/%u/%u\n",
            (unsigned long long) gWindowInFlight,
            (unsigned long long) gUfsInFlight,
            (unsigned long long) gUfsCommands,
@@ -412,7 +417,11 @@ heartbeatThread (void *, wait_result_t)
            (int) native_a540_abi_reports,
            native_a540_abi_report,
            (unsigned long long) native_ram_block_gpu_addon_physical,
-           (unsigned) native_gpu_addon_crc_bad);
+           (unsigned) native_gpu_addon_crc_bad,
+           (unsigned) native_a540_open_count,
+           (unsigned) native_a540_open_type,
+           (unsigned) native_a540_sel_count,
+           (unsigned) native_a540_sel_last);
     }
     // H128: the process dumps and the persistent-log flush run here, in thread
     // context with no storage lock held.  They used to run from the UFS

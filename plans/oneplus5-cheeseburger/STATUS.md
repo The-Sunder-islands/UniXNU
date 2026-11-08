@@ -9254,6 +9254,38 @@ H218 boot:    e78cacaa6286976fc1210b6f5577d0a6a01f374bc807be839b94532d48b69835
 判读：若死锁解除，应看到 `open request type=16711` → `user client type=16711 granted`
 → 随后 `NATIVE_A540_ABI: sel=…` 行（插件真正调用的 selector 及其参数形状）。
 
+### H218 结果：日志窗口混入旧 slot，结论需用心跳复核（2026-11-08）
+
+- H218 启动里仍然没有 `open request type=16711`，也没有任何
+  `NATIVE_A540_ABI: sel=` 行；
+- 但发现报告里出现**上一轮启动的旧行**（例如 `NATIVE_A540_ACCEL: read key=…`
+  在 369.034694，与 H217 报告的时间戳完全相同），而当前内核二进制里已经没有
+  这个字符串。原因是 H103 窗口的 247 个 slot 覆盖多次启动，合并时并非所有旧
+  slot 都被 boot id 过滤掉。
+- 结论：**不能用合并文本判断"本轮是否发生过某事件"**，只能用心跳行
+  （由当前启动的状态写入）或原始 slot 的 boot 戳。
+
+### H219：把加速器打开/selector 计数写进心跳（2026-11-08）
+
+- `NativeA540AcceleratorProbe.cpp` 新增全局计数：
+  `native_a540_open_count/open_type`（`newUserClient` 每次调用）与
+  `native_a540_sel_count/sel_last`（`externalMethod` 每次调用）；
+- 心跳行追加 `accel=<open_count>/<open_type>/<sel_count>/<sel_last>`，
+  每 11 秒刷新，只反映**当前启动**；
+- 这样能明确回答两件事：
+  1. 真实 ABI 打开（type `0x4147` = 16711）有没有发生；
+  2. 插件到底调用了哪个 selector（tunnel 之外的原始 selector）。
+
+```text
+H219 kernel:  63b7cfc8498a2e804eb5de89b2b7758dad9892840adf3264bd8e973252d706c5
+H219 payload: 62354bfdc397d752ef5aa6f8dc18d7719423ff6f138e98a944cd45aca5bddc09
+H219 boot:    f83676ee7d51042e0263a348457c6c4e31cf628bcfaaae8db320bfb6998ae100
+              81,147,904 B
+```
+
+判读：`accel=` 的第二个数字若变成 16711 → 真实打开成功；第四个数字给出
+最后一个 selector。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
