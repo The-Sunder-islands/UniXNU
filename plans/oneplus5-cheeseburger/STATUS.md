@@ -8361,6 +8361,37 @@ H194 boot:    7a6a40d485b6e23bf30b1654c9c3e951e3cc334784f9288f49bc9b68cc93c8be
 与 `NATIVE_A540_ABI: report …`；若仍崩溃，崩溃点就已经进入测试本身（selector 探测/ABI
 调用），可从 ABI 行定位。
 
+### H194 结果：内联测试跑起来了，但 MACF 按类名拒绝（2026-11-08）
+
+boot `2b9cc4c2`：`open request` / `user client … granted` 共 23 次，说明内联测试
+真的打开了服务并开始探测（marks 1/2 都出现了），但随后：
+
+```text
+266.211  IOUC NativeAcceleratorClient failed MACF in process pid 55, backboardd
+266.386  NATIVE_A540_ACCEL: open request type=16711
+266.412  NATIVE_A540_ACCEL: user client type=16711 granted
+266.439  IOUC NativeAcceleratorClient failed MACF in process pid 55, backboardd
+266.582  NATIVE_A540_ACCEL: open request type=1095192321   (mark 0x4f01 = 打开失败)
+```
+
+内核侧 `newUserClient` 成功，但**沙箱 MACF 按用户客户端类名拒绝**，所以用户态
+`IOServiceOpen` 失败。上游 `NativeAdrenoPublish.cpp` 正是因此把连接类命名为
+`AGXDeviceUserClient`（原版 profile 只放行这个类名；探针 daemon 的 entitlement 也是它）。
+
+### H195：A540 用户客户端改名 AGXDeviceUserClient（2026-11-08）
+
+`NativeAcceleratorClient` → `AGXDeviceUserClient`（9 处），display 归档正常重建，
+内核标记 H195。
+
+```text
+H195 kernel:  8c06aba56d6def317fa1e18e21ac23c9027dfbc5bd1e8d5eeee41fd342c8ea88
+H195 payload: 9d4152ebff8575f8bdf450f4d8c25d3fd828fe1b69b98fe40ef937b57d12a048
+H195 boot:    d0605972f5d2bdbd311e2dbeb12266351c056963ab6f5b3e71f5f5484b9ce84c
+```
+
+判读：`failed MACF` 应消失；`IOServiceOpen(0x4147)` 返回成功，测试进入 selector
+探测，随后出现 `NATIVE_A540_ABI: report …`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
