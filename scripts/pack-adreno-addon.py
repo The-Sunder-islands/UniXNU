@@ -42,12 +42,13 @@ def main() -> int:
         if len(encoded) > 160 or '..' in name.split('/') or name.startswith('/'):
             sys.exit('Bad addon path ' + name)
         packed = zlib.compress(data, 9)
-        # H208: entries above 20 MiB are stored as they are. The kernel writes them without
-        # inflating, and every entry carries the CRC-32 of its stored bytes so the kernel can
-        # tell an intact boot-time addon block from one that was overwritten (the H205-H207
-        # 21.7 MB plugin stream decoded 32 bytes past its size with Z_DATA_ERROR in the kernel
-        # although the host zlib 1.2.3 decodes the same file exactly).
-        stored = len(data) > (20 << 20) or len(packed) >= len(data)
+        # H208: every entry carries the CRC-32 of its stored bytes so the kernel can tell an
+        # intact boot-time addon block from one that was overwritten (the H205-H207 21.7 MB
+        # plugin stream decoded 32 bytes past its size with Z_DATA_ERROR in the kernel although
+        # the host zlib 1.2.3 decodes the same file exactly). Entries are stored as they are
+        # only when compression does not help: the boot image cannot exceed ~81 MB (H86f), so
+        # the plugin must stay compressed.
+        stored = len(packed) >= len(data)
         if stored:
             packed = data
         body += struct.pack('<IIQQII', len(encoded), mode, len(data), len(packed),

@@ -8869,6 +8869,42 @@ H208 boot:    ca1759bc986ec04ddb68782bd219991a03b365695942d225492aa00d1a304c75
 - `crc ... got != want` → 交接块在内核读它之前已被改写，下一步按 `paddr` 定位并
   改为早期副本/保留物理页。
 
+### H208 上机：boot image 超过 81 MB，UEFI 未启动（2026-11-08）
+
+为了让插件完全绕开 zlib，H208 把 >20 MiB 的条目改为原样存储（addon 24.8 MB），
+payload 从 76 MiB 扩到 84 MiB，boot image 89,536,512 B。结果：**停在 OnePlus
+logo，UEFI 菜单都没出现**。
+
+与文档中 H86f 的现象一致（`STATUS` §H86：32 字节 policy 时 boot image 135 MB，
+停在 OnePlus logo，UEFI 根本没起来，确认是镜像过大；截断后回到 81,147,904 B
+即可启动）。已知可启动的最大镜像就是 **81,147,904 B（76 MiB payload）**，
+84 MiB payload 超出上限。
+
+结论：**原样存储的大 addon 无法经 payload 投送**（12.67 MB 增量装不进 76 MiB）。
+`board.toml` 的 `size_mib` 保持 76。
+
+### H209：压缩投送 + 条目 CRC32（C0，2026-11-08）
+
+回退原样存储，保留 H208 的格式改动：
+
+- addon 条目头 32 B：`name_bytes, mode, size, packed, crc32, flags`，
+  `flags` bit0 = 原样存储（当前不触发）；
+- 内核在写入/解压**之前**用 `z_crc32` 校验存储字节，不匹配打印
+  `crc <path> got=.. want=..` 并返回 `EILSEQ`；
+- 保留短行诊断：`blob <va> paddr=<phys> bytes= count=`、
+  `e%u off/packed/crc/stored`、每 1 MiB 一行校验和。
+
+```text
+H209 addon:   12,125,744 B（plugin packed=9,040,949 crc=? stored=0）
+H209 kernel:  4f56c8b7f8664edca5cd2dfb1ee5499b92e0726c26e4a9b105f2c59d507437c1
+H209 payload: ceb2cbe20189990fe15d1fc2510192b7359504c2b4c98141d5586331f4e8e2d4
+H209 boot:    e80d60f952668c009a54220873ee8e50725facf239075a757c489d62f755eea2
+             81,147,904 B — 与已知可启动上限完全一致
+```
+
+判读：这是**决定性一次**——`crc got == want` 说明交接块数据完好（问题在内核 zlib
+使用环境），`got != want` 说明数据在被读取前已被改写（下一步按 `paddr` 处理）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
