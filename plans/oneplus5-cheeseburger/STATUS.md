@@ -9777,6 +9777,41 @@ H234 payload: fc4aa30a1f26c42bc2d827bceaf9be09e5c8b87cf4c0fd0216e3a45a1f825a1e
 H234 boot:    173fd5448de0758485f8b17f5ca2147b5ce02a53b5420edb6ebb388f5aa3508c
 ```
 
+### C1e 起点：SPMI 与 PM8005 的权威坐标（2026-11-08）
+
+厂商 DTS（`cheeseburger.dts`）给出：
+
+```text
+qcom,spmi@800f000  compatible = "qcom,spmi-pmic-arb"
+  core   = 0x0800f000  (0x1000)
+  chnls  = 0x08400000  (0x1000000)     # 每个 slave 的通道页
+  obsrvr = 0x09400000  (0x1000000)
+  intr   = 0x0a400000  (0x220000)
+  cnfg   = 0x0800a000  (0x3000)
+  qcom,ee = 0 ; qcom,channel = 0 ; qcom,reserved-chan = 0x1ff
+  interrupts = <0 0x146 0>
+
+qcom,pm8005@5  (SPMI slave id 5)
+  regulator@1400  regulator-name = "pm8005_s1"
+    regulator-min-microvolt = 0x07dfa0 (515,000 µV)
+    regulator-max-microvolt = 0x109a00 (1,088,768 µV)
+    qcom,enable-time = 0x1f4 (500 µs)
+```
+
+GPU 的 `vdd`（第二路供电）就是 `pm8005_s1`；路线 C 计划 §4.2 也记为
+`id=1 / sid=5 / 524000..1100000 µV`。
+
+**实现要点（下一步 C1e-1）**：msm8998 的 SPMI 是 `spmi-pmic-arb`，不是直接内存映射，
+写入要走 **APID 通道 + CMD/DATA 寄存器**（参考主线 `drivers/spmi/spmi-pmic-arb.c`）：
+
+1. 由 SID=5 与 PMIC 寄存器地址 0x1400 算出 APID（arbiter 的 PPID 映射）；
+2. 通过 `chnls` 里对应的通道页写 `CMD`，再从 `DATA`/`CMD` 写数据；
+3. 读回校验；
+4. 设定目标电压（S1 的最小档 515 mV 起步），再回到 GX GDSC 重试
+   （`gx_gdscr[0x1094]` 的 bit31 应置位）。
+
+这一步不依赖 SMEM/RPM，是当前唯一可推进的 GX 供电路径。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
