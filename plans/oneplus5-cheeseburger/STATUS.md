@@ -8392,6 +8392,33 @@ H195 boot:    d0605972f5d2bdbd311e2dbeb12266351c056963ab6f5b3e71f5f5484b9ce84c
 判读：`failed MACF` 应消失；`IOServiceOpen(0x4147)` 返回成功，测试进入 selector
 探测，随后出现 `NATIVE_A540_ABI: report …`。
 
+### H195 结果：backboardd 的 open 没到 newUserClient（2026-11-08）
+
+boot `2b9a5a37`：
+
+- MACF 拒绝只剩 `mediaserverd`（7 次），**backboardd 不再被 MACF 拒绝**；
+- backboardd 在 266.65 s 完成匹配/读键/映射插件（`blob=21529504`），326.234 s 有一次
+  `op=open comm=backboardd cls=AGXAccelerator`，但**没有对应的 `open request` 内核日志**
+  —— 也就是说这次 open 没有走到我们的 `newUserClient`；
+- 没有 `NATIVE_A540_ABI: report`。
+
+日志噪声（槽合并/截断）让判断困难，需要进程级入口日志。
+
+### H196：记录请求者与 ABI 方法入口（2026-11-08）
+
+`NativeA540AcceleratorProbe.cpp`：
+
+- `makeClient` 打印 `open request type=… comm=<进程名>`（`proc_selfname`）；
+- `externalMethod` 前 24 次打印 `method=… selector=… in=… comm=<进程名>`。
+
+这样一次启动就能确定：backboardd 的 open 是否到达内核、隧道方法是否被调用。
+
+```text
+H196 kernel:  550344009317f0abcd305f63440cd2097b2b9f1aa90cf67033303a410582aa3a
+H196 payload: 55e4b26546a9cc38072647975056bedd34ef6f8d3307c2f35542de7fbd574c9d
+H196 boot:    12d4de02c7c514a6007a3098482bfd66726b50d3d5dfe9ede32e05dc9e465eff
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
