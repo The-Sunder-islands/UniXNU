@@ -9649,6 +9649,31 @@ H231 payload: 1d138ecf8d3a2fc7ab1e7d8b8824524461402fc6aa7bd879e172c511cc5b4113
 H231 boot:    727aea72610c22bddf990511bd2d8e74bc3b6f8da80b533ebb3a28e85abf54dc
 ```
 
+### C1d-3 方案 A 的可行性核查（2026-11-08）
+
+查 `drivers/DarwinBoot/DarwinBootPkg/Driver/DarwinBoot.c`：loader **不构造**
+`boot_args->MemoryMap`，`GetMemoryMap` 只用于给 `ExitBootServices` 取 Key：
+
+```c
+Status = gBS->GetMemoryMap (&MapSize, Map, &Key, &Stride, &Version);
+...
+Status = gBS->ExitBootServices (mImage, Key);
+```
+
+而 `osfmk/arm64/arm_vm_init.c` 里也没有任何 `MemoryMap` 的使用。也就是说本端口
+给 XNU 的可用 DRAM 是"连续区间"（`gPhysBase` + ADT 的 `owned_memory_size`），
+`0x86000000`（2.1 GiB）正落在区间内 → 被当作空闲内存使用/清零。
+
+因此方案 A 不能只改 loader，需要在下面二者之一动手：
+
+- **A1（内核侧）**：在 `arm_vm_init` 里把 SMEM carveout 从可用内存中挖掉
+  （在建立空闲页之前标记为已用），需要确认 arm64 空闲页来源的确切代码路径；
+- **A2（loader + 内核侧）**：loader 在 `/chosen/memory-map` 里加一个 `SMEM` 条目，
+  内核在 `arm_vm_init` 里认识并保留它（与 TrustCache 同样的处理方式）。
+
+两者都要改 `arm_vm_init.c`（敏感文件），建议先只做"读 + 打印"确认空闲页来源，
+再决定挖洞位置。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
