@@ -9502,6 +9502,44 @@ H227 boot:    b243da94629202401ee9446eb3869542e3e76a5bdcb05877398291158a07aec7
               81,147,904 B
 ```
 
+### H227/H228 结果：GDSC 已解除 collapse，但时钟不起、RBBM 全 0（C1b，2026-11-08）
+
+H227（每 beat 一步）实测：
+
+```text
+start  clamp=00000001 cx=00222001 gx=00222001 gfx3d_rcg=80000000
+step1  clamp now=00000000                 ← GX clamp 解除
+step2  cx=18222000  collapsed=0           ← CX GDSC 的 SW_COLLAPSE 已清
+step3  gfx3d_rcg=80000000 cfg=00000000    ← ROOT_OFF(bit31) 仍在
+step4  gfx3d_branch=80002621 running=0    ← 分支 CLK_OFF(bit31) 未清
+step5  gx=08222000  collapsed=0           ← GX GDSC 的 SW_COLLAPSE 已清
+```
+
+H228（清 ROOT_OFF + 轮询）结果相同，且 RBBM 三个字（hw_version/hw_release/status，
+经 `gc=24/25/26` 通道输出）**全为 0**。
+
+判读：
+
+- 两个 GDSC 的 `SW_COLLAPSE` 位已清零，说明**时钟控制器层面已接受"上电"**；
+- 但 `gfx3d_rcg`/`gfx3d_branch` 的 bit31 一直为 1，时钟没有真正输出；
+- RBBM 读回 0（不是挂死），说明 GPU 域仍未被真正供电/授时。
+
+下一步（C1c）需要按主线的 GDSC/RCG 语义补齐，而不是继续猜：
+
+1. `gpu_cx_gdsc`/`gpu_gx_gdsc` 是 **VOTABLE** 类型，主线在 `gdsc.c` 里除清
+   `SW_COLLAPSE` 外还要写 `gds_hw_ctrl`(0x1008) 的 vote 位；本端口只清了 bit0；
+2. `gfx3d_clk_src` 的根需要由**父时钟**（gpupll0 输出或 XO 分支）真正产生；
+   目前 `cxo_branch` 虽为 1，但根仍 off，需要确认 `CMD_RCGR` 的 bit31 语义
+   （ROOT_OFF 还是只读状态）；
+3. GX 域的电压来自 **RPM 的 CX/GX 投票**，本端口尚无 RPM 驱动——这很可能是
+   "GDSC 显示已上电但时钟不跑、GPU 读回 0"的根本原因。
+
+```text
+H227 boot: b243da94629202401ee9446eb3869542e3e76a5bdcb05877398291158a07aec7
+H228 boot: 119d1b59c6ed0c0d3fcbe7f40ee897c289a7a985940b66eddebf9dc69322a78f
+          kernel eb5f04f9a2ee01232327ac4b46762706145638096a4c1b602a72c5bd7c2111df
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
