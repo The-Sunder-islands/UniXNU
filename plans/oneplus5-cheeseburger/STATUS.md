@@ -9170,6 +9170,48 @@ H217 boot:    a22deeef19b7ce7a1a0e315cb7ea2e3f4041553de6dc172c285fb8129e0602ba
 判读：出现 `repaired off=32112640 len=8`（0x7b9800）+ `addon=8/8/0/0` + `abi≠0`
 → C0 完成；若 `repaired` 不出现而 CRC 仍失败，说明损坏位置变了。
 
+### H217 结果：C0 投送完成，backboardd 首次打开 AGXAccelerator（2026-11-08）
+
+```text
+NATIVE_GPU_ADDON: plugin=NativeAdreno info=0 files=8 written=8 same=0 failed=0 error=0
+addon=8/8/0/0/0/1 … crcbad=0
+late blob=… bytes=12125780 crc_bad=0
+```
+
+- 8 个文件全部写入，**没有任何 CRC 失败**：修复表（H217）把已知的 8 字节损坏
+  恢复后，插件条目校验通过；
+- `repaired`/`blob` 两行又落在日志快照窗口内被吞掉，但 `crcbad=0`、`written=8`
+  已足以证明修复生效（若未命中，插件条目仍会 `EILSEQ`）。
+
+更重要的变化：**backboardd 开始打开加速器服务**：
+
+```text
+NATIVE_IOKIT: op=open comm=backboardd cls=AGXAccelerator d=- ok=0
+NATIVE_A540_ACCEL: open request type=0x41470001 comm=backboardd … granted
+NATIVE_A540_ACCEL: user client type=0x41470001 granted
+NATIVE_A540_ACCEL: open request type=0x41470002 comm=backboardd … granted
+NATIVE_A540_ACCEL: user client type=0x41470002 granted
+```
+
+在此之前（H190–H216）backboardd 从未打开过该服务；这是插件真正投送成功后才出现
+的行为。
+
+仍未完成的部分：`abi=0/0/0`，日志里没有任何 `NATIVE_A540_ABI` 报告，即用户态
+尚未调用 Query/GetDeviceInfo 等 ABI 方法。按路线 C 计划，C0 的第二个验收点
+（`abi` 出现 Query/GetDeviceInfo）还需要下一轮。
+
+下一步候选：
+1. 先确认插件是否被 Metal 真正加载（`NativeAdrenoMetal` 的 dyld/初始化痕迹）；
+2. 或在既有 ABI 上补齐 backboardd 打开 0x41470001/0x41470002 后立即调用的方法；
+3. 同时可以开始 C1（ADT 打开 `gpu@5000000`/`gpucc`、按 §4.2 上电）。
+
+```text
+H217 kernel:  e686df836927e2d8c33dd6afdac70c25176e339c7971e439e97b33115dee38b4
+H217 payload: b81a43a633be28c7028bd135e20038f49ea46cdb4e0e35a2e8e8b8e7d406e137
+H217 boot:    a22deeef19b7ce7a1a0e315cb7ea2e3f4041553de6dc172c285fb8129e0602ba
+              81,147,904 B
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
