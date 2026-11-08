@@ -9617,6 +9617,38 @@ H230 payload: eaba1411c0be656423acbf03b9110b5966ccea0431263f6410bdf4c70540c9d1
 H230 boot:    4a1dc266fb61229a14324b7cd3cfcaa9159f1c941affc1d62f47272fa504f489
 ```
 
+### H231：映射机制验证通过，SMEM 区段为空（C1d-2，2026-11-08）
+
+同一段代码、同一种映射（`IODeviceMemory` + cache-inhibit + 只读）读两个地址：
+
+```text
+gc=36/37/38 = 5550474e / 32444441 / 00000008   ← GPU addon 头 "NGPU" "ADD2" size=8 ✓
+gc=30..35   = 00000000                          ← SMEM 头与 "COMM" 分区表全 0
+```
+
+结论：
+
+1. **映射机制正确**：已知 RAM 读出了精确的 `NGPUADD2` 头，所以不是 device/cacheable
+   属性问题；
+2. **`0x86000000` 上的 SMEM 确实为空**。最可能的解释是该区段没有被 boot_args 的
+   内存映射标记为保留，内核早期把它当可用 DRAM 使用/清零了（本端口没有 RPM 驱动，
+   也从未与 RPM 通信，所以之前没人发现）。
+
+下一步（C1d-3）有三个方向，都需要改**内存预留**，而不是继续读寄存器：
+
+- **A**：在 boot_args 的内存映射里把 SMEM carveout（`0x86000000`+2 MiB）标为保留，
+  让内核不碰它，然后重新探测 SMEM 是否恢复；
+- **B**：若 ABL 在本启动路径下根本没有放置 SMEM，则需要像 Android 内核那样由
+  bootloader 初始化 SMEM/RPM 握手，代价很大；
+- **C**：绕开 RPM：确认 GX 是否还有其它上电路径（例如 GPUCC 内部 GDSC 的 votable
+  位 + PM8005 S1 的 SPMI 直写），但这仍需要 SPMI 驱动。
+
+```text
+H231 kernel:  6a1966def36de08cea520ec5ef82f8c186c23667a2ee2f93807b8f367cc62f2a
+H231 payload: 1d138ecf8d3a2fc7ab1e7d8b8824524461402fc6aa7bd879e172c511cc5b4113
+H231 boot:    727aea72610c22bddf990511bd2d8e74bc3b6f8da80b533ebb3a28e85abf54dc
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
