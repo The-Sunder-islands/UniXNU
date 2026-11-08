@@ -9540,6 +9540,27 @@ H228 boot: 119d1b59c6ed0c0d3fcbe7f40ee897c289a7a985940b66eddebf9dc69322a78f
           kernel eb5f04f9a2ee01232327ac4b46762706145638096a4c1b602a72c5bd7c2111df
 ```
 
+### H229：GDSC 按主线 `gdsc.c` 语义重做（C1c-1，2026-11-08）
+
+H227/H228 只清了 `SW_COLLAPSE`，没有读真正的电源状态位。按主线 `gdsc.c`：
+
+- `PWR_ON = BIT(31)`；有 `gds_hw_ctrl` 的 GDSC（`gpu_cx_gdsc` = 0x1008）从该寄存器读，
+  没有的（`gpu_gx_gdsc`）从自身 GDSCR（0x1094）读；
+- 使能时还要写等待字段（EN_REST=2 @23:20、EN_FEW=8 @19:16、CLK_DIS=2 @15:12），
+  并清 `HW_CONTROL`(bit1) 与 `SW_OVERRIDE`(bit2)；
+- `SW_COLLAPSE = BIT(0)`，清 0 后延时 ≥1 µs 再轮询状态。
+
+H229 的 `gpuGdscOn()` 完整实现上述步骤，并打印
+`<name> gdscr <before>-><after> status[<reg>]=<value> on=<0|1>`。判读：`on=0` 说明
+GDSC 没有真正上电（缺电压/投票），而不是"我们没清位"。
+
+```text
+H229 kernel:  90d86e92d3c9239a6539d4993edf44b5c3768b7117bc8d6d2d120754ce601a34
+H229 payload: 581b44bb359c9f9e6cffb4f9b7aa33c9c2301a19226cb40eff7c923ea2f4784e
+H229 boot:    e164c98340cdac6998654a6220607aa58a623078d8a1fbd3cb8e3150fed413b4
+              81,147,904 B
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
