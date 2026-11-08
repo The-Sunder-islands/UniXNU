@@ -8294,6 +8294,46 @@ H192 boot:    e05516fd3475a7bb964ace5b6a67c6bb53eb13af4aebd0aeaabf0c0b5d50b01b
 （0x4147）与 `NATIVE_A540_ABI: report <进程> s<步骤> e<错误> …`；只要 report 行出现，
 就证明 `IOServiceOpen` + 隧道 + Query/GetDeviceInfo + SetMetadata 全线打通。
 
+### H192 结果：镜像已加载，但测试线程没启动（2026-11-08）
+
+按本次启动（boot `2b938e4f`，uptime 5–526 s）的新鲜槽统计：
+
+```text
+addon=8/8/0/0/0/1 owner=4/0 ext=4/2 dm=5/0 wp=1/2
+backboardd exc=1 : 0            （没有 H173 式 panic）
+MetalPluginClassName : 2        （261.69、263.10 两轮）
+NATIVE_CACHE_SIG: blob=21529520 size=186512   （261.79，插件镜像被 dlopen）
+NATIVE_A540_ABI: report : 0
+NATIVE_A540_ACCEL: open request / user client : 0
+```
+
+也就是说：accelerator 服务正常、插件镜像被成功映射、CA 读到了类名并调用
+`initWithAcceleratorPort:`，但用户态测试线程没有发出任何 `IOServiceOpen`。
+
+根因：Adreno 插件（与 nil 插件不同）在 `initWithAcceleratorPort:` 里先执行
+`self = [super init];`，而 `_MTLDevice` 的 `-init` 不是 NSObject 初始化；对插件自建
+实例返回 nil，方法因此在启动测试线程之前就返回了。
+
+### H193：测试路径跳过 `[super init]`（2026-11-08）
+
+该对象只用于承载调用、从不作为 device 使用，所以测试路径直接跳过 superclass init
+（published 路径不变）。插件/daemon/Turnip 重新 4 KiB 签名，CDHash：
+
+```text
+plugin  280cbf8ce6e11ab491a5a9eaa8db004645469ca6
+daemon  f8b5856743c5cff102970637a48eacf8a260cb05
+turnip  39a625607e3f916d6763f964fc61da74bf3895d1
+```
+
+```text
+H193 payload: 835f00e629eb6d0646c723b64d87ed39534970074d666fc7bf680c671425ea4b
+H193 boot:    b340d85ae878317e37590782fe34fcf743d05c58538b075f65bb33a327190297
+```
+
+内核沿用 H192 构建（标记 H192）。判读：应出现
+`NATIVE_A540_ACCEL: open request type=16711`、`user client … granted` 以及
+`NATIVE_A540_ABI: report …`。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
