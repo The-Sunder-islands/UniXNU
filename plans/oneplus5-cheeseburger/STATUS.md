@@ -8585,6 +8585,29 @@ H201 payload: 5124c133c2445089813000ce2b0ec9cbc62c0cf7cca594e85aa8049dffe0da08
 H201 boot:    ebafa20f49333c227b8e9474ee88aa0b1c650ef18ca397f26220ad0aeb09624b
 ```
 
+### H201 结果：间歇性竞态（2026-11-08）
+
+新鲜槽（boot `24444a61`，31–1355 s）：backboardd 只做了 mark 1/2（250.7/433.3/591.2 s），
+主连接 `open(0x4147)` 一次都没到内核；mediaserverd 反而打开了两次主连接。没有
+backboardd 崩溃、没有 ABI 行。与 H200 第二次启动（主连接+探测+Query 全成功）对比，
+说明剩下的是**端口/服务实例的时序竞态**：discovery 传入的 accelerator port 在测试执行
+期间会失效或被重新发布。
+
+### H202：测试前重新查找服务并重试（2026-11-08）
+
+`NativeAdrenoUserTest.h`：在打开 0x4147 之前先
+`IOServiceGetMatchingService("IOAcceleratorES")` 取一个新鲜的 port；若第一次打开仍失败，
+再用重新查到的 port 重试一次（与上游线程内重新查找的做法一致，但保持内联）。
+
+```text
+plugin  ee40b192ba28a76a7b394caa0967b65abda8b4e2
+daemon  08b8944448a21b3d4e6b7b261799e3332cb23c74
+H202 payload: 4bb701337461b244801c42effaccdebd5eef9992010350ed3c208fbc13c784c2
+H202 boot:    c9c47f94d4e14a7db04dbb867d842364b1ffdaa179b6ef317fac4361b162ded2
+```
+
+内核沿用 H201（标记 H201）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
