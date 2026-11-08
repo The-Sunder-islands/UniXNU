@@ -9901,11 +9901,30 @@ SMPS（0x03/0x08 或 0x09）、且 GX GDSC 仍处于 collapse 时，才会写 PM
 `gc=87:00000003`、`gc=88:00000008` 确认 PM8005 SMPS；`gc=104` 的 bit31 为 1 才表示
 GX 真正上电。
 
-本会话在 Linux 上完成源码与离线语法检查（clang++/g++ `-fsyntax-only` 均无告警）。
-**内核镜像未在本机构建**：kernel/prelink 步骤需要 macOS + Xcode，构建与实测哈希待回填。
+**H236 构建（Mac `lss@192.168.10.103`，2026-11-08）**：`build-op5-legacy-display.py`
+按 `-Werror` 重建 `libNativeLegacyDisplay.late.a`，`run-h103n-build.sh` 的环境
+（含 `XNU_NATIVE_LEGACY_DISPLAY=1`、`XNU_OWNER_DATA_MOUNT=1`）完成内核链接，prelink
+输出 `kernel.macho`。首轮编译暴露并修复了 `gSpmi2Count++` 在 C++20
+`-Wdeprecated-volatile` 下的错误（改为局部计数再写回）。
 
-构建沿用设备仓库 README 的 kernel → payload → `scripts/make-bootimg.py` 流程（本机为
-Linux，未执行）。启动参数分别用：
+构建机上 `build-xnu-4k-baseline.sh` 的补丁循环对已打补丁的树不是幂等的（`native-aes`
+等 35 个 patch 在二次运行时冲突），所以本轮先 `git reset --hard d8b8029 && git clean -fdx`，
+由 bootstrap 一次性应用全部 114 个 patch，再用 `XNU_SKIP_PATCH_LOOP=1` 跑最终构建；
+`xnu-work` 的改动已备份在 Mac `~/h236-backup/`。这是构建机工作流问题，不是 C1e-2 代码问题。
+
+产物（payload 以 H235 的 76 MiB FAT 为基线，只替换 `kernel.macho` 并把
+`sheng-gpu-power=1` 改成 `2`；firmware 与 H235 相同，`fw-H103ea` 0x163917aa…）：
+
+```text
+H236 kernel  b2f8e50b7fb4f1cc0cd82250503176f3f5d135b1f52896adac0abe97ac35cbf5
+H236 payload 971adcfee953bc630c1bbeb592f1ca557e273846cac0a10bacf245dcffb80c7e
+H236 boot    ec605b344bc180c9c0bee2ae60c7f41f88b4c6fda972cff6c457d55987bcf9f0
+```
+
+同一打包方式重打 H235 得到 `19f1160d…`，与 STATUS 的 H235 boot 哈希一致，说明
+boot 头/地址/固件基线与上一轮完全相同。
+
+启动参数分别用：
 
 ```text
 第一轮  sheng-gpu-power=2    只读 survey
@@ -9914,6 +9933,8 @@ Linux，未执行）。启动参数分别用：
 ```
 
 每轮只改 payload 的 `unixnu.toml`（`kernel_args`）并重新打包 payload，不需要重新构建内核。
+镜像已放到 Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H236.img`，手机当前在 TWRP
+（adb `16149951 recovery`），待执行 `fastboot boot`。
 
 ## 更新规则
 
