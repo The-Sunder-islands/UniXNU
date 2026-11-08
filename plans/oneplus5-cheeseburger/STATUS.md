@@ -10012,6 +10012,47 @@ gc=111 00000000   RBBM 0x0210
 - 下一步 C2：Fabia PLL → 257 MHz、gfx3d_clk_src 分频、根时钟使能，再读 RBBM
   确认 A540 ID 并进入 GMU/CP。
 
+### H236g：Fabia PLL 与 gfx3d 根/分支时钟（C2，2026-11-08）
+
+H227 只清了 `CMD_RCGR` 的 **bit31**（这是只读的 ROOT_STATUS），没有置 **bit1**
+（ROOT_ENABLE），所以根时钟一直显示 `0x80000000`。正确语义是：
+
+```text
+0x1070 CMD_RCGR : bit0 = CONFIG_UPDATE，bit1 = ROOT_ENABLE，bit31 = ROOT_STATUS (RO)
+0x1074 CFG_RCGR : [4:0] div，[10:8] src（1 = gpu_pll0 的 even 输出）
+```
+
+C2 序列（kernel `8147dc53…`，payload `93a7ce42…`，boot `4dd225e2…`）：
+
+1. Fabia PLL：L=53、alpha=0x8aab → VCO 1028 MHz；USER_CTL_LO 的 even post-div=1
+   （/2）→ 514 MHz；置 RESET_N、OPMODE=RUN，等 LOCK；置 OUTCTRL；
+2. RCG：CFG=0x101（even 源、div 1 → 257 MHz），CMD 先 update 再置 ROOT_ENABLE；
+3. branch：0x1098 bit0+bit13；4. GX reset + RBBM。
+
+实测：
+
+```text
+gc=105 d0000005   PLL MODE：bit31 lock=1，bit30 active=1，bit0 outctrl=1
+gc=106 00000035   PLL L=53
+gc=107 00000002   RCG：ROOT_ENABLE=1，ROOT_STATUS=0
+gc=108 00000101   CFG：even 源、div 1
+gc=109 80002621   branch 写后立即读（bit31 仍 1）
+gc=110 00000000   GX BCR
+gc=111..113       RBBM 00010042 / b5f00000 / 00000000
+```
+
+后续 GPUCC survey（同一 boot）：
+
+```text
+gc=15 00000002    gfx3d_rcg 根已开
+gc=18 00002621    gfx3d_branch 已开（bit31=0）
+gc=17 a0282000    GX GDSCR PWR_ON
+```
+
+结论：**C2 的供电+时钟链路打通**：S1 752 mV → GX GDSCR PWR_ON → Fabia PLL 锁定
+→ gfx3d 根 257 MHz → 分支使能 → RBBM 可读。RBBM 身份为 `0x00010042 /
+0xb5f00000`。下一步 C3：从 RBBM/GMU 读 GPU ID，启动 GMU/CP。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
