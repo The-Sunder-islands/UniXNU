@@ -9978,6 +9978,40 @@ boot 头/地址/固件基线与上一轮完全相同。
 下一步：`sheng-gpu-power=3` 验证写通路（ENABLE 原值写回），再 `=4`
 （保留 752 mV → MODE HPM → ENABLE → GX GDSC）。
 
+### H236f：EXT_WRITEL 写通路成立，GX 首次 PWR_ON（2026-11-08）
+
+PM8005 的 QPNP 寄存器用 **16 位寄存器号**（0x1446），厂商 regmap 走
+`spmi_ext_register_writel`，对应仲裁器 **opcode 0（EXT_WRITEL）**。标准写
+（14）和 8 位扩展写（2）都会返回 `STATUS DONE`，但 PMIC 不更新寄存器；这就是
+H236d/H236e 里 `MODE 06->07`、`ENABLE 00->80` 读回仍是 6/0 的原因。
+
+改用 opcode 0 后（kernel `6304a821…`，payload `cc3a44b9…`，boot `4d0e6697…`）：
+
+```text
+gc=99  00000007   MODE 写
+gc=100 00000080   ENABLE 写
+gc=101 00000080   enable 回读  ← bit7=1
+gc=102 00000002   vset 回读（752 mV）
+gc=103 00000007   mode 回读（HPM）
+gc=104 a0282000   GX GDSCR，bit31=1  ← GX PWR_ON
+gc=105 80000000   gfx3d_rcg（根仍 off）
+gc=106 00000000   gfx3d cfg（XO）
+gc=107 80002621   gfx3d_branch（写后；后续 GPUCC survey 读到 00002621）
+gc=108 00000000   GX BCR
+gc=109 00010042   RBBM 0x0000
+gc=110 b5f00000   RBBM 0x0004
+gc=111 00000000   RBBM 0x0210
+```
+
+结论：
+
+- **C1e-2 完成**：S1 在 752 mV 使能，GX GDSC 首次置 PWR_ON，RBBM 能读；
+- `gfx3d_branch` 的 bit31 最终清掉（GPUCC survey 的 0x1098 = 0x00002621），
+  但 `gfx3d_rcg`(0x1070) 仍是 0x80000000；根时钟的父时钟（gpupll0/Fabia）
+  `lval=0`、`status=0`，仍未起振；
+- 下一步 C2：Fabia PLL → 257 MHz、gfx3d_clk_src 分频、根时钟使能，再读 RBBM
+  确认 A540 ID 并进入 GMU/CP。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
