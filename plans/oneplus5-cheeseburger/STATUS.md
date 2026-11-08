@@ -8833,6 +8833,42 @@ H207 payload: 2cc080c864bca0326ac6cffd4f1e5708d04d4a5e1f1e3e60b6782c79097dc5a4
 H207 boot:    ddd9a9b3f2e19c7fe7485466c2779b2aa5cd7d725c520579e36a7d07e584ae74
 ```
 
+### H208：条目 CRC32 + 原样存储，插件绕开 zlib（C0，2026-11-08）
+
+H207 只抓到 dylib 的源校验和（`fnv=2fc21ad9`，与主机一致）；插件的诊断行没有进入
+日志环，但 `inflate`/`failed` 行仍在。为了一次拿到确定结论并尽量解除 C0：
+
+- addon 条目头从 24 B 扩到 32 B：`name_bytes, mode, size, packed, crc32, flags`；
+  `flags` bit0 = 原样存储。blob magic 仍是 `NGPUADD2`（loader 只校验 magic/总长）；
+- 内核在写入/解压前用 `z_crc32` 校验**存储字节**，不匹配就打印
+  `crc <path> got=.. want=..` 并返回 `EILSEQ`；
+- `pack-adreno-addon.py`：大于 20 MiB 的条目**原样存储**（当前只有 Metal 插件），
+  这样解压路径完全不参与该文件的投送；
+- `NativeRamBlock` 导出 `native_ram_block_gpu_addon_physical`，安装时打印
+  `blob <va> paddr=<phys> bytes=.. count=..`，可对照 `TopOfKernelData`/VM 区间；
+- 诊断改为短行：每条目一行 `e%u off/packed/crc/stored`，之后每 1 MiB 一行校验和。
+
+新的 addon（24,800,808 B）关键值：
+
+```text
+plugin  e1 off=480      packed=21716016 crc=32bf9d33 stored=1
+turnip  e3 off=21717208 packed=3066332  crc=eed78f81 stored=0
+```
+
+payload 从 76 MiB 扩到 **84 MiB**（内容 80,533,512 B，剩余 6.8 MiB），
+`ramdisk_end = 0x17400000 < tags 0x18000000`。
+
+```text
+H208 kernel:  b3d104e6289dfdd07a232e3aa1e356edef8ff013e2d9198d8b292c579892100f
+H208 payload: df6933118de33f2a474b58836f547c85c7211f157a45c866e95ba2e234cc3968
+H208 boot:    ca1759bc986ec04ddb68782bd219991a03b365695942d225492aa00d1a304c75
+```
+
+判读：
+- `crc ... got == want` 且 `addon=8/8/0/0` → 源数据完好，插件已按原样写入，C0 完成；
+- `crc ... got != want` → 交接块在内核读它之前已被改写，下一步按 `paddr` 定位并
+  改为早期副本/保留物理页。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

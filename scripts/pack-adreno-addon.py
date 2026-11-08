@@ -42,7 +42,16 @@ def main() -> int:
         if len(encoded) > 160 or '..' in name.split('/') or name.startswith('/'):
             sys.exit('Bad addon path ' + name)
         packed = zlib.compress(data, 9)
-        body += struct.pack('<IIQQ', len(encoded), mode, len(data), len(packed)) + pad(encoded) + pad(packed)
+        # H208: entries above 20 MiB are stored as they are. The kernel writes them without
+        # inflating, and every entry carries the CRC-32 of its stored bytes so the kernel can
+        # tell an intact boot-time addon block from one that was overwritten (the H205-H207
+        # 21.7 MB plugin stream decoded 32 bytes past its size with Z_DATA_ERROR in the kernel
+        # although the host zlib 1.2.3 decodes the same file exactly).
+        stored = len(data) > (20 << 20) or len(packed) >= len(data)
+        if stored:
+            packed = data
+        body += struct.pack('<IIQQII', len(encoded), mode, len(data), len(packed),
+                            zlib.crc32(packed) & 0xffffffff, 1 if stored else 0) + pad(encoded) + pad(packed)
     blob = b'NGPUADD2' + struct.pack('<IIQ', len(files), 0, 24 + len(body)) + body
     output.write_bytes(blob)
     for name, mode, data in files:
