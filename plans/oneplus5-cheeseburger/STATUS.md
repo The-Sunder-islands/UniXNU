@@ -8683,6 +8683,33 @@ H204 boot:    1dc626feab3665f5230c2c7a47a50c6e7fa010f4f9d585569a4f336166a59e5e
 （本轮构建遇到一次 `prepare-xnu-source.py` 的 `http.client.RemoteDisconnected`，
 清掉 `.cache/xnu-work` 后重新构建即通过，属已知间歇问题。）
 
+### H204 结果：失败的是插件可执行文件本身（2026-11-08）
+
+```text
+38.730  NATIVE_GPU_ADDON: failed /private/var/ngpu/addons/NativeAdreno.bundle/NativeAdrenoMetal
+        error=22 (EINVAL) size=21716016
+```
+
+- 失败文件是 **21.7 MB 的插件可执行文件**，发生在 launchd 启动之前；
+- bundle 缺可执行文件 → CA 拿不到 principal class → `abi=0`；
+- 心跳 `addon=8/7/0/1/22/1`、`abi=0/0/0` 与之吻合；
+- H191/H193 曾成功安装同样大小的文件，嫌疑集中在“已存在旧文件时的
+  `O_TRUNC` + `IO_UNIT` 整块写入”路径（见路线 C 计划 §7.1）。
+
+### 参考项目调研（2026-11-08）
+
+已 `git fetch` 最新代码：
+
+- `sagit-ios-port`（小米 6 / MSM8998 / A540，同 SoC/GPU）：完整 A540 GPU kext、
+  QcomMTL、内核侧上电计划、平台策略（RPM/GPUCC/PM8005/OPP/ZAP/IOVA）、固件清单；
+- `ios-sweet`（OnePlus 5）：无 GPU 时 CA 渲染器不启动（与我们一致），
+  以及 CA::OGL::SW 等渲染器研究；
+- `hackios-xnu-kernel`：RedwoodGPU（Linux msm DRM ABI）+ OnePlus 5 a5xx 移植说明；
+- `DinnerABC/UniXNU-cheeseburger`：GPU 不可用，A740 实现不适用于 MSM8998。
+
+路线 C 的完整计划：`plans/oneplus5-cheeseburger/diagnostics/A540-route-C-plan-2026-11-08.md`
+（内核侧上电、原生 IOGPU 服务与 type-1 客户端、entitlement 准入、C0–C6 里程碑）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
