@@ -1,0 +1,31 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7747,17 +7747,21 @@
+ 				printf("\n");
+ 			}
+ 		}
+-		/* 1 MiB pieces to find the bad megabyte, then 64 KiB pieces over the 7-8 MiB window the
+-		 * earlier boots failed in. H212 printed all 144 pieces and lost every line past 0x520000. */
++		/* 1 MiB pieces to find the bad megabyte. H213 narrowed the corruption to the single
++		 * 64 KiB piece 0x7b0000..0x7c0000 (plugin stream) on every boot, so print its content
++		 * instead of more hashes: 32 bytes at every 4 KiB tells the writer apart (zeros, log
++		 * text, a DMA descriptor, or a copy of another file range). */
+ 		for (uint64_t c = 0; c < native_gpu_addon_bad_bytes; c += 1 << 20) {
+ 			uint64_t length = native_gpu_addon_bad_bytes - c < (1 << 20) ? native_gpu_addon_bad_bytes - c : (1 << 20);
+ 			printf("NATIVE_GPU_ADDON: late m%llu %08x\n", (unsigned long long)(c >> 20),
+ 			    native_gpu_addon_fnv(native_gpu_addon_bad_source + c, length));
+ 		}
+-		for (uint64_t c = 0x700000; c < 0x800000 && c < native_gpu_addon_bad_bytes; c += 1 << 16) {
+-			uint64_t length = native_gpu_addon_bad_bytes - c < (1 << 16) ? native_gpu_addon_bad_bytes - c : (1 << 16);
+-			printf("NATIVE_GPU_ADDON: late f%llu %08x\n", (unsigned long long)c,
+-			    native_gpu_addon_fnv(native_gpu_addon_bad_source + c, length));
++		for (uint64_t c = 0x7b0000; c < 0x7c0000 && c < native_gpu_addon_bad_bytes; c += 0x1000) {
++			printf("NATIVE_GPU_ADDON: late b%llu", (unsigned long long)(c - 0x7b0000));
++			for (uint64_t k = 0; k < 32 && c + k < native_gpu_addon_bad_bytes; ++k) {
++				printf(" %02x", native_gpu_addon_bad_source[c + k]);
++			}
++			printf("\n");
+ 		}
+ 	}
+ }

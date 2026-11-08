@@ -9056,6 +9056,36 @@ H213 boot:    1967ddb4dfd8994f8679a6156a97d0ae029bdcbc9601bd5cecc92bcb65937010
               81,147,904 B
 ```
 
+### H213 结果：副本与交接块逐字节相同，损坏在 64 KiB 内精确定位（2026-11-08）
+
+```text
+late blob=… paddr=6542426112 bytes=12125744 crc_bad=1
+late crc_bad source=… bytes=9040949 off=480
+late copyvirt=fffffffbb86b1000 copybytes=12125744 block=0xfffffff00cf58000
+     blockbytes=12125744 diff=12125744
+late m0..m6 = 主机一致；m7 3ef50fb0（期望 5123d802）；m8 一致
+```
+
+- `diff == 总长` → **早期副本与 loader 交接块完全相同**；既然副本本身已坏，
+  损坏发生在 `NativeRamBlock::start()` 复制**之前**，不是安装期被踩；
+- 64 KiB 粒度（`0x700000..0x800000` 共 16 块，全部打印成功）显示：
+  **只有 `0x7b0000..0x7c0000` 这一块不符**，其余 15 块与主机完全一致；
+- 对应 addon 偏移 `0x7b01e0..0x7c01e0`，物理地址约
+  `0x1867081e0..0x1867181e0`（约一个 64 KiB 页范围）。
+
+### H214：打印坏块内容（C0，2026-11-08）
+
+- 保留 `late blob` / `late crc_bad` / `diff=` / 9 行 1 MiB 校验和；
+- 对已知坏块 `0x7b0000..0x7c0000` 每 4 KiB 打印 32 字节（16 行），
+  用内容特征判断写入者（全 0、ASCII 日志、DMA 描述符、或文件另一段的拷贝）。
+
+```text
+H214 kernel:  88791801ff4646be3ab94663b0e73d14c45f0860079085c7c51f0bbdd8b01b04
+H214 payload: 706cf4fdaefeb6900b7324600b5475903e5ad1bbeb7b24f0898762a9b12ee848
+H214 boot:    010ab231f7c513ecfc834dcdcc81ecd87abd0ff5a797f7305a0e600f1bb14a68
+              81,147,904 B
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
