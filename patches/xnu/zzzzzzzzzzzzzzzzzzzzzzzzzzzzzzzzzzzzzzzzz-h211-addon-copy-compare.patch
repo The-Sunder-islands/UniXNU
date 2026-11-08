@@ -1,0 +1,65 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7381,6 +7381,8 @@
+  * Counters for the boot log: files in the addon (-1 none), files written, files already equal, failures and the last error. */
+ extern int native_ram_block_gpu_addon(const uint8_t **, uint64_t *) __attribute__((weak_import));
+ extern uint64_t native_ram_block_gpu_addon_physical __attribute__((weak_import));
++extern int native_ram_block_gpu_addon_block(const uint8_t **, uint64_t *) __attribute__((weak_import));
++extern int native_ram_block_gpu_addon_copy_info(uint64_t *, uint64_t *, uint64_t *) __attribute__((weak_import));
+ #include <libkern/zlib.h>
+ /* zlib's state, from kalloc with its size in front (the default allocator of the kernel's zlib is not meant for this). */
+ static voidpf
+@@ -7715,12 +7717,49 @@
+ 		printf("NATIVE_GPU_ADDON: late crc_bad source=%p bytes=%llu off=%llu\n",
+ 		    native_gpu_addon_bad_source, (unsigned long long)native_gpu_addon_bad_bytes,
+ 		    (unsigned long long)(native_gpu_addon_bad_source - addon));
+-		for (uint64_t c = 0; c < native_gpu_addon_bad_bytes; c += 1 << 20) {
+-			uint64_t length = native_gpu_addon_bad_bytes - c < (1 << 20) ? native_gpu_addon_bad_bytes - c : (1 << 20);
+-			printf("NATIVE_GPU_ADDON: late c%llu %08x\n", (unsigned long long)(c >> 20),
++		/* H211: 64 KiB pieces, so the host can pinpoint the rewritten range. */
++		for (uint64_t c = 0; c < native_gpu_addon_bad_bytes; c += 1 << 16) {
++			uint64_t length = native_gpu_addon_bad_bytes - c < (1 << 16) ? native_gpu_addon_bad_bytes - c : (1 << 16);
++			printf("NATIVE_GPU_ADDON: late f%llu %08x\n", (unsigned long long)c,
+ 			    native_gpu_addon_fnv(native_gpu_addon_bad_source + c, length));
+ 		}
+ 	}
++	/* H211: is the loader block itself already wrong, or did the copy get rewritten? */
++	if (native_gpu_addon_crc_bad) {
++		uint64_t copy_virt = 0, copy_phys = 0, copy_bytes = 0;
++		const uint8_t *block = NULL;
++		uint64_t block_bytes = 0;
++		if (native_ram_block_gpu_addon_copy_info &&
++		    native_ram_block_gpu_addon_copy_info(&copy_virt, &copy_phys, &copy_bytes) &&
++		    native_ram_block_gpu_addon_block && native_ram_block_gpu_addon_block(&block, &block_bytes)) {
++			uint64_t diff = bytes < block_bytes ? bytes : block_bytes, at = 0;
++			for (uint64_t k = 0; k < diff; ++k) {
++				if (block[k] != addon[k]) {
++					at = k;
++					break;
++				}
++				if (k + 1 == diff) {
++					at = diff;
++					break;
++				}
++			}
++			printf("NATIVE_GPU_ADDON: late copyvirt=%llx copyphys=%llx copybytes=%llu block=%p blockbytes=%llu diff=%llu\n",
++			    (unsigned long long)copy_virt, (unsigned long long)copy_phys, (unsigned long long)copy_bytes,
++			    block, (unsigned long long)block_bytes, (unsigned long long)at);
++			if (at < diff) {
++				printf("NATIVE_GPU_ADDON: late copy ");
++				for (uint64_t k = 0; k < 16 && at + k < diff; ++k) {
++					printf(" %02x", addon[at + k]);
++				}
++				printf("\n");
++				printf("NATIVE_GPU_ADDON: late block");
++				for (uint64_t k = 0; k < 16 && at + k < diff; ++k) {
++					printf(" %02x", block[at + k]);
++				}
++				printf("\n");
++			}
++		}
++	}
+ }
+ static void
+ native_gpu_addon_prepare(proc_t p, user_addr_t scratch)

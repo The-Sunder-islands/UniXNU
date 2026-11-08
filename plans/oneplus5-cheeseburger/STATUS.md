@@ -8951,6 +8951,44 @@ H210 boot:    0f1cef6a5e28bed003b1bb8def1d9ea4c2eb68de2b62c796723911aaa1b78f6e
 判读：`crcbad=0` 且 `addon=8/8/0/0` → 早期副本完好，C0 完成；若 `crcbad>0`，
 说明副本也已被改写，`late c*` 行会指出被改写的位置。
 
+### H210 结果：只有 7–8 MiB 那一段被改写（2026-11-08）
+
+```text
+NATIVE_GPU_ADDON: late blob=0xfffffff78966e000 paddr=6542426112 bytes=12125744 crc_bad=1
+NATIVE_GPU_ADDON: late crc_bad source=0xfffffff78966e1e0 bytes=9040949 off=480
+NATIVE_GPU_ADDON: late c0 a4c47b8b   … c6 43bcb43d   c7 3ef50fb0   c8 94cc5623
+addon=8/7/0/1/92/1 … gpup=185f58000 crcbad=1
+```
+
+- addon 物理地址 **0x185f58000**（6.09 GiB），不是之前推测的低地址；
+- 主机期望值：`… c6 43bcb43d  c7 5123d802  c8 94cc5623`；
+- 内核实测：只有 **c7** 不符（插件流 7–8 MiB），其余 8 个 1 MiB 块**完全一致**；
+- 即被改写的是 addon 偏移 7,340,512 起（物理约 `0x1866581e0`）的一小段，
+  范围 < 1 MiB；
+- 早期副本（`NativeRamBlock::start` 的快照）里就已经是坏的 → 损坏发生在
+  快照之前，不是安装期的缓冲区踩踏。
+- 心跳字段 `gpup=`/`crcbad=` 不受日志快照影响，已确认可用。
+
+### H211：副本 vs 交接块逐字节比较（C0，2026-11-08）
+
+- `NativeRamBlock` 新增 `native_ram_block_gpu_addon_block()`（直接返回 loader
+  交接块）与 `native_ram_block_gpu_addon_copy_info()`（副本的虚拟/物理地址），
+  快照日志增加 `copy=.. copyphys=..`；
+- `kern_exec` 在 CRC 失败时比较**副本**与**交接块**，打印首个不同偏移
+  `diff=` 以及该处两侧各 16 字节，并把定位粒度细化为 **64 KiB**（`late f<off>`）。
+
+判读：
+- `diff` 与 64 KiB 分段能指出被改写的确切范围；
+- `block`/`copy` 两侧字节可对照主机文件，判断写入者的内容特征（全 0、ASCII、
+  像素值等），从而定位写入者。
+
+```text
+H211 kernel:  007de9cb57ab46debd4cc8f51cfcaf3f8bf18acbbafe4edd22e374a7cb15c7a0
+H211 payload: b255c1d8c19dea5ff4fb8cf079fbb5d9066408092bea781143914aa2438e45f7
+H211 boot:    0c453ce98e14026df85d24743a59035331d79c6aaf46d6e11937ed93449a467b
+              81,147,904 B
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
