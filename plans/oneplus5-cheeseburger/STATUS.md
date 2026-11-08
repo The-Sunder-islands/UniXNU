@@ -8226,6 +8226,44 @@ H191 boot:    9f08a70a7056385273ca7488e57090a7af5e43ca71e2913d7fe9862ec80288cb
 CA 是否加载 `NativeAdreno.bundle`、是否出现 `NILMETAL` 之外的插件日志，以及
 backboardd 是否打开 AGX user client、是否出现帧。
 
+### H191 结果：真实插件已投放，但设备仍未建立（2026-11-08）
+
+按本次启动（boot id `88c649c3`，uptime 5–712 s）的新鲜槽统计：
+
+```text
+addon=8/8/0/0/0/1  owner=4/0  ext=4/2  dm=5/0  wp=1/2
+comm=backboardd exc=1 : 0
+MetalPluginClassName   : 1
+MetalPluginName=NativeAdreno source=arg set=1
+NATIVE_FRAME           : event=5 client=1 xfer=0 frames=0
+adrenoprobed           : 0   （daemon 无 IOLog，无法从内核日志判断是否启动）
+```
+
+- 8 个 addon 文件全部落地（bundle + Turnip dylib + advert daemon + 3 个 plist）；
+- `ext=4/2`：Extensions overlay 正常；**`dm=5/0`：LaunchDaemons overlay 也到了
+  stage 5**（我方自己的 plist 可见），这是这次新打通的一条通道；
+- backboardd 不崩，CA 读到了类名，但没有任何 `op=open ... AGX` 记录，也没有帧。
+
+结论：**用户态半边已经完整**（插件、Turnip、签名、trust cache、addon、两个 overlay），
+但 `initWithAcceleratorPort:` 里真正的 `IOGPUDeviceCreateWithAPIProperty` 需要内核
+提供一个能 `IOServiceOpen` 的 AGX/Adreno user client；当前内核里只有
+`NATIVE_UFS_ACCEL` 注入的 `AGXAccelerator` 影子服务（没有 user client 实现），
+所以设备建立失败，CA 仍然没有 Metal 设备。
+
+### 下一里程碑：内核侧 NativeAdreno（未开始）
+
+仓库里已有完整驱动（`drivers/NativeAdreno`，构建开关 `XNU_NATIVE_ADRENO=1`，
+归档 `build/native-adreno/libNativeAdreno.a`），但在 cheeseburger 上被关闭。启用需要：
+
+1. GPU 固件（`scripts/data/adreno-inputs.json` 的 `firmware`，用
+   `fetch-adreno-inputs.py` 拉取）；
+2. GPU 电源/时钟域（Sheng PMGR 的 CX/GX；ADT 生成器的 `--gpu` 目前只是引用节点，
+   不做硬件初始化）；
+3. SMMU（`kits/ArmSmmu4K`）与 GMU 冷启动（`NativeAdrenoGmuContextBringup`）；
+4. 在板级 probe 里按顺序调用，并通过 addon 已打通的通道验证。
+
+这是独立的大里程碑，不是本轮能顺手完成的改动。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
