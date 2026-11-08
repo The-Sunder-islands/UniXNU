@@ -9936,6 +9936,48 @@ boot 头/地址/固件基线与上一轮完全相同。
 镜像已放到 Windows `D:\Users\ls\Documents\OnePlus5_ios\boot-H236.img`，手机当前在 TWRP
 （adb `16149951 recovery`），待执行 `fastboot boot`。
 
+### H236 结果：SPMI 读通路成立，S1 是 FTS426 而不是 GP_CTL SMPS（2026-11-08）
+
+第一轮 `sheng-gpu-power=2`（只读）成功落盘，`NATIVE_BUILD: H236`，
+`gc=80..94`：
+
+```text
+80 30000000   版本（v3 数据通路）
+81 00000514   PPID（sid=5, addr>>8=0x14）
+82 00000001   APID = 1
+83 00000000   owner = EE 0（可写）
+86 00000000   rev
+87 0000001c   TYPE  = 0x1c  ← FTS，不是 BUCK/GP_CTL
+88 0000000a   SUBTYPE = 0x0a ← FTS426
+89 000000f0   0x1440 = 0xf0（16 位电压的低字节）
+90 00000002   0x1441 = 0x02 → 0x02f0 = 752 mV
+91 00000006   MODE = 6（common2 AUTO）
+92 00000000   ENABLE = 0x00（未使能）
+93 00000081   STEP_CTRL = 0x81
+94 ffffffff   旧 8 位 RANGE/VSET 解码失败（range=0xf0 非法）
+```
+
+判读：
+
+- **APID 映射/通道/EE 仲裁全部正确**：`0x514 → APID 1 → owner 0`，8 个读事务
+  全部 `rc=0`；
+- PM8005 S1 是 **FTS426（type 0x1c/subtype 0x0a，FTSMPS2）**，使用 common2 布局：
+  `0x40/0x41` 是 16 位小端电压（mV），`MODE 0x45` 是 3 位 AUTO/HPM 选择，
+  **不是** 8 位 RANGE/VSET；因此旧解码得到 `0xffffffff` 是预期结果，不是读失败；
+- 当前寄存器已存 **752 mV**，MODE=AUTO(6)，ENABLE=0（轨未开）。
+
+据此修正 mode 4：FTS426 走 `pm8005Voltage()`（16 位 mV）与 MODE=7(HPM)；
+若已存电压在 500–1100 mV 内就**保留 752 mV**，只补 MODE/ENABLE，不再写电压。
+
+根卷验证：干净重建漏掉了 `zzz-root-auth-bypass.patch`（`native-skip-root-auth`
+不生效，`bsd_init.c:1103` panic）。补上该 patch 后重建得到 H236b
+（kernel `1d452686…`），启动日志出现
+`NATIVE_ROOT_AUTH_BYPASS: autherr=80`，不再提前 panic；H236b boot
+`80618feb…`。这是构建补丁状态问题，与 SPMI 代码无关。
+
+下一步：`sheng-gpu-power=3` 验证写通路（ENABLE 原值写回），再 `=4`
+（保留 752 mV → MODE HPM → ENABLE → GX GDSC）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
