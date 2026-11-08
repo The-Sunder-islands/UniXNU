@@ -94,7 +94,7 @@ static uint32_t gH103SlotCursor;
 // boot wrote it.  The header alone is not enough: it is written after the
 // slot, and a late header write failure leaves a stale slots_written behind,
 // which made earlier logs mix slots from several boots.
-#define H103_BUILD "H219"
+#define H103_BUILD "H220"
 static uint64_t gH103BootId;
 static volatile int gH103Quiet;
 static volatile uint64_t gH103LastSlotTicks;
@@ -384,6 +384,13 @@ heartbeatThread (void *, wait_result_t)
     h103MaybeSetAcceleratorPlugin ();
     h103ProbeAcceleratorService ();
     beat++;
+    // H220: the long ALIVE line can be truncated inside a log slot, and its abi=/accel= fields
+    // are the ones that matter here. This short line carries them alone, once per beat.
+    IOLog ("NATIVE_ACCEL_HB: accel=%u/%u/%u/%u abi=%d/%d/%d rep=%.31s\n",
+           (unsigned) native_a540_open_count, (unsigned) native_a540_open_type,
+           (unsigned) native_a540_sel_count, (unsigned) native_a540_sel_last,
+           (int) native_a540_abi_calls, (int) native_a540_abi_last_method,
+           (int) native_a540_abi_reports, native_a540_abi_report);
     if (beat == 1 || (beat % 10) == 0) {
     IOLog ("NATIVE_UFS_ALIVE: winFlight=%llu ufsFlight=%llu cmds=%llu "
            "winReq=%llu winBytes=%llu lastCmd=%llx/%llu req=%llx/%llu "

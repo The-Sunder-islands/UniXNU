@@ -9286,6 +9286,41 @@ H219 boot:    f83676ee7d51042e0263a348457c6c4e31cf628bcfaaae8db320bfb6998ae100
 判读：`accel=` 的第二个数字若变成 16711 → 真实打开成功；第四个数字给出
 最后一个 selector。
 
+### H219 判读：日志窗口混入多次启动，但本轮数据证明插件 ABI 已在跑（2026-11-08）
+
+按 slot 戳逐条解析后（本轮 boot `2c39e48b`，H219，共 28 个 slot，到 322 s）：
+
+```text
+266.08 … 267.88  NATIVE_A540_ABI: sel=10..31 w=4e544e4c ("NTNL") comm=backboardd
+267.97           NATIVE_A540_ACCEL: open request type=0x41470000 comm=backboardd … granted
+```
+
+- 之前看到的 700/866/1068 s 心跳其实来自 **H214** 的旧 slot（msgbuf 残留文本会带进
+  新 slot），所以 `accel=0/0/0/0` 只代表 266 s 之前；
+- **266 s 起插件在 backboardd 里跑完了 selector 探测**，用的是我们测试的 `NTNL`
+  隧道，`sel=10..31`、`in=0/8`、`w=4e544e4c` 全部命中 → 真实 ABI 连接
+  （`IOServiceOpen(0x4147)`）其实已经成功，只是那一行正好落在被截断/交错的
+  日志区间里。
+
+结论：C0 的第二个验收点（插件建立真实 ABI 连接并调用方法）**已经达成**；
+剩下的是"补齐插件真正需要的方法语义"。
+
+### H220：独立的加速器状态短行（2026-11-08）
+
+- 心跳里新增每拍一行短日志：
+  `NATIVE_ACCEL_HB: accel=<open>/<type>/<sel>/<last> abi=<calls>/<method>/<reports> rep=<text>`
+- 长 `NATIVE_UFS_ALIVE` 行在 slot 里会被截断，短行保证 `abi=`/`rep=` 一定可读。
+
+```text
+H220 kernel:  ebaf460392b46893fe6a6fea7e985cec57f8e35d5a62d14183b283fcee039159
+H220 payload: d5d7fb5f4cee83df592c3631c83470957b7ca14b31811e030ebbab19d620953a
+H220 boot:    a022b4404833621795eb40373d1a1217f4418710ce9322ac42d99dee24c2d0d3
+              81,147,904 B
+```
+
+判读：`abi=` 的第二个数字即插件最后调用到的方法编号；`rep=` 是测试写入的报告文本
+（`s<step> e<error> v<verified>`）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
