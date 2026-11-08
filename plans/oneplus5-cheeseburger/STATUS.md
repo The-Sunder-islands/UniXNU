@@ -8989,6 +8989,35 @@ H211 boot:    0c453ce98e14026df85d24743a59035331d79c6aaf46d6e11937ed93449a467b
               81,147,904 B
 ```
 
+### H211 结果：`ml_static_vtop` 用于堆地址导致 panic（2026-11-08）
+
+```text
+NATIVE_PANIC_STR: ml_static_vtop: illegal VA: 0xfffffff896613000;
+                  virt base 0xfffffff007004000, size 0x80000000 @arm_vm_init.c:425
+```
+
+- 诊断代码在安装末尾调用 `ml_static_vtop((vm_offset_t)copy)`，但 `copy` 是
+  `IOMalloc` 的**内核堆地址**，不在静态映射窗口内，`ml_static_vtop` 直接 panic；
+- 与 GPU/投送无关，是本轮诊断代码的缺陷；
+- 说明：安装确实走到了末尾诊断（`late blob`/64 KiB 分段已打印），只是随后崩溃。
+
+### H212：去掉 `ml_static_vtop`，保留内容比较（C0，2026-11-08）
+
+- 快照日志只打印 `copy=<虚拟地址>`，不再求物理地址；
+- `native_ram_block_gpu_addon_copy_info()` 的 `phys` 固定返回 0；
+- 其余不变：`kern_exec` 在 CRC 失败时比较**副本 vs 交接块**，打印 `diff=` 与
+  两侧各 16 字节，并输出 64 KiB 粒度校验和。
+
+```text
+H212 kernel:  59fa0e0fd32fe63d53799cefa5f09ab7807ca0e1f8e44cf0d3a819435c3fd69b
+H212 payload: ae8bcfccb0422091c2aefe518853367566739f93dcf0ae131c2e6e36b0878fc9
+H212 boot:    e16725f483fdb76473a9b4b0dec95caf84ff655fca563d91ae6b6281d515de9c
+              81,147,904 B
+```
+
+判读：`diff=identical` 或很小的偏移 → 交接块在快照时就已经是坏的；
+`diff` 指向 `copy` 与 `block` 不同的位置 → 副本之后又被写过。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
