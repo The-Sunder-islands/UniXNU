@@ -8479,6 +8479,37 @@ H198 boot:    431c306d089fe1a9a071b6ecc22d6f93d60c20d065adc912bfe23ca1d79b584b
 判读：backboardd 的 `failed MACF` 应完全消失，`NATIVE_A540_ABI: method=…` 与
 `report …` 应出现。
 
+### H198 结果：授权覆盖不完整（2026-11-08）
+
+```text
+388.7-389.0  service=AGXAccelerator process=backboardd grant=backboardd match=1（多次）
+401.040      open request mark1 → granted
+401.041      IOUC AGXDeviceUserClient failed MACF … backboardd（这次没有 grant 日志）
+401.0416     open request type=16711（主连接）→ granted
+401.0418     IOUC … failed MACF
+401.042      open request 0x4f01（打开失败标记）
+406.4        grant match=1 又出现
+```
+
+部分实例带授权、部分不带，主连接时好时坏；`NATIVE_A540_ABI: method=` 仍为 0。
+另外确认：探针 daemon `adrenoprobed` 从未 exec（日志里 0 次），原版
+`IOMFB_FDR_Loader` 仍在运行（310 次），说明 launchd 用的是封印卷里的 plist，
+没有使用 overlay 中同名替换的版本。
+
+阶段文档：`plans/oneplus5-cheeseburger/diagnostics/A540-bringup-milestone1-2026-11-08.md`。
+
+### H199：init 设置授权并记录实例（2026-11-08）
+
+- `AGXAccelerator::init()` 覆盖并设置 `NativeSandboxGrantProcess=backboardd`
+  （覆盖所有发布路径创建的实例）；
+- `newUserClient` 打印 `self=<实例指针> grant=<属性值>`，用于确认缺授权的实例来源。
+
+```text
+H199 kernel:  ce6a651e490c6d9138b092c48f903c8c1f26ebcf8e8e1adb5e7e4612a2ebaa1f
+H199 payload: 0e165694a5450f78ede122eaec93d65d3ea4c07ba83a310796fdae35d1917e5f
+H199 boot:    9a63913e2c5bcbf896b0a4d3833779bffc549bb54497c8dfa043d8a3c7782581
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
