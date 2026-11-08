@@ -1,0 +1,46 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7445,6 +7445,18 @@
+ 		printf("NATIVE_GPU_ADDON: write at=%llu error=%d resid=%d\n", (unsigned long long)offset, error, resid);
+ 	}
+ 	return error;
++}
++/* H207 one-shot diagnostic: the kernel read a stream that decoded 32 bytes past the entry size with
++ * Z_DATA_ERROR (H206), while the same file decodes cleanly on the host with this zlib. The checksums
++ * tell whether the boot-time addon block still holds the packed bytes. */
++static uint32_t
++native_gpu_addon_fnv(const uint8_t *data, uint64_t size)
++{
++	uint32_t hash = 2166136261u;
++	for (uint64_t at = 0; at < size; ++at) {
++		hash = (hash ^ data[at]) * 16777619u;
++	}
++	return hash;
+ }
+ /* Writes one addon file in 1 MiB pieces, inflating into a fixed 1 MiB buffer instead of allocating the whole file. The
+  * previous whole-file allocation (21.7 MB for the Metal plugin) could land on the boot-time addon block itself, and
+@@ -7626,7 +7638,22 @@
+ 		const char *name = (const char *)(addon + at);
+ 		at += (name_bytes + 7) & ~7ULL;
+ 		snprintf(path, sizeof(path), "/private/var/ngpu/%s", name);
+-		int error = native_gpu_addon_store(path, addon + at, packed, size, mode, ctx, chunk);
++		const uint8_t *source = addon + at;
++		if (packed >= (1 << 20)) {
++			printf("NATIVE_GPU_ADDON: src %s off=%llu packed=%llu fnv=%08x head=%02x%02x%02x%02x tail=%02x%02x%02x%02x\n",
++			    name, (unsigned long long)(source - addon), (unsigned long long)packed,
++			    native_gpu_addon_fnv(source, packed), source[0], source[1], source[2], source[3],
++			    source[packed - 4], source[packed - 3], source[packed - 2], source[packed - 1]);
++			if (packed >= (4 << 20)) {
++				printf("NATIVE_GPU_ADDON: chunks");
++				for (uint64_t c = 0; c < packed; c += 1 << 20) {
++					uint64_t length = packed - c < (1 << 20) ? packed - c : (1 << 20);
++					printf(" %08x", native_gpu_addon_fnv(source + c, length));
++				}
++				printf("\n");
++			}
++		}
++		int error = native_gpu_addon_store(path, source, packed, size, mode, ctx, chunk);
+ 		if (error == ENOENT && !(error = native_gpu_addon_parents(p, scratch, path))) {
+ 			error = native_gpu_addon_store(path, addon + at, packed, size, mode, ctx, chunk);
+ 		}

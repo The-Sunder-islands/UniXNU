@@ -8789,6 +8789,50 @@ H206 boot:    50be3f3a51546fdd597554e3420606c2da2ae0663efc18868493073c7966db00
 判读：`addon=8/8/0/0` 表示插件已写入；`probe ... overlap=1` 证实 H205 的失败原因。
 随后看 `abi=`/`rep=` 是否非零（插件加载与 ABI 探测）。
 
+### H206 判读：流式写入可用，但输入流在内核里被改写了（2026-11-08）
+
+```text
+NATIVE_GPU_ADDON: inflate result=-3 total_in=9040949/9040949
+                  total_out=21716048/21716016 avail_in=0
+NATIVE_GPU_ADDON: probe alloc=0xfffffff85d2e3000 size=21716016 blob=0xfffffff00cf58000 overlap=0
+addon=8/7/0/1/22/1
+```
+
+- `result=-3` 是 `Z_DATA_ERROR`，`avail_in=0`（输入全部消费），`total_out` 比条目
+  声明的 `size` **多 32 字节**——内核看到的压缩流与文件里的不是同一份数据；
+- 探针的 `overlap=0` 无意义：`kalloc` 返回内核堆虚拟地址（`0xfffffff8…`），addon 是
+  静态映射地址（`0xfffffff0…`），两者本来就不会落在同一区间；
+- 已核对：payload 里的 `kernel.macho.gpuaddon` 与本地验证文件 SHA-256 完全一致，
+  所以 FAT/打包没有问题；
+- 主机用**内核同一份 zlib 1.2.3**、同样的 1 MiB 流式 `Z_NO_FLUSH` 调用解压同一
+  addon，8 个条目全部 `result=Z_STREAM_END`（插件 21 次调用，`total_out` 精确）；
+- 尾部 4 字节损坏只会得到 `total_out = size` + `incorrect data check`，与内核的
+  `size + 32` 不符。
+
+`DarwinBoot.c` 里 `Args->TopOfKernelData = Address + Used` 已覆盖 addon，理论上
+VM 不会分配这块物理内存，因此需要直接确认运行时的字节。
+
+### H207：addon 源数据校验和诊断（C0，2026-11-08）
+
+新增补丁 `zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-h207-addon-source-fnv.patch`：
+对 `packed >= 1 MiB` 的条目打印源数据的 FNV-1a、首尾 4 字节，并对插件按 1 MiB
+分块打印 9 个校验和。主机端同一文件的期望值：
+
+```text
+NativeAdrenoMetal  off=464      packed=9040949 fnv=30ad5e1b head=78daecbd tail=e9e55dfc
+  chunks a4c47b8b 6ddf9b97 ddcb1a57 edf29cb0 92675356 3941162e 43bcb43d 5123d802 94cc5623
+libvulkan_freedreno.dylib off=9042112 packed=3066332 fnv=2fc21ad9
+```
+
+判读：若 FNV 与上表一致 → 运行时数据完好，问题在内核 zlib 的使用/环境；若某一
+分块不一致 → 直接定位被改写的物理区段。
+
+```text
+H207 kernel:  e58aae6aca8417a7aa1de1485e06e5663a470e53ef07e13d91203cc48bc05829
+H207 payload: 2cc080c864bca0326ac6cffd4f1e5708d04d4a5e1f1e3e60b6782c79097dc5a4
+H207 boot:    ddd9a9b3f2e19c7fe7485466c2779b2aa5cd7d725c520579e36a7d07e584ae74
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
