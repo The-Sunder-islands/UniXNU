@@ -8748,6 +8748,47 @@ H205 boot:    56f27d938c2bea324a0e6ebd05201f47bfebb9f11b3d13cc4020000e10548b19
 判读：心跳 `addon=8/8/0/0` 表示修复成功，随后看 `abi=`/`rep=`；
 若仍失败，新的分步日志会给出确切步骤与 errno。
 
+### H205 判读：失败点是 inflate，不是写入（2026-11-08）
+
+H205 的分步日志（boot `2ba5a2a7`，uptime 38.7 s）给出确定结论：
+
+```text
+NATIVE_GPU_ADDON: inflate /private/var/ngpu/addons/NativeAdreno.bundle/NativeAdrenoMetal
+                  size=21716016 packed=9040949 error=22
+addon=8/7/0/1/22/1
+```
+
+- 21.7 MB 插件可执行文件在 `native_gpu_addon_inflate` 返回 `EINVAL`；
+- 主机解析同一个 `adreno-h202.gpuaddon`，每一条都能被 **内核自带的 zlib 1.2.3**
+  （`libkern/zlib`，同一份源码编译）正确解出：
+  `result=1 total_out=21716016 avail_in=0`，其余 7 条同样正确；
+- 因此压缩流、addon 布局、分块写入都没有问题；失败发生在内核环境里。
+
+推断：旧写入路径为每个文件 `kalloc_data(整个文件大小)`；21.7 MB 的一次性分配
+很可能落在 bootloader 交接的 addon 内存块上，而 `kalloc_data` 会清零，于是
+解压前输入已被自己覆盖（这也解释为什么只有最大的插件失败、之后 3 MB 的 Turnip
+和尾部小文件都正常）。
+
+### H206：流式解压 + 分块写，去掉整文件分配（C0，2026-11-08）
+
+新增补丁 `zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-h206-addon-stream-write.patch`：
+
+- `native_gpu_addon_store`：固定 1 MiB 缓冲，`inflate(..., Z_NO_FLUSH)` 流式解压，
+  每块用 `vn_rdwr` 按偏移写入，**不再分配整个文件的输出缓冲**；
+- `packed == size` 的条目按原样分块写入（原样存储格式），供不适合压缩的条目使用；
+- 失败时打印 inflate 的 `result/total_in/total_out/avail_in` 或具体写偏移；
+- 安装结束后做一次性探针：分配"最大条目大小"（21.7 MB）并按地址判断是否与
+  addon 交接块重叠，打印 `probe alloc=... blob=... overlap=0|1`，用于确认上述推断。
+
+```text
+H206 kernel:  a6e328fd834cd04eff968b974d5c585bbab00187be6426c5f24a6a8dd1b31b46
+H206 payload: 35363bc148e288fe5d602d3f8d5e86c979630b25a557c471fc7fd8e0bfa47792
+H206 boot:    50be3f3a51546fdd597554e3420606c2da2ae0663efc18868493073c7966db00
+```
+
+判读：`addon=8/8/0/0` 表示插件已写入；`probe ... overlap=1` 证实 H205 的失败原因。
+随后看 `abi=`/`rep=` 是否非零（插件加载与 ABI 探测）。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。

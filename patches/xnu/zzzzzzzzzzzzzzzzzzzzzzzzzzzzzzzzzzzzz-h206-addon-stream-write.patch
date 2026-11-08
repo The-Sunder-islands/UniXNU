@@ -1,0 +1,226 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7401,7 +7401,7 @@
+ 	memcpy(&bytes, block, sizeof(bytes));
+ 	kfree_data(block, bytes);
+ }
+-static int
++static __unused int
+ native_gpu_addon_inflate(const uint8_t *packed, uint64_t packed_size, uint8_t *data, uint64_t size)
+ {
+ 	z_stream stream;
+@@ -7416,8 +7416,14 @@
+ 		return ENOMEM;
+ 	}
+ 	int result = inflate(&stream, Z_FINISH);
++	uLong total_out = stream.total_out;
++	uInt avail_in = stream.avail_in;
++	if (!(result == Z_STREAM_END && total_out == size && !avail_in)) {
++		printf("NATIVE_GPU_ADDON: inflate result=%d total_in=%lu/%llu total_out=%lu/%llu avail_in=%u\n", result,
++		    stream.total_in, (unsigned long long)packed_size, total_out, (unsigned long long)size, avail_in);
++	}
+ 	inflateEnd(&stream);
+-	return result == Z_STREAM_END && stream.total_out == size && !stream.avail_in ? 0 : EINVAL;
++	return result == Z_STREAM_END && total_out == size && !avail_in ? 0 : EINVAL;
+ }
+ volatile int native_gpu_addon_files = -1;
+ volatile int native_gpu_addon_calls = 0;
+@@ -7425,66 +7431,81 @@
+ volatile int native_gpu_addon_same = 0;
+ volatile int native_gpu_addon_failed = 0;
+ volatile int native_gpu_addon_error = 0;
+-static int
+-native_gpu_addon_equal(vnode_t vp, const uint8_t *data, uint64_t size, uint32_t mode, vfs_context_t ctx)
++/* One write of at most 1 MiB at an absolute offset. */
++static int
++native_gpu_addon_pwrite(vnode_t vp, const uint8_t *data, uint64_t length, uint64_t offset, vfs_context_t ctx)
+ {
+-	struct vnode_attr va;
+-	VATTR_INIT(&va);
+-	VATTR_WANTED(&va, va_data_size);
+-	VATTR_WANTED(&va, va_mode);
+-	if (vnode_getattr(vp, &va, ctx) || va.va_data_size != size || (va.va_mode & 07777) != mode) {
+-		return 0;
++	int resid = 0;
++	int error = vn_rdwr(UIO_WRITE, vp, (caddr_t)(uintptr_t)data, (int)length, (off_t)offset, UIO_SYSSPACE, IO_NOAUTH,
++	    vfs_context_ucred(ctx), &resid, vfs_context_proc(ctx));
++	if (!error && resid) {
++		error = EIO;
+ 	}
+-	const uint32_t chunk = 1024 * 1024;
+-	uint8_t *buffer = kalloc_data(chunk, Z_WAITOK);
+-	if (!buffer) {
+-		return 0;
++	if (error) {
++		printf("NATIVE_GPU_ADDON: write at=%llu error=%d resid=%d\n", (unsigned long long)offset, error, resid);
+ 	}
+-	int equal = 1;
+-	for (uint64_t at = 0; equal && at < size; at += chunk) {
+-		int length = (int)(size - at < chunk ? size - at : chunk), resid = 0;
+-		if (vn_rdwr(UIO_READ, vp, (caddr_t)buffer, length, (off_t)at, UIO_SYSSPACE, IO_NOAUTH, vfs_context_ucred(ctx), &resid,
+-		    vfs_context_proc(ctx)) || resid || memcmp(buffer, data + at, length)) {
+-			equal = 0;
+-		}
+-	}
+-	kfree_data(buffer, chunk);
+-	return equal;
++	return error;
+ }
++/* Writes one addon file in 1 MiB pieces, inflating into a fixed 1 MiB buffer instead of allocating the whole file. The
++ * previous whole-file allocation (21.7 MB for the Metal plugin) could land on the boot-time addon block itself, and
++ * kalloc_data zeroes what it allocates, so the compressed input was destroyed before inflate ran (H205: EINVAL although
++ * the host zlib decodes the same bytes). An entry whose packed size equals its content size is stored uncompressed. */
+ static int
+-native_gpu_addon_write(const char *path, const uint8_t *data, uint64_t size, uint32_t mode, vfs_context_t ctx)
++native_gpu_addon_store(const char *path, const uint8_t *packed, uint64_t packed_size, uint64_t size, uint32_t mode,
++    vfs_context_t ctx, uint8_t *chunk)
+ {
+ 	vnode_t vp = NULLVP;
+-	int error = vnode_open(path, FREAD | O_NOFOLLOW, 0, 0, &vp, ctx);
+-	if (!error) {
+-		int equal = native_gpu_addon_equal(vp, data, size, mode, ctx);
+-		vnode_close(vp, FREAD, ctx);
+-		vp = NULLVP;
+-		if (equal) {
+-			return -1;
+-		}
+-	}
+-	error = vnode_open(path, O_CREAT | O_TRUNC | FWRITE | O_NOFOLLOW, mode, 0, &vp, ctx);
++	int error = vnode_open(path, O_CREAT | O_TRUNC | FWRITE | O_NOFOLLOW, mode, 0, &vp, ctx);
+ 	if (error) {
+ 		printf("NATIVE_GPU_ADDON: open %s error=%d\n", path, error);
+ 		return error;
+ 	}
+-	int resid = 0;
+-	error = 0;
+-	const uint64_t chunk = 1 << 20;
+-	for (uint64_t at = 0; at < size; at += chunk) {
+-		int length = (int)(size - at < chunk ? size - at : chunk);
+-		resid = 0;
+-		error = vn_rdwr(UIO_WRITE, vp, (caddr_t)(uintptr_t)(data + at), length, (off_t)at, UIO_SYSSPACE,
+-		    IO_NOAUTH, vfs_context_ucred(ctx), &resid, vfs_context_proc(ctx));
+-		if (error || resid) {
+-			if (!error) {
+-				error = EIO;
++	uint64_t offset = 0;
++	if (packed_size == size) {
++		while (!error && offset < size) {
++			uint64_t length = size - offset < (1 << 20) ? size - offset : (1 << 20);
++			error = native_gpu_addon_pwrite(vp, packed + offset, length, offset, ctx);
++			offset += length;
++		}
++	} else {
++		z_stream stream;
++		memset(&stream, 0, sizeof(stream));
++		stream.zalloc = native_gpu_addon_zalloc;
++		stream.zfree = native_gpu_addon_zfree;
++		stream.next_in = (Bytef *)(uintptr_t)packed;
++		stream.avail_in = (uInt)packed_size;
++		if (inflateInit(&stream) != Z_OK) {
++			error = ENOMEM;
++		} else {
++			int result = Z_OK;
++			while (!error && result != Z_STREAM_END) {
++				stream.next_out = chunk;
++				stream.avail_out = 1 << 20;
++				result = inflate(&stream, Z_NO_FLUSH);
++				uint64_t produced = (1 << 20) - stream.avail_out;
++				if (result != Z_OK && result != Z_STREAM_END) {
++					printf("NATIVE_GPU_ADDON: inflate result=%d total_in=%lu/%llu total_out=%lu/%llu avail_in=%u\n",
++					    result, stream.total_in, (unsigned long long)packed_size, stream.total_out,
++					    (unsigned long long)size, stream.avail_in);
++					error = EINVAL;
++					break;
++				}
++				if (produced) {
++					error = native_gpu_addon_pwrite(vp, chunk, produced, offset, ctx);
++					offset += produced;
++				} else if (result == Z_OK && !stream.avail_in) {
++					printf("NATIVE_GPU_ADDON: inflate truncated at %llu/%llu\n", (unsigned long long)offset,
++					    (unsigned long long)size);
++					error = EINVAL;
++				}
+ 			}
+-			printf("NATIVE_GPU_ADDON: write %s at=%llu/%llu error=%d resid=%d\n", path,
+-			    (unsigned long long)at, (unsigned long long)size, error, resid);
+-			break;
++			inflateEnd(&stream);
+ 		}
++		if (!error && offset != size) {
++			printf("NATIVE_GPU_ADDON: inflate size %llu != %llu\n", (unsigned long long)offset,
++			    (unsigned long long)size);
++			error = EINVAL;
++		}
+ 	}
+ 	if (!error) {
+ 		struct vnode_attr va;
+@@ -7586,7 +7607,13 @@
+ 	}
+ 	native_gpu_addon_files = (int)count;
+ 	vfs_context_t ctx = vfs_context_current();
++	uint8_t *chunk = kalloc_data(1 << 20, Z_WAITOK);
++	if (!chunk) {
++		native_gpu_addon_error = ENOMEM;
++		return;
++	}
+ 	char path[192];
++	uint64_t largest = 0;
+ 	at = 24;
+ 	for (uint32_t i = 0; i < count; ++i) {
+ 		uint32_t name_bytes = 0, mode = 0;
+@@ -7599,32 +7626,36 @@
+ 		const char *name = (const char *)(addon + at);
+ 		at += (name_bytes + 7) & ~7ULL;
+ 		snprintf(path, sizeof(path), "/private/var/ngpu/%s", name);
+-		uint8_t *data = kalloc_data(size ? size : 1, Z_WAITOK);
+-		int error = data ? native_gpu_addon_inflate(addon + at, packed, data, size) : ENOMEM;
+-		if (error) {
+-			printf("NATIVE_GPU_ADDON: inflate %s size=%llu packed=%llu error=%d\n", path,
+-			    (unsigned long long)size, (unsigned long long)packed, error);
++		int error = native_gpu_addon_store(path, addon + at, packed, size, mode, ctx, chunk);
++		if (error == ENOENT && !(error = native_gpu_addon_parents(p, scratch, path))) {
++			error = native_gpu_addon_store(path, addon + at, packed, size, mode, ctx, chunk);
+ 		}
+-		if (!error) {
+-			error = native_gpu_addon_write(path, data, size, mode, ctx);
+-			if (error == ENOENT && !(error = native_gpu_addon_parents(p, scratch, path))) {
+-				error = native_gpu_addon_write(path, data, size, mode, ctx);
+-			}
+-		}
+-		if (data) {
+-			kfree_data(data, size ? size : 1);
+-		}
+-		if (error < 0) {
+-			native_gpu_addon_same++;
+-		} else if (error) {
++		if (error) {
+ 			native_gpu_addon_failed++;
+ 			native_gpu_addon_error = error;
+-			printf("NATIVE_GPU_ADDON: failed %s error=%d size=%llu\n", path, error, (unsigned long long)size);
++			printf("NATIVE_GPU_ADDON: failed %s error=%d size=%llu packed=%llu\n", path, error,
++			    (unsigned long long)size, (unsigned long long)packed);
+ 		} else {
+ 			native_gpu_addon_written++;
+ 		}
++		if (size > largest) {
++			largest = size;
++		}
+ 		at += (packed + 7) & ~7ULL;
+ 	}
++	kfree_data(chunk, 1 << 20);
++	/* H206 one-shot diagnostic: an allocation of the largest entry's size (21.7 MB), taken after the install so it cannot
++	 * disturb it, shows whether such a buffer overlaps the boot-time addon block; that is the H205 inflate failure. */
++	if (largest >= (1 << 20)) {
++		uint8_t *probe = kalloc_data(largest, Z_WAITOK);
++		if (probe) {
++			uintptr_t base = (uintptr_t)probe, handoff = (uintptr_t)addon;
++			printf("NATIVE_GPU_ADDON: probe alloc=%p size=%llu blob=%p bytes=%llu overlap=%d\n", probe,
++			    (unsigned long long)largest, addon, (unsigned long long)bytes,
++			    base < handoff + bytes && handoff < base + largest);
++			kfree_data(probe, largest);
++		}
++	}
+ }
+ static void
+ native_gpu_addon_prepare(proc_t p, user_addr_t scratch)
