@@ -9382,6 +9382,56 @@ H221 boot:    3fb008527f04ed2b3deae6d1660d512bfc4b318394636340bb99c393a3475b4d
               81,147,904 B
 ```
 
+### H221 结果：GPUCC 前 0x78 可读，之后总线挂死（2026-11-08）
+
+扫描结果（写进日志、屏幕可见）：
+
+```text
+NATIVE_GPUCC: [0004]=0000001a  [0008]=0000001a  [000c]=00009187
+NATIVE_GPUCC: [0010]=00004005  [0014]=20405699  [0018]=00002067
+NATIVE_GPUCC: [001c]=40000000  [0030]=0000c555
+NATIVE_GPUCC: [0044]=0000001a  [0048]=0000001a  [004c]=00000107
+NATIVE_GPUCC: [0050]=00004805  [0054]=20405699  [0058]=00002067
+NATIVE_GPUCC: [005c]=40000000  [0078]=0000c555
+```
+
+- `0x0000..0x0078` 可读，呈现**两组对称的 PLL 寄存器**（0x00–0x3C、0x40–0x7C，
+  每组含 `20405699` 这样的 Fabia PLL 值）；
+- 读到 `0x0078` 之后**总线挂死**（屏幕黑掉、无 panic 文本、adb/fastboot 均无响应）
+  → 不能对该块做整段扫描；未上电时部分子块不可访问。
+
+同轮还拿到 CPU 侧的真实读数（之前一直是 0）：
+
+```text
+NATIVE_CPUFREQ_OSM: c0/c1 全 0
+NATIVE_CPUFREQ_APCS: cluster=0 pll_l=00000051 rcgr=00000301
+NATIVE_CPUFREQ_APCS: cluster=1 pll_l=00000020 rcgr=00000403
+```
+
+### H222：GPUCC 定点读取（只读主线驱动实际访问的寄存器）（2026-11-08）
+
+改用主线 `drivers/clk/qcom/gpucc-msm8998.c` 的寄存器表（msm8998 与 A540 同一块）：
+
+| 名称 | 偏移 | 说明 |
+| --- | --- | --- |
+| gpupll0 | 0x0000..0x0020 | Fabia PLL（L 值/配置/状态） |
+| gx_clamp_io | 0x0130 | GX clamp |
+| cx_bcr / cx_gdscr / cx_gds_hw_ctrl | 0x1000 / 0x1004 / 0x1008 | CX 电源域 |
+| cxo_branch | 0x1020 | XO 分支（关键时钟） |
+| rbcpr_rcg / rbcpr_bcr / rbcpr_branch | 0x1030 / 0x1050 / 0x1054 | RBCPR |
+| gfx3d_rcg / gx_bcr / gx_gdscr / gfx3d_branch | 0x1070 / 0x1090 / 0x1094 / 0x1098 | GX 域与 3D 时钟 |
+| rbbmtimer_rcg / rbbmtimer_branch | 0x10b0 / 0x10d0 | RBBM 定时器 |
+| isense_rcg / isense_bcr / isense_branch | 0x1100 / 0x1120 / 0x1124 | 电流感应 |
+
+这些是时钟驱动必须能访问的寄存器（否则无法上电），定点读取应避免 H221 的挂死。
+
+```text
+H222 kernel:  c3a658ee34569daa6f01f99c5370a481c72bd6adb43d1c60c4158dc7f8a1955e
+H222 payload: b9383d0a58133df8d94f18598d3473f440c240637d05ac425bcab15342b0dc23
+H222 boot:    56212a70c55616165c84158391184d35ed473930d91c5725444d51176e0b5462
+              81,147,904 B
+```
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
