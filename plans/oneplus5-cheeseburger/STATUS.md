@@ -3,18 +3,20 @@
 - 计划：`plans/oneplus5-cheeseburger/PLAN.md`
 - 线路：B — UniXNU / 4K
 - 路线/目标：iPad7,1 / iPadOS 17.7.11（21H461）
-- 当前阶段：**C1/C2 完成（2026-11-09）——A540 的供电和时钟链路已打通。**
+- 当前阶段：**C1/C2 完成，C3 进入 SMMU 只读 survey（2026-11-09）。**
   PM8005 S1（FTS426）经 SPMI 在 752 mV 使能 → GX GDSCR PWR_ON → Fabia PLL
   1028 MHz 锁定 → gfx3d 根 257 MHz → 分支使能 → RBBM 可读
-  （`0x00010042 / 0xb5f00000`）。基线、寄存器序列和产物见
-  `plans/oneplus5-cheeseburger/diagnostics/A540-C1-C2-baseline-2026-11-09.md`。
-  下一步 C3：GPU 身份/GMU/CP 冷启动。
-- 当前 gate：**用户态仍以 H103 线的 SpringBoard/display 状态为背景；GPU 线已从 C0
-  （插件投送）推进到 C2（GX 供电+257 MHz 时钟）。C3 的第一步是只读 GPU ID/GMU/CP
-  survey，随后才做 GMU 固件加载。**
+  （`0x00010042 / 0xb5f00000`）。C3 的内存/CP/GPMU 代码已就位；A540 的
+  `qcom,smmu-v2` 已按厂商 `arm-smmu.c` 路径核对，下一步用 H236u 的
+  `sheng-gpu-power=8` 只读 survey 确认 CB0 启用状态和 SMR/S2CR 语义。
+  基线见 `diagnostics/A540-C1-C2-baseline-2026-11-09.md`，SMMU 路径见
+  `diagnostics/A540-C3-smmu-vendor-path-2026-11-09.md`。
+- 当前 gate：**C3 在 SMMU context 处。H236t 直接写 CB0 造成约 70 秒心跳阻塞，
+  已确认 vendor 布局（CB0=0x8000、GR1=0x1000、IMPL_DEF1=0x6000），但 ID 读数
+  自相矛盾（NUMCB=129 > 页数=2），在 survey 之前不再写任何 SMMU 寄存器。**
 - 基线提交：C1/C2 基线 kernel `8147dc53…`、boot `4dd225e2…`（见 H236g）
-- 当前代码提交：本地 UniXNU `main` `e277de9`；NativeMobileDisplay `ce9001d`（C2）；
-  设备仓库 `main` 未变；关键子模块见 `BASELINE.md`
+- 当前代码提交：本地 UniXNU `main`（H236u 提交）；NativeMobileDisplay H236u
+  （vendor SMMU 路径 + 只读 survey + CB0 保护）；设备仓库 `main` 未变
 - 远程仓库：
   - UniXNU `https://github.com/lss717/UniXNU`（`main`）
   - UEFI fork `https://github.com/lss717/edk2-msm8998`（分支 `unixnu-cheeseburger`）
@@ -10201,6 +10203,53 @@ ARM MMU-500 的 CB0 布局盲写**。下一步必须先把厂商 `drivers/iommu/
 的 msm8998 路径（`qcom,skip-init`、`attach-impl-defs`、CB 偏移、secure/ATS）
 移植/对照清楚，再做只读 survey；在拿到 CB0 实际偏移和使能状态前，不再写
 SMMU 寄存器。
+
+### H236u：msm8998 GPU SMMU 厂商路径对照与只读 survey（2026-11-09）
+
+新增诊断文档 `diagnostics/A540-C3-smmu-vendor-path-2026-11-09.md`，把 H236t 之后
+的三个问题一次查清：
+
+1. **谁驱动 A540 的 SMMU**：本地 ROM DTB 里同时存在 `qcom,kgsl-iommu`
+   （`qcom,kgsl-smmu-v2`）和 `arm,smmu-kgsl@5040000`（`qcom,smmu-v2`）。
+   `qcom,kgsl-iommu` 的子节点 `iommus` 指向后者（phandle `0x1b5`），所以寄存器
+   由 `drivers/iommu/arm-smmu.c` 驱动；kgsl 只通过 IOMMU API 建 domain。
+2. **真实布局**：`GR1 = base + 0x1000`、`CB0 = reg_size/2 = 0x8000`、
+   `CBn = 0x8000 + n*0x1000`、`SMR = 0x800+4n`、`S2CR = 0xc00+4n`、
+   `CBA2R = GR1 + 0x800 + 4n`、`IMPL_DEF1 = base + 0x6000`。H236t 的 CB 偏移
+   本身没有错。
+3. **写之前必须知道的状态**：DT 给 GPU SMMU 标了
+   `qcom,skip-init` + `qcom,dynamic` + `qcom,register-save`。`dynamic` 路径下
+   `arm-smmu.c` **不写 SMR/S2CR**，即 SID 0 → CB0 的映射由 bootloader/TZ 预留；
+   `attach-impl-defs` 写入前厂商会先 `arm_smmu_halt()`（0x6000 bit2，等 bit3）。
+   对已 enabled 的 bank 写 `CBA2R/CBAR` 是 architecturally unpredictable，
+   与 H236t 的 70 秒心跳阻塞吻合。
+
+ID 读数仍异常：`ID1=00188c81` 解出 NUMCB=129 > 页数=2，`ID2=48016403` 的 OAS=0
+且保留位被置；这组值不能当真实 ID。H236u 因此加入 **只读 survey**：
+
+- `sheng-gpu-power=8`，C2 之后每个心跳只读一个寄存器，经 `gc=80+k` 输出；
+  即使某个读卡住，之前的值已在上一拍打印；
+- 读 GR0 `0x000/0x020..0x02c/0x048`、`+0x400` NS 别名、SMR/S2CR 0..2、
+  CBAR0/CBA2R0、`0x2000`、`0x6000`、CB0 `0x8000..0x8058`、CB1/CB2 SCTLR，
+  并把 `ID0`/`CB0.SCTLR` 各重复读一次；
+- `smmu_direct()` 先读 `CB0.SCTLR`，bit0=1 时直接 `fail step 9 (cb0 enabled)`，
+  不再触碰 enabled bank。
+
+构建（Mac `lss@192.168.10.103`）：
+
+```text
+H236u kernel  8f35f4d8302b2071bae43c828f75cc71d99b47bbc4569459112b4fe345f74d6a
+H236u payload 9f3ba3c8fca1dec50f9b47b328a53b9d136bb92f3da7a9f10414bd7a81a24d37
+H236u boot    8aba74fd41e9f1f48d9c6cb0da223a3268d37be94b86ff2ce99c1508f960d83a
+```
+
+payload 的 `unixnu.toml` 已加入 `sheng-gpu-power=8`（payload 重新打包后哈希
+如上），镜像已放到 Windows `192.168.8.58` 的
+`D:\Users\ls\Documents\OnePlus5_ios\boot-H236u.img`。
+
+判读：看 `NATIVE_ACCEL_HB: ... gc=80:<value>` 到 `gc=111`，对照诊断文档 §7 的
+表格；关键四个值是 `cb0_sctlr`(gc=100)、`smr0`(gc=90)、`s2cr0`(gc=93) 和
+`micro_mmu_ctrl`(gc=99)。
 
 ## 更新规则
 
