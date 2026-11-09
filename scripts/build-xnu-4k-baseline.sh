@@ -48,6 +48,14 @@ for LATE_PATCH in "$ROOT/patches/xnu/zzzzzzzz-h103-root-union.patch" \
     git -C .cache/xnu-work apply --reverse "$LATE_PATCH"
   fi
 done
+# The bootstrap pass already applied the series once.  Reverse checks can fail
+# when two patches touch the same hunk (KernelConfigTables.cpp), so reset the
+# worktree for the final pass and apply the series from the reference commit.
+if [ "${XNU_BOOTSTRAP:-0}" != 1 ]; then
+  echo 'kernel: reset patched XNU worktree for the final pass'
+  git -C .cache/xnu-work reset --hard HEAD
+  git -C .cache/xnu-work clean -fdx
+fi
 for PATCH in "$ROOT"/patches/xnu/*.patch "$ROOT"/kits/NativePrelink/patches/*.patch; do
   if ! git -C .cache/xnu-work apply --reverse --check "$PATCH" >/dev/null 2>&1; then
     git -C .cache/xnu-work apply --check "$PATCH"
