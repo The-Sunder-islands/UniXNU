@@ -7,16 +7,18 @@
   PM8005 S1（FTS426）经 SPMI 在 752 mV 使能 → GX GDSCR PWR_ON → Fabia PLL
   1028 MHz 锁定 → gfx3d 根 257 MHz → 分支使能 → RBBM 可读
   （`0x00010042 / 0xb5f00000`）。C3 的内存/CP/GPMU 代码已就位；A540 的
-  `qcom,smmu-v2` 已按厂商 `arm-smmu.c` 路径核对，下一步用 H236u 的
-  `sheng-gpu-power=8` 只读 survey 确认 CB0 启用状态和 SMR/S2CR 语义。
-  基线见 `diagnostics/A540-C1-C2-baseline-2026-11-09.md`，SMMU 路径见
+  `qcom,smmu-v2` 已按厂商 `arm-smmu.c` 路径核对。H236x 的只读 survey 已确认
+  SMMU 几何（3 个 CB、8 个寄存器页、36 位 PA），H236y 用修正后的 kit 参数执行
+  C3（CB0 + SID0 映射 + CP/GPMU）。基线见
+  `diagnostics/A540-C1-C2-baseline-2026-11-09.md`，SMMU 路径见
   `diagnostics/A540-C3-smmu-vendor-path-2026-11-09.md`。
-- 当前 gate：**C3 在 SMMU context 处。H236t 直接写 CB0 造成约 70 秒心跳阻塞，
-  已确认 vendor 布局（CB0=0x8000、GR1=0x1000、IMPL_DEF1=0x6000），但 ID 读数
-  自相矛盾（NUMCB=129 > 页数=2），在 survey 之前不再写任何 SMMU 寄存器。**
+- 当前 gate：**C3 进入 SMMU 编程。ID0=48016403（S1TS/SMS，3 个 SMR）、
+  ID1=20008003（8 页、3 个 CB）、ID2=00007511（IAS/OAS=36、4K 表）；
+  bootloader 没有留任何映射（SMR=0、S2CR=FAULT、CB0 关），所以 C3 必须自己写
+  CB0 和 SID0→CB0。H236y 已把 output_bits 改成 36、预清 S2CR、补 ACTLR。**
 - 基线提交：C1/C2 基线 kernel `8147dc53…`、boot `4dd225e2…`（见 H236g）
-- 当前代码提交：本地 UniXNU `main`（H236u 提交）；NativeMobileDisplay H236u
-  （vendor SMMU 路径 + 只读 survey + CB0 保护）；设备仓库 `main` 未变
+- 当前代码提交：本地 UniXNU `main`（H236y 提交）；NativeMobileDisplay H236y
+  （SMMU 几何修正 + CP/GPMU 路径 + 只读 survey）；设备仓库 `main` 未变
 - 远程仓库：
   - UniXNU `https://github.com/lss717/UniXNU`（`main`）
   - UEFI fork `https://github.com/lss717/edk2-msm8998`（分支 `unixnu-cheeseburger`）
@@ -10250,6 +10252,75 @@ payload 的 `unixnu.toml` 已加入 `sheng-gpu-power=8`（payload 重新打包�
 判读：看 `NATIVE_ACCEL_HB: ... gc=80:<value>` 到 `gc=111`，对照诊断文档 §7 的
 表格；关键四个值是 `cb0_sctlr`(gc=100)、`smr0`(gc=90)、`s2cr0`(gc=93) 和
 `micro_mmu_ctrl`(gc=99)。
+
+### H236v/H236w/H236x/H236y：SMMU 几何确认、survey 与 C3 重新执行（2026-11-09）
+
+H236u 之后连续踩了两个构建/打包问题，先把它们记下来：
+
+- **H236u(u1) panic**：直接用 `unixnu build payload` 默认参数重建，payload 里只剩
+  `kernel.macho` 和 `kernel.macho.adt`，丢了 H236t 的
+  `kernel.macho.trustcache`、`scratch-data.img`、`kernel.macho.gpuaddon`；
+  内核在 `kern_trustcache.c:1051` 报 `property lookup failed -1`。**以后必须从
+  H236t 的 payload 复制后只替换 kernel/toml，或显式传三个输入。**
+- **H236u(u2) panic**：最早一次 `./unixnu build kernel` 跑 patch loop 时在
+  `KernelConfigTables.cpp:61` 失败；失败前 loop 已把 10 个 `zzz*/zzy*` 后置
+  patch 反向卸掉，随后一直用 `XNU_SKIP_PATCH_LOOP=1` 构建，导致
+  `NATIVE_ROOT_AUTH_BYPASS` 不存在，在 `bsd_init.c:1103` panic。修法：删掉
+  `.cache/xnu-work`，从干净 XNU 重新 clone 并完整应用 patch，再全量编译。
+- **H236v**：干净树重编，`strings` 确认 `NATIVE_ROOT_AUTH_BYPASS` 存在；但
+  重建环境漏了 `XNU_OWNER_CACHE_CARRIER=1`，H236x 又在 launchd 阶段报
+  `Library not loaded: /usr/lib/libSystem.B.dylib (no such file, no dyld cache)`。
+  `offline-owner-cache-carrier.patch` 没有这个 define 时整段被编译掉，正是
+  文档 B5 里的旧 `no dyld cache` 现象；H236y 已补上
+  `XNU_OWNER_CACHE_CARRIER=1` / `..._WRONG_UUID=0`。
+
+survey 结果（H236x，`sheng-gpu-power=8`，每心跳读一个寄存器）：
+
+```text
+sCR0 = 00200626
+ID0  = 48016403   S1TS=1 SMS=1 CTTW=1 NUMSMRG=3
+ID1  = 20008003   PAGESIZE=4K, NUMPAGENDXB=2 -> 8 页 (size=0x10000),
+                  NUMCB=3, NUMS2CB=0
+ID2  = 00007511   IAS=36, OAS=36, UBS=48, PTFS=4K/16K/64K
+sGFSR= 00000000
+SMR0..2  = 00000000   (invalid)
+S2CR0..2 = 000200ff   (type=FAULT, cbndx=0xff)
+CBAR0    = 00000000
+CB0 TTBR0/TTBCR/CONTEXTIDR/FSR = 00000000
+CB1/CB2 SCTLR = 00000000
+```
+
+结论：
+
+1. **CB0 = 0x8000 由 ID1 几何直接确认**（8 页，size/2）；
+2. **bootloader 没有留下任何映射**：SMR 全 invalid、S2CR 全 FAULT、CB0 关，
+   所以不能“复用固件映射”，必须自己写 CB0 + SMR/S2CR；
+3. ID0 bit30 与 ID2 bit12 都满足，`ArmSmmu4K` 现在会通过 ID 检查；之前
+   H236r 的 Unsupported 是当时读到 `00188c41/48016403` 的错误值造成的；
+4. H236w 在读完 ID2 后读 `0x02c (ID3)` 把总线挂死（黑屏）：这个 SMMU 只有
+   ID0..ID2，ID3 未实现。H236x 已把 `0x02c`、`0x400` NS 别名、`0x2000`/
+   `0x6000` 从未验证地址中删除。
+
+H236y 的 C3 修改：
+
+- `ArmSmmu4KConfig.output_bits = 36`（原 40 超过 ID2.OAS）；
+- 先把 `S2CR0` 写成纯 `0x00020000`（FAULT），满足 kit 的 attach 前置条件；
+- 写 `CB0 ACTLR = 0x70000000`（vendor `SMMU_MODEL_QCOM_V2`，kit 不含 ACTLR）；
+- 用 `ArmSmmu4KAttachStreams` 发布 SID 0 → CB0；
+- 编译环境补 `XNU_OWNER_CACHE_CARRIER=1`。
+
+产物：
+
+```text
+H236x kernel  d0df547ffa547886ead9342c827514fd4a54530431606a1a73897becb74ed35a
+H236x boot    ad3b72fc06ece6e87fbaff2684ede87109a9abdbd9a797df8d5cba1997364133
+H236y kernel  4c217f92db7bae6bb7ecb918e5a0bd814fc181c9520511632217864274822543
+H236y payload fc092afd883c98ddf5a7baffc4c0966ec66b42a6004653a100d0e15085b7bb98
+H236y boot    9fc64a864ec364331b3bada40f4410f2db86b2e42ea1bc3c740c260034ee5204
+```
+
+H236y 用 `sheng-gpu-power=7`（C3），已在 `2026-11-09` 启动；下一步看 C3 是否
+越过 SMMU 进入 `cp me init` 和 GPMU `BABEFACE`。
 
 ## 更新规则
 
