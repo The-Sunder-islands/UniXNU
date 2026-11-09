@@ -96,6 +96,16 @@ jobs:
           ./unixnu fetch xnu libplatform libdispatch AvailabilityVersions libpthread \
                           corecrypto-2023 IOStorageFamily -D "$UNIXNU_DEVICE"
 
+      - name: Prepare Data skeleton
+        run: |
+          set -euo pipefail
+          python3 scripts/prepare-owner-data-fixture.py --skeleton --size-mib 512 --packed \
+            --output build/owner-data-fixture
+          uuid="$(python3 -c 'import json; print(json.load(open("build/owner-data-fixture/seed.json"))["volume_uuid"])')"
+          test -n "$uuid"
+          echo "XNU_OWNER_DATA_VOLUME_UUID=$uuid" >> "$GITHUB_ENV"
+          ls -lh build/owner-data-fixture
+
       - name: Reset cached XNU worktree
         run: rm -rf out/dumpling/tree
 
@@ -103,6 +113,8 @@ jobs:
         env:
           IPSW_URL: ${{ inputs.ipsw_url }}
           DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+          XNU_OWNER_DATA_VOLATILE: 1
+          XNU_OWNER_BOOT_MANIFEST: 0
         run: |
           args=()
           if [ -n "$IPSW_URL" ]; then args+=(--ipsw "$IPSW_URL"); fi
@@ -112,6 +124,8 @@ jobs:
         env:
           IPSW_URL: ${{ inputs.ipsw_url }}
           DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+          XNU_OWNER_DATA_VOLATILE: 1
+          XNU_OWNER_BOOT_MANIFEST: 0
         run: |
           # The first pass produced out/dumpling/kernel/kernel.macho.  The
           # second pass rebuilds the PMGR archive against its ApplePMGR
@@ -180,6 +194,7 @@ jobs:
             out/dumpling/kernel/**
             out/dumpling/payload/**
             out/dumpling/logs/**
+            build/owner-data-fixture/**
           if-no-files-found: error
           retention-days: 7
 
