@@ -150,6 +150,19 @@ def main():
     ap.add_argument('--kernelcache', type=Path, default=Path(os.environ.get('OP5_KERNELCACHE', DEFAULT_KC)))
     a = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
+    # Vendor firmware blobs are local-only; generate the header before compiling.
+    fw = Path(os.environ['OP5_A540_FIRMWARE']) if os.environ.get('OP5_A540_FIRMWARE') else None
+    if fw is None or not (fw / 'a530_pm4.fw').is_file():
+        for candidate in (Path.home() / 'UniXNU/.cache/firmware/a540',
+                          ROOT.parents[2] / '.cache/firmware/a540',
+                          ROOT / '.cache/firmware/a540'):
+            if (candidate / 'a530_pm4.fw').is_file():
+                fw = candidate
+                break
+    if fw is None or not (fw / 'a530_pm4.fw').is_file():
+        raise SystemExit('A540 firmware cache not found: set OP5_A540_FIRMWARE')
+    run([sys.executable, ROOT / 'scripts/gen-a540-firmware.py',
+         '--input', fw, '--output', OUT / 'A540FirmwareBlobs.h'])
     audit_path = ROOT / 'build/display-analysis/mobile-graphics-legacy-abi.json'
     run([sys.executable, AUDIT, a.kernelcache, '--out', audit_path])
     audit = json.loads(audit_path.read_text())
@@ -163,10 +176,30 @@ def main():
         run([sys.executable, ROOT / 'scripts/build-arm-driver.py', component], env=env)
 
     recipe = ROOT / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/iokit/DEVELOPMENT/IOPlatformExpert.cpo.json'
-    for name in ('LegacyDisplayProbe.cpp', 'NativeLegacyProbeSupport.cpp', 'NativeA540AcceleratorProbe.cpp'):
+    for name in ('LegacyDisplayProbe.cpp', 'NativeLegacyProbeSupport.cpp', 'NativeA540AcceleratorProbe.cpp',
+                 'NativeA540C3.cpp'):
         compile_recipe(ROOT / 'drivers/NativeMobileDisplay' / name, OUT / (Path(name).stem + '.o'), recipe,
                        ['-I', str(OUT), '-I', str(ROOT / 'drivers/NativeMobileDisplay'),
+                        '-I', str(ROOT / 'kits/ArmSmmu4K'),
                         '-I', str(ROOT / 'drivers/NativeMetal'), '-I', str(ROOT / '.cache/xnu-work/osfmk')])
+
+    # SMMUv2 kit is freestanding C and is linked into the same late archive.
+    smmu_flags = ['-target', 'arm64-apple-ios17.0', '-O2', '-std=c11',
+                  '-ffreestanding', '-mgeneral-regs-only', '-Wall', '-Wextra', '-Werror',
+                  '-Wno-incompatible-sysroot', '-I', str(ROOT / 'kits/ArmSmmu4K')]
+    smmu_env = os.environ.copy()
+    smmu_env['SDKROOT'] = env['SDKROOT']
+    smmu_objs = []
+    for name in ('ArmSmmu4K', 'ArmSmmu4KContext', 'ArmSmmu4KProgram', 'ArmSmmu4KStreams', 'ArmSmmu4KMmio'):
+        obj = OUT / (name + '.o')
+        result = subprocess.run([str(x) for x in
+                                 ['xcrun', 'clang', *smmu_flags, '-c',
+                                  ROOT / 'kits/ArmSmmu4K' / (name + '.c'), '-o', obj]],
+                                env=smmu_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        (OUT / (name + '.log')).write_text(result.stdout)
+        if result.returncode:
+            raise SystemExit(result.stdout[-8000:])
+        smmu_objs.append(obj)
 
     display_obj = OUT / 'NativeLegacyDisplay.o'
     presenter_obj = ROOT / 'build/native-gop-presenter/NativeGOPPresenter.o'
@@ -252,16 +285,22 @@ def main():
     # its state; this compensates for the small gray-strip addition.
     members = [OUT / 'NativeLegacyDisplay.late.o', OUT / 'NativeGOPPresenter.late.o', OUT / 'original-bindings.o',
                OUT / 'LegacyDisplayProbe.o', OUT / 'NativeLegacyProbeSupport.o',
-               OUT / 'NativeA540AcceleratorProbe.late.o', OUT / 'original-accelerator-bindings.o']
+               OUT / 'NativeA540AcceleratorProbe.late.o', OUT / 'original-accelerator-bindings.o',
+               OUT / 'NativeA540C3.o'] + smmu_objs
     run(['xcrun', 'ar', 'rcs', archive] + members)
     sources = [ROOT / 'scripts/audit-mobile-graphics-legacy-op5.py',
+               ROOT / 'scripts/gen-a540-firmware.py',
                ROOT / 'drivers/NativeMobileDisplay/NativeLegacyDisplay.cpp',
                ROOT / 'drivers/NativeMobileDisplay/NativeGOPPresenter.cpp',
                ROOT / 'drivers/NativeMobileDisplay/NativeGOPWire.h',
                ROOT / 'drivers/NativeMobileDisplay/NativeLegacyRequest.h',
                ROOT / 'drivers/NativeMobileDisplay/LegacyDisplayProbe.cpp',
                ROOT / 'drivers/NativeMobileDisplay/NativeLegacyProbeSupport.cpp',
-               ROOT / 'drivers/NativeMobileDisplay/NativeA540AcceleratorProbe.cpp']
+               ROOT / 'drivers/NativeMobileDisplay/NativeA540C3.cpp',
+               ROOT / 'drivers/NativeMobileDisplay/NativeA540AcceleratorProbe.cpp'] + \
+              [ROOT / 'kits/ArmSmmu4K' / (n + ext) for n in
+               ('ArmSmmu4K', 'ArmSmmu4KContext', 'ArmSmmu4KProgram', 'ArmSmmu4KStreams', 'ArmSmmu4KMmio')
+               for ext in ('.c', '.h')]
     (OUT / 'build-report.json').write_text(json.dumps(dict(
         source_sha256={str(p.relative_to(ROOT)): sha(p) for p in sources},
         generated_abi_sha256=sha(OUT / 'OriginalLegacyFramebufferABI.h'),

@@ -10132,6 +10132,35 @@ c3 state rbbm=1 cm3=1 gen0=0 cp=0x303
 - 下一步 C3：GPU 可见内存 + SMMU 映射 + CP ringbuffer + `a530_pm4/pfp` 微码，
   再加载 `a540_gpmu.fw2`。这部分在离线实现，不再盲写寄存器。
 
+### H236o/H236p/H236q：C3 四块代码上线，SMMU context 待调（2026-11-09）
+
+新增文件：
+
+- `drivers/NativeMobileDisplay/NativeA540C3.cpp`：GPU 可见内存（IOBufferMemoryDescriptor）、
+  A540 SMMUv2（ArmSmmu4K kit）、CP ring/`a530_pm4/pfp` 微码、`a540_gpmu.fw2` 加载；
+- `scripts/gen-a540-firmware.py`：从 `.cache/firmware/a540/` 生成
+  `A540FirmwareBlobs.h`（厂商固件不提交）；
+- `scripts/build-op5-legacy-display.py`：生成固件头、编译 C3 源和 ArmSmmu4K kit，
+  并把对象加入 late archive（archive 成员集因此变化）。
+
+`sheng-gpu-power=7` 在 C2 之后运行 C3。H236o 先加入 **C2 preclean**（拉 clamp、
+关 root/branch/PLL、collapse GX），修复了热复位后 PLL/RCG 卡住的问题；H236o/p
+的 C2 完整走到 `pll d0000005 / rcg 00000002 / branch 00002621 / rbbm`。
+
+H236p 的 C3 结果（boot `2e9c1415`）：
+
+```text
+tables/ring 分配成功
+SMMU ID0=00188c41  ID1=00188c81  ID2=48016403
+ArmSmmu4KProgramDisabledContext -> 失败（step 5, smmu context）
+```
+
+H236q（kernel `8fe04d61…`，boot `cf35be9b…`）在失败点记录
+`status/phase/fault_status/sCR0`，已放到 Windows `192.168.8.58`。
+下一步先看这四个值：最可能是 A540 SMMU 的 ID0 能力位、bank0 已被固件使能，
+或 sCR0 策略与 kit 的 `0x406` 要求不一致；确认后调整 context 或改用只读
+`ObserveOwnedContext` 复用固件留下的映射。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
