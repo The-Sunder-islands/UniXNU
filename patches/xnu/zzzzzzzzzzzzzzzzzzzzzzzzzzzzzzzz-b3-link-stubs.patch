@@ -1,21 +1,20 @@
 diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
 --- a/bsd/kern/kern_exit.c
 +++ b/bsd/kern/kern_exit.c
-@@ -139,7 +139,18 @@
+@@ -139,7 +139,17 @@
  #include <pexpert/pexpert.h>
  
  #include <kdp/kdp_dyld.h>
  
 +/*
-+ * B3 link-only definitions for the H103 owner-Data diagnostics and the
-+ * H117 panic flush.  Weak definitions keep the bootstrap pass linkable
-+ * before the PMGR archive exists; the archive's strong definitions win
-+ * when it is linked.
++ * B3 link-only definitions for the H103 owner-Data diagnostics.  Strong
++ * definitions in this always-compiled file keep both the bootstrap and
++ * final links independent of PMGR archive order.  native_panic_flush is
++ * provided strongly by NativeUfsProbe.o.
 + */
 +volatile int native_owner_data_status = -1;
 +volatile int native_owner_data_readonly = -1;
 +volatile dev_t native_owner_data_device = -1;
-+void native_panic_flush(void) {}
 +
  #if SYSV_SHM
  #include <sys/shm_internal.h>   /* shmexit */
