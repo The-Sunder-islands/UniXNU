@@ -3112,7 +3112,7 @@ NativeUfsProbe::start (IOService *provider)
   ADD ("cur=%llx bak=%llx usable=%llx..%llx\n",
        currentLba, backupLba, firstUsable, lastUsable);
   const char *const keys[] = {
-    "userdata_ios", "persist", "cache", "misc", "metadata", "system", "vendor",
+    "userdata_ios", "userdata", "persist", "cache", "misc", "metadata", "system", "vendor",
     "boot", "recovery", "modem", "modemst1", "modemst2", "fsg", "fsc",
     "keymaster", "abl", "xbl", "tz", "devcfg", "devinfo"
   };
@@ -3136,7 +3136,11 @@ NativeUfsProbe::start (IOService *provider)
       name[length++] = (hi == 0 && lo >= 32 && lo < 127) ? char (lo) : '?';
     }
     name[length] = 0;
-    if (!__builtin_strcmp (name, "userdata_ios")) {
+    // The 5T GPT calls the large partition "userdata"; the cheeseburger and
+    // sheng ports use a dedicated "userdata_ios".  Prefer the dedicated name
+    // when present and fall back to the first "userdata".
+    if (!__builtin_strcmp (name, "userdata_ios") ||
+        (!rootFirst && !__builtin_strcmp (name, "userdata"))) {
       rootFirst = first;
       rootLast = last;
     }
