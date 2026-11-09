@@ -10099,6 +10099,39 @@ C3 后续（已查厂商 kgsl）：
 - 这比 C1/C2 大一个量级，下一步先看 H236h 的 13 个读数确认 CP/GPMU 窗口可访问，
   再写 RBBM/CP 复位。
 
+### H236k/H236m：热复位修复与 CP 块写入（C3 第二步，2026-11-09）
+
+连续 `fastboot boot` 后出现早期卡住：新 boot 只写 1–2 个 slot，停在 S1 的
+`0x1440` 读之前。原因是上一轮把 S1 留在使能状态，FTS426 在带电时的电压寄存器读
+不可靠。修复：在 APID/owner 确定后、读 S1 之前先 **写 ENABLE=0** 关掉 S1；同时把
+C2 做成幂等（PLL 已锁定在 L=53 时跳过重配；重配前先关根/分支）。
+
+H236k（mode 5，kernel `7ec9a479…`，boot `aeec61ef…`）验证修复：
+
+```text
+s1 pre-disable rc=0 status=1
+s1 rev/type/subtype/range/vset/mode/enable/step 全部 rc=0
+c3 cp_rb_base..gpmu_inst_ram0 13 个读数完整
+```
+
+H236m（mode 6，kernel `c199d40a…`，boot `52e4af15…`）做 **不带软复位的 CP
+块写入测试**：
+
+```text
+c3 reset skipped rbbm=00000001 cp=00000303
+c3 cp thresholds cp=00000303          ← 4 个 A540 阈值写入未挂总线
+c3 state rbbm=1 cm3=1 gen0=0 cp=0x303
+```
+
+结论：
+
+- CP/GPMU 窗口可读可写，写入阈值不会挂总线；
+- **不要单独发 `RBBM_SW_RESET_CMD`**：厂商的 `_soft_reset` 会复位整个 GPU 逻辑，
+  必须紧跟完整的 a5xx 重启（电源状态、VBIF、微码、ringbuffer）；单独复位后读
+  总线会挂（H236l 已实测）；
+- 下一步 C3：GPU 可见内存 + SMMU 映射 + CP ringbuffer + `a530_pm4/pfp` 微码，
+  再加载 `a540_gpmu.fw2`。这部分在离线实现，不再盲写寄存器。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
