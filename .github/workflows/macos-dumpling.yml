@@ -1,0 +1,185 @@
+name: macOS build (dumpling)
+
+# OnePlus 5T (dumpling) kernel + payload build.
+# Firmware is built separately by edk2-msm8998/build.sh; this workflow only
+# covers the steps that need Xcode (XNU kernel, prelink, payload/ADT).
+#
+# Run:
+#   gh workflow run macos-dumpling.yml -R The-Sunder-islands/UniXNU --ref dumpling-ci \
+#     -f device_repository=The-Sunder-islands/UniXNU-dumpling
+
+on:
+  workflow_dispatch:
+    inputs:
+      device_repository:
+        description: Device repository as owner/name
+        required: true
+        default: The-Sunder-islands/UniXNU-dumpling
+      device_ref:
+        description: Device repository ref
+        required: true
+        default: main
+      ipsw_url:
+        description: IPSW URL (empty uses board.toml [ipsw])
+        required: false
+        default: ""
+      build_userdata:
+        description: Also build the userdata image
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-dumpling-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: 1
+  HOMEBREW_NO_INSTALL_CLEANUP: 1
+  GITHUB_TOKEN: ${{ github.token }}
+  UNIXNU_DEVICE: ${{ github.workspace }}/device
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.device_repository }}
+          ref: ${{ inputs.device_ref }}
+          path: device
+          token: ${{ secrets.UNIXNU_DEVICE_TOKEN || github.token }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Report the runner toolchain
+        run: |
+          sw_vers
+          uname -m
+          xcodebuild -version
+          xcode-select -p
+          /usr/bin/compression_tool -h >/dev/null 2>&1 && echo 'compression_tool ok' || echo 'compression_tool missing'
+
+      - name: Install host tools
+        run: |
+          brew install cmake ninja unifdef llvm lld mtools dtc
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix lld)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix unifdef)/bin" >> "$GITHUB_PATH"
+
+      - name: Select the device
+        run: |
+          ./unixnu defconfig dumpling_defconfig -D "$UNIXNU_DEVICE"
+          ./unixnu fetch xnu libplatform libdispatch AvailabilityVersions libpthread \
+                          corecrypto-2023 IOStorageFamily -D "$UNIXNU_DEVICE"
+
+      - name: Prepare Data skeleton
+        run: |
+          python3 scripts/prepare-owner-data-fixture.py --skeleton --size-mib 512 --packed \
+            --output build/owner-data-fixture
+          uuid="$(python3 -c 'import json; print(json.load(open("build/owner-data-fixture/seed.json"))["volume_uuid"])')"
+          test -n "$uuid"
+          echo "XNU_OWNER_DATA_VOLUME_UUID=$uuid" >> "$GITHUB_ENV"
+
+      - name: Reset cached XNU worktree
+        run: rm -rf out/dumpling/tree
+
+      - name: Build kernel
+        env:
+          IPSW_URL: ${{ inputs.ipsw_url }}
+          DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+        run: |
+          args=()
+          if [ -n "$IPSW_URL" ]; then args+=(--ipsw "$IPSW_URL"); fi
+          ./unixnu build kernel "${args[@]}" -D "$UNIXNU_DEVICE"
+
+      - name: Debug XNU patch source
+        if: always()
+        run: |
+          find out/dumpling/tree -path '*xnu-work/bsd/kern/kern_exec.c' -print 2>/dev/null || true
+          for log in out/dumpling/logs/kernel.log out/dumpling/logs/kernel-bootstrap.log; do
+            if [ -f "$log" ]; then
+              echo "== $log"
+              grep -nE 'error:|#error|Undefined symbols|ld: |redefined' "$log" | tail -40 || true
+            fi
+          done
+
+      - name: Build payload
+        env:
+          UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
+        run: |
+          args=()
+          if [ -f "$RUNNER_TEMP/trustcache" ]; then args+=(--trust-cache "$RUNNER_TEMP/trustcache"); fi
+          if [ -n "$UNIQUE_CHIP_ID" ]; then args+=(--unique-chip-id "$UNIQUE_CHIP_ID"); fi
+          data="$GITHUB_WORKSPACE/build/owner-data-fixture/owner-data.dbr"
+          test -f "$data"
+          args+=(--data-ramdisk "$data")
+          ./unixnu build payload "${args[@]}" -D "$UNIXNU_DEVICE"
+
+      - name: Build userdata
+        if: inputs.build_userdata
+        env:
+          IPSW_URL: ${{ inputs.ipsw_url }}
+        run: |
+          args=()
+          if [ -n "$IPSW_URL" ]; then args+=(--ipsw "$IPSW_URL"); fi
+          ./unixnu build userdata "${args[@]}" -D "$UNIXNU_DEVICE"
+
+      - name: Split userdata image for artifact transport
+        if: inputs.build_userdata
+        run: |
+          cd out/dumpling/userdata
+          test -f userdata-root.img
+          shasum -a 256 userdata-root.img > userdata-root.img.sha256
+          cat userdata-root.img.sha256
+          split -b 1992294400 userdata-root.img userdata-root.img.part.
+          ls -lh userdata-root.img.part.*
+
+      - name: Summarise the artifacts
+        if: always()
+        run: |
+          {
+            echo '## dumpling build'
+            echo
+            echo '```'
+            find out/dumpling -type f \( -name '*.json' -o -name '*.img' -o -name '*.macho' -o -name '*.adt' \) 2>/dev/null | sort | while IFS= read -r f; do ls -lh "$f"; done
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload kernel and payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: unixnu-dumpling
+          path: |
+            out/dumpling/kernel/**
+            out/dumpling/payload/**
+            out/dumpling/logs/**
+            build/owner-data-fixture/owner-data.dbr
+            build/owner-data-fixture/seed.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload userdata parts
+        if: inputs.build_userdata
+        uses: actions/upload-artifact@v4
+        with:
+          name: unixnu-dumpling-userdata
+          path: |
+            out/dumpling/userdata/userdata-root.json
+            out/dumpling/userdata/userdata-root.img.sha256
+            out/dumpling/userdata/userdata-root.img.part.*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Remove proprietary inputs
+        if: always()
+        run: |
+          rm -rf out/ipsw out/feeds device/.cache/firmware out/dumpling/tree/.cache/firmware
+          rm -f "$RUNNER_TEMP/trustcache"
