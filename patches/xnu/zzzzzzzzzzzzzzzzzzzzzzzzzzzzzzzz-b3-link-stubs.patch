@@ -1,0 +1,22 @@
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -139,7 +139,18 @@
+ #include <pexpert/pexpert.h>
+ 
+ #include <kdp/kdp_dyld.h>
+ 
++/*
++ * B3 link-only definitions for the H103 owner-Data diagnostics and the
++ * H117 panic flush.  Weak definitions keep the bootstrap pass linkable
++ * before the PMGR archive exists; the archive's strong definitions win
++ * when it is linked.
++ */
++__attribute__((weak)) volatile int native_owner_data_status = -1;
++__attribute__((weak)) volatile int native_owner_data_readonly = -1;
++__attribute__((weak)) volatile dev_t native_owner_data_device = -1;
++__attribute__((weak)) void native_panic_flush(void) {}
++
+ #if SYSV_SHM
+ #include <sys/shm_internal.h>   /* shmexit */
+ #endif /* SYSV_SHM */
