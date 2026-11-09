@@ -10161,6 +10161,32 @@ H236q（kernel `8fe04d61…`，boot `cf35be9b…`）在失败点记录
 或 sCR0 策略与 kit 的 `0x406` 要求不一致；确认后调整 context 或改用只读
 `ObserveOwnedContext` 复用固件留下的映射。
 
+### H236r：C3 跑到 SMMU，kit 的 ID 假设与 A540 不符（2026-11-09）
+
+C3 改到独立内核线程后，心跳不再被阻塞；H236r（kernel `9d85ae9d…`）完整记录：
+
+```text
+NATIVE_GPU_C3: thread start
+NATIVE_GPU_C3: alloc tables
+NATIVE_GPU_C3: alloc ring
+NATIVE_GPU_C3: smmu setup
+NATIVE_GPU_C3: smmu context status=6 phase=1 fault=00000000 scr0=00200626
+NATIVE_GPU_C3: fail step 5 (smmu context)
+```
+
+- `status=6` = `ArmSmmu4KUnsupported`，`phase=1`：失败在 `ArmSmmu4KEncodeContext` 的
+  ID 能力检查，**还没写任何 SMMU 寄存器**；
+- 读到的 `ID0=00188c41`（bit30=0）、`ID1=00188c81`、`ID2=48016403`（bit12=0）；
+  ArmSmmu4K 要求 ID0 bit30 与 ID2 bit12，这是 sheng 的 MMU-500 的假设，msm8998
+  的 `qcom,smmu-v2` 不满足；
+- `sCR0=00200626`：`(sCR0&0x407)==0x406` 成立，全局策略本身没问题；
+- 分配（table pool/ring/ucode/GPMU）和 SMMU 表构建都已通过。
+
+结论：C3 的内存、CP、GPMU 代码都已就位，当前唯一阻塞是 **A540 SMMU 的 context
+编码**。下一步先做只读 SMMU 布局 survey（global 0x0..0x100 与 CB0 0x6000..0x6100），
+确认 Qualcomm 版的 ID/CB 偏移，再按厂商 `attach-impl-defs` 直接写 CB0；不再依赖
+ArmSmmu4K 的 ID 检查。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
