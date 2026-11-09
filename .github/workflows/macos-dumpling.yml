@@ -80,14 +80,6 @@ jobs:
           ./unixnu fetch xnu libplatform libdispatch AvailabilityVersions libpthread \
                           corecrypto-2023 IOStorageFamily -D "$UNIXNU_DEVICE"
 
-      - name: Prepare Data skeleton
-        run: |
-          python3 scripts/prepare-owner-data-fixture.py --skeleton --size-mib 512 --packed \
-            --output build/owner-data-fixture
-          uuid="$(python3 -c 'import json; print(json.load(open("build/owner-data-fixture/seed.json"))["volume_uuid"])')"
-          test -n "$uuid"
-          echo "XNU_OWNER_DATA_VOLUME_UUID=$uuid" >> "$GITHUB_ENV"
-
       - name: Reset cached XNU worktree
         run: rm -rf out/dumpling/tree
 
@@ -118,9 +110,8 @@ jobs:
           args=()
           if [ -f "$RUNNER_TEMP/trustcache" ]; then args+=(--trust-cache "$RUNNER_TEMP/trustcache"); fi
           if [ -n "$UNIQUE_CHIP_ID" ]; then args+=(--unique-chip-id "$UNIQUE_CHIP_ID"); fi
-          data="$GITHUB_WORKSPACE/build/owner-data-fixture/owner-data.dbr"
-          test -f "$data"
-          args+=(--data-ramdisk "$data")
+          # First kernel bring-up: no Data seed yet.  Add --data-ramdisk once
+          # the UFS/APFS root stage is ready.
           ./unixnu build payload "${args[@]}" -D "$UNIXNU_DEVICE"
 
       - name: Build userdata
@@ -161,8 +152,6 @@ jobs:
             out/dumpling/kernel/**
             out/dumpling/payload/**
             out/dumpling/logs/**
-            build/owner-data-fixture/owner-data.dbr
-            build/owner-data-fixture/seed.json
           if-no-files-found: error
           retention-days: 7
 
