@@ -115,6 +115,7 @@ jobs:
           DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
           XNU_OWNER_DATA_VOLATILE: 1
           XNU_OWNER_BOOT_MANIFEST: 0
+          XNU_BRINGUP_CACHE_MOUNT: 1
         run: |
           args=()
           if [ -n "$IPSW_URL" ]; then args+=(--ipsw "$IPSW_URL"); fi
@@ -126,6 +127,7 @@ jobs:
           DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
           XNU_OWNER_DATA_VOLATILE: 1
           XNU_OWNER_BOOT_MANIFEST: 0
+          XNU_BRINGUP_CACHE_MOUNT: 1
         run: |
           # The first pass produced out/dumpling/kernel/kernel.macho.  The
           # second pass rebuilds the PMGR archive against its ApplePMGR
