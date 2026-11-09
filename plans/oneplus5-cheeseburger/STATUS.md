@@ -10187,6 +10187,21 @@ NATIVE_GPU_C3: fail step 5 (smmu context)
 确认 Qualcomm 版的 ID/CB 偏移，再按厂商 `attach-impl-defs` 直接写 CB0；不再依赖
 ArmSmmu4K 的 ID 检查。
 
+### H236s/H236t：直接 SMMU 编程仍卡住（2026-11-09）
+
+- H236s（线程版 + 直接 SMMU）：C3 线程启动后没有第一条日志，疑似
+  `kernel_thread_start`/kevent 上下文不稳；
+- H236t（同步版 + 直接 SMMU）：C2 完整通过，C3 调用把心跳阻塞约 70 秒
+  （日志 slot 从 67 s 直接跳到 139 s），随后系统继续到 launchd/backboardd；
+  没有 `NATIVE_GPU_C3` 行，说明直接写 CB0（GR1=0x1000、CB0=0x8000、
+  SMR/S2CR=0x800/0xC00）在总线/寄存器层面卡住或不返回。
+
+结论：C3 的内存/CP/GPMU 代码已就位，但 **A540 的 qcom,smmu-v2 不能按
+ARM MMU-500 的 CB0 布局盲写**。下一步必须先把厂商 `drivers/iommu/arm-smmu.c`
+的 msm8998 路径（`qcom,skip-init`、`attach-impl-defs`、CB 偏移、secure/ATS）
+移植/对照清楚，再做只读 survey；在拿到 CB0 实际偏移和使能状态前，不再写
+SMMU 寄存器。
+
 ## 更新规则
 
 每次工作结束追加一行日志，并更新“当前阶段/下一步/待实测/阻塞”。构建产物哈希、日志路径和失败现象记录在日志里；私有文件只放 `.cache/firmware/`，不提交。
