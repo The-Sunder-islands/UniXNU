@@ -67,10 +67,17 @@ if args.skeleton:
         version_file = source_zoneinfo / '+VERSION'
         version = version_file.read_text().strip() if version_file.is_file() else 'system'
         dataset = timezone / 'tz' / version / 'zoneinfo'
+        # macOS 15 GitHub runners do not ship /usr/share/zoneinfo.default, and
+        # the old dangling-symlink path also failed when tz/<version> did not
+        # exist.  Keep the tzinit layout valid with an empty dataset instead.
+        dataset.parent.mkdir(parents=True, exist_ok=True)
         if source_zoneinfo.is_dir():
             shutil.copytree(source_zoneinfo, dataset, symlinks=True)
-        elif not dataset.exists():
+        elif os.path.isdir('/usr/share/zoneinfo.default'):
             os.symlink('/usr/share/zoneinfo.default', dataset)
+        else:
+            dataset.mkdir(parents=True, exist_ok=True)
+            print('prepare-owner-data-fixture: no /usr/share/zoneinfo.default; using an empty timezone dataset')
         for link, target_path in (
                 (timezone / 'tz_latest', 'tz/' + version),
                 (timezone / 'zoneinfo', 'tz_latest/zoneinfo'),
