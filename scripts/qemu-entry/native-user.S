@@ -3,6 +3,15 @@
 .text
 .global _start, _checkpoint
 _start:
+  // B3.5 mockfs banner: write(1, "MOCKFS_INIT_OK\n", 15).
+  // The mockfs root hands this Mach-O to PID 1; the banner proves that the
+  // RAM root mounted and the init exec reached our own fixture.
+  mov x0, #1
+  adrp x1, _mockfs_banner@PAGE
+  add x1, x1, _mockfs_banner@PAGEOFF
+  mov x2, #15
+  mov x16, #4
+  svc #0x80
   mov x16, #20
   svc #0x80
   adrp x19, _results@PAGE
@@ -42,6 +51,10 @@ _start:
 _checkpoint:
   b _checkpoint
 .data
+.balign 8
+.global _mockfs_banner
+_mockfs_banner:
+  .ascii "MOCKFS_INIT_OK\n"
 .balign 8
 .global _results, _user_page_size, _old_length
 _results:

@@ -1,0 +1,49 @@
+name: macOS fixture (dumpling mockfs)
+
+# Build the signed static Darwin PID-1 fixture used by the B3.5 mockfs RAM
+# root.  This is separate from the kernel workflow so it does not rebuild the
+# 52 MiB XNU kernel for a 100 KiB test process.
+#
+# Run:
+#   gh workflow run macos-fixture.yml -R The-Sunder-islands/UniXNU --ref dumpling-ci
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Report the runner toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcode-select -p
+
+      - name: Build the native-user fixture
+        run: |
+          python3 scripts/build-native-user-fixture.py --output build/native-user-fixture
+          ls -lh build/native-user-fixture
+          shasum -a 256 build/native-user-fixture/launchd.macho \
+                         build/native-user-fixture/trustcache.bundle
+
+      - name: Upload the fixture
+        uses: actions/upload-artifact@v4
+        with:
+          name: unixnu-dumpling-fixture
+          path: build/native-user-fixture/**
+          if-no-files-found: error
+          retention-days: 7
