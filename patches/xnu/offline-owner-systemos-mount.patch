@@ -254,10 +254,10 @@
 +#endif
 +extern dev_t mdevlookup(int);
 +extern int mdevgetrange(int, uint64_t *, uint64_t *);
-+volatile int native_owner_data_status = -1;
++__attribute__((weak)) volatile int native_owner_data_status = -1;
 +volatile int native_owner_data_stage = 0;
-+volatile int native_owner_data_readonly = -1;
-+volatile dev_t native_owner_data_device = NODEV;
++__attribute__((weak)) volatile int native_owner_data_readonly = -1;
++__attribute__((weak)) volatile dev_t native_owner_data_device = NODEV;
 +uint64_t native_owner_data_seed_base, native_owner_data_seed_size;
 +uint8_t native_owner_data_seed_sha256[32];
 +char native_owner_data_device_path[64];
