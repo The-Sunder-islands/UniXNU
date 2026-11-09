@@ -67,6 +67,22 @@ jobs:
           xcode-select -p
           /usr/bin/compression_tool -h >/dev/null 2>&1 && echo 'compression_tool ok' || echo 'compression_tool missing'
 
+      - name: Cache Homebrew downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: brew-${{ runner.os }}-${{ hashFiles('device/unixnu.lock') }}
+          restore-keys: |
+            brew-${{ runner.os }}-
+
+      - name: Cache UniXNU source feeds
+        uses: actions/cache@v4
+        with:
+          path: out/dumpling/feeds
+          key: dumpling-feeds-${{ hashFiles('device/unixnu.lock', 'feeds.toml') }}
+          restore-keys: |
+            dumpling-feeds-
+
       - name: Install host tools
         run: |
           brew install cmake ninja unifdef llvm lld mtools dtc
@@ -83,11 +99,23 @@ jobs:
       - name: Reset cached XNU worktree
         run: rm -rf out/dumpling/tree
 
-      - name: Build kernel
+      - name: Build kernel (bootstrap pass, PMGR stub)
         env:
           IPSW_URL: ${{ inputs.ipsw_url }}
           DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
         run: |
+          args=()
+          if [ -n "$IPSW_URL" ]; then args+=(--ipsw "$IPSW_URL"); fi
+          ./unixnu build kernel "${args[@]}" -D "$UNIXNU_DEVICE"
+
+      - name: Build kernel (real PMGR pass)
+        env:
+          IPSW_URL: ${{ inputs.ipsw_url }}
+          DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+        run: |
+          # The first pass produced out/dumpling/kernel/kernel.macho.  The
+          # second pass rebuilds the PMGR archive against its ApplePMGR
+          # vtable, relinks the kernel and prelinks again.
           args=()
           if [ -n "$IPSW_URL" ]; then args+=(--ipsw "$IPSW_URL"); fi
           ./unixnu build kernel "${args[@]}" -D "$UNIXNU_DEVICE"
@@ -170,5 +198,7 @@ jobs:
       - name: Remove proprietary inputs
         if: always()
         run: |
-          rm -rf out/ipsw out/feeds device/.cache/firmware out/dumpling/tree/.cache/firmware
+          # Keep out/dumpling/feeds for the source cache; it contains only
+          # open-source git clones.  Remove IPSW/KernelCache and device firmware.
+          rm -rf out/dumpling/ipsw device/.cache/firmware out/dumpling/tree/.cache/firmware
           rm -f "$RUNNER_TEMP/trustcache"
