@@ -79,7 +79,7 @@ index 36f0cb4..9a6b5d3 100644
  
  	error = mac_vnode_check_signature(
  		vp,
-@@ -4685,11 +4692,32 @@ ubc_cs_blob_add(
+@@ -4685,11 +4692,33 @@ ubc_cs_blob_add(
  		flags,
  		platform);
  
@@ -96,6 +96,7 @@ index 36f0cb4..9a6b5d3 100644
 +		/* Temporary bring-up: keep the structurally valid Apple cache blob so
 +		 * mmap() can succeed; restore real AMFI/CT policy for the final image. */
 +		error = 0;
++		cs_flags |= CS_VALID | CS_SIGNED | CS_PLATFORM_BINARY;
 +		tmp_blob.csb_flags |= CS_VALID | CS_SIGNED | CS_PLATFORM_BINARY;
 +#else
  		goto out;
