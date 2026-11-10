@@ -1,8 +1,8 @@
+diff --git a/bsd/kern/kern_descrip.c b/bsd/kern/kern_descrip.c
+index 13b08b5..64b7ec4 100644
 --- a/bsd/kern/kern_descrip.c
 +++ b/bsd/kern/kern_descrip.c
-@@ -3873,8 +3873,25 @@
- 		if (error) {
- 			vnode_put(vp);
+@@ -3888,6 +3888,23 @@ sys_fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
  			goto outdrop;
  		}
  
@@ -26,28 +26,70 @@
  		/*
  		 * First check if we have something loaded a this offset
  		 */
+diff --git a/bsd/kern/kern_mman.c b/bsd/kern/kern_mman.c
+index 57d9070..98aa76d 100644
+--- a/bsd/kern/kern_mman.c
++++ b/bsd/kern/kern_mman.c
+@@ -609,12 +609,30 @@ mmap(proc_t p, struct mmap_args *uap, user_addr_t *retval)
+ 
+ 			handle = (void *)vp;
+ #if CONFIG_MACF
++#if defined(XNU_NATIVE_CACHE_SIGNATURE_BYPASS) && XNU_NATIVE_CACHE_SIGNATURE_BYPASS
++			int native_cache_mmap = (vp->v_name != NULL &&
++			    strncmp(vp->v_name, "dyld_shared_cache", 17) == 0);
++			if (native_cache_mmap) {
++				printf("NATIVE_MMAP: enter '%s' off=%llx prot=%x flags=%x\n",
++				    vp->v_name, (unsigned long long)(file_pos + pageoff), prot, flags);
++			}
++#endif
+ 			error = mac_file_check_mmap(vfs_context_ucred(ctx),
+ 			    fp->fp_glob, prot, flags, file_pos + pageoff,
+ 			    &maxprot);
++#if defined(XNU_NATIVE_CACHE_SIGNATURE_BYPASS) && XNU_NATIVE_CACHE_SIGNATURE_BYPASS
++			if (native_cache_mmap) {
++				printf("NATIVE_MMAP: exit '%s' error=%d\n", vp->v_name, error);
++			}
++#endif
+ 			if (error) {
++#if defined(XNU_NATIVE_CACHE_SIGNATURE_BYPASS) && XNU_NATIVE_CACHE_SIGNATURE_BYPASS
++				printf("NATIVE_MMAP: ignore MACF check %d\n", error);
++				error = 0;
++#else
+ 				(void)vnode_put(vp);
+ 				goto bad;
++#endif
+ 			}
+ #endif /* MAC */
+ 			/*
+diff --git a/bsd/kern/ubc_subr.c b/bsd/kern/ubc_subr.c
+index 36f0cb4..9a6b5d3 100644
 --- a/bsd/kern/ubc_subr.c
 +++ b/bsd/kern/ubc_subr.c
-@@ -4742,6 +4742,17 @@
+@@ -4675,6 +4675,13 @@ ubc_cs_blob_add(
+ #if CONFIG_MACF
  	unsigned int cs_flags = tmp_blob.csb_flags;
  	unsigned int signer_type = tmp_blob.csb_signer_type;
- 
 +#if defined(XNU_NATIVE_CACHE_SIGNATURE_BYPASS) && XNU_NATIVE_CACHE_SIGNATURE_BYPASS
-+	/* Temporary bring-up: AMFI's validation of the large .01 subcache can
-+	 * stall before the post-validation bypass below runs.  Skip the MACF
-+	 * call for dyld shared-cache vnodes and mark the blob usable. */
-+	if (vp->v_name != NULL &&
-+	    strncmp(vp->v_name, "dyld_shared_cache", 17) == 0) {
-+		printf("NATIVE_CACHE_SIG: skip AMFI '%s'\n", vp->v_name);
-+		cs_flags |= CS_VALID | CS_SIGNED | CS_PLATFORM_BINARY;
-+		error = 0;
-+	} else
++	boolean_t native_cache_vnode = (vp->v_name != NULL &&
++	    strncmp(vp->v_name, "dyld_shared_cache", 17) == 0);
++	if (native_cache_vnode) {
++		printf("NATIVE_CACHE_SIG: AMFI enter '%s'\n", vp->v_name);
++	}
 +#endif
+ 
  	error = mac_vnode_check_signature(
  		vp,
- 		&tmp_blob,
-@@ -4764,7 +4764,14 @@
+@@ -4685,11 +4692,32 @@ ubc_cs_blob_add(
+ 		flags,
+ 		platform);
  
++#if defined(XNU_NATIVE_CACHE_SIGNATURE_BYPASS) && XNU_NATIVE_CACHE_SIGNATURE_BYPASS
++	if (native_cache_vnode) {
++		printf("NATIVE_CACHE_SIG: AMFI exit '%s' error=%d\n",
++		    vp->v_name, error);
++	}
++#endif
++
  	if (error != 0) {
  		printf("validation of code signature failed through MACF policy: %d\n", error);
 +#if defined(XNU_NATIVE_CACHE_SIGNATURE_BYPASS) && XNU_NATIVE_CACHE_SIGNATURE_BYPASS
@@ -60,20 +102,13 @@
 +#endif
  	}
  
- #if HAS_APPLE_PAC
---- a/bsd/kern/kern_mman.c
-+++ b/bsd/kern/kern_mman.c
-@@ -622,8 +622,13 @@
- 			    fp->fp_glob, prot, flags, file_pos + pageoff,
- 			    &maxprot);
- 			if (error) {
 +#if defined(XNU_NATIVE_CACHE_SIGNATURE_BYPASS) && XNU_NATIVE_CACHE_SIGNATURE_BYPASS
-+				printf("NATIVE_MMAP: ignore MACF check %d\n", error);
-+				error = 0;
-+#else
- 				(void)vnode_put(vp);
- 				goto bad;
++	if (native_cache_vnode) {
++		printf("NATIVE_CACHE_SIG: post-MACF '%s' error=%d flags=%x\n",
++		    vp->v_name, error, cs_flags);
++	}
 +#endif
- 			}
- #endif /* MAC */
- 			/*
++
+ #if HAS_APPLE_PAC
+ 	signed_entitlements = ptrauth_sign_unauthenticated(
+ 		tmp_blob.csb_entitlements,
