@@ -27,15 +27,23 @@ index 13b08b5..64b7ec4 100644
  		 * First check if we have something loaded a this offset
  		 */
 diff --git a/bsd/kern/kern_mman.c b/bsd/kern/kern_mman.c
-index 57d9070..98aa76d 100644
+index 57d9070..8637671 100644
 --- a/bsd/kern/kern_mman.c
 +++ b/bsd/kern/kern_mman.c
-@@ -609,12 +609,30 @@ mmap(proc_t p, struct mmap_args *uap, user_addr_t *retval)
+@@ -207,6 +207,7 @@ mmap(proc_t p, struct mmap_args *uap, user_addr_t *retval)
+ 	int error = 0;
+ 	int fd = uap->fd;
+ 	int num_retries = 0;
++	int native_cache_mmap = 0;
+ 
+ 	/*
+ 	 * Note that for UNIX03 conformance, there is additional parameter checking for
+@@ -609,12 +610,30 @@ mmap(proc_t p, struct mmap_args *uap, user_addr_t *retval)
  
  			handle = (void *)vp;
  #if CONFIG_MACF
 +#if defined(XNU_NATIVE_CACHE_SIGNATURE_BYPASS) && XNU_NATIVE_CACHE_SIGNATURE_BYPASS
-+			int native_cache_mmap = (vp->v_name != NULL &&
++			native_cache_mmap = (vp->v_name != NULL &&
 +			    strncmp(vp->v_name, "dyld_shared_cache", 17) == 0);
 +			if (native_cache_mmap) {
 +				printf("NATIVE_MMAP: enter '%s' off=%llx prot=%x flags=%x\n",
@@ -61,8 +69,39 @@ index 57d9070..98aa76d 100644
  			}
  #endif /* MAC */
  			/*
+@@ -625,8 +644,18 @@ mmap(proc_t p, struct mmap_args *uap, user_addr_t *retval)
+ 			 * then we don't check for writeability on the file
+ 			 * object, because it will only ever see reads.
+ 			 */
++#if defined(XNU_NATIVE_CACHE_SIGNATURE_BYPASS) && XNU_NATIVE_CACHE_SIGNATURE_BYPASS
++			if (native_cache_mmap) {
++				printf("NATIVE_MMAP: vnop enter cache=1\n");
++			}
++#endif
+ 			error = VNOP_MMAP_CHECK(vp, (flags & MAP_PRIVATE) ?
+ 			    (prot & ~PROT_WRITE) : prot, ctx);
++#if defined(XNU_NATIVE_CACHE_SIGNATURE_BYPASS) && XNU_NATIVE_CACHE_SIGNATURE_BYPASS
++			if (native_cache_mmap) {
++				printf("NATIVE_MMAP: vnop exit cache=1 error=%d\n", error);
++			}
++#endif
+ 			if (error) {
+ 				(void)vnode_put(vp);
+ 				goto bad;
+@@ -934,6 +963,11 @@ bad:
+ 	KERNEL_DEBUG_CONSTANT((BSDDBG_CODE(DBG_BSD_SC_EXTENDED_INFO2, SYS_mmap) | DBG_FUNC_NONE), (uint32_t)(*retval >> 32), (uint32_t)(user_size >> 32),
+ 	    (uint32_t)(file_pos >> 32), (uint32_t)file_pos, 0);
+ #endif /* XNU_TARGET_OS_OSX */
++#if defined(XNU_NATIVE_CACHE_SIGNATURE_BYPASS) && XNU_NATIVE_CACHE_SIGNATURE_BYPASS
++	if (native_cache_mmap) {
++		printf("NATIVE_MMAP: done cache=1 error=%d\n", error);
++	}
++#endif
+ 	return error;
+ }
+ 
 diff --git a/bsd/kern/ubc_subr.c b/bsd/kern/ubc_subr.c
-index 36f0cb4..9a6b5d3 100644
+index 36f0cb4..f6442a4 100644
 --- a/bsd/kern/ubc_subr.c
 +++ b/bsd/kern/ubc_subr.c
 @@ -4675,6 +4675,13 @@ ubc_cs_blob_add(
