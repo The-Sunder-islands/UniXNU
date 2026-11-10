@@ -28,6 +28,24 @@
  		 */
 --- a/bsd/kern/ubc_subr.c
 +++ b/bsd/kern/ubc_subr.c
+@@ -4742,6 +4742,17 @@
+ 	unsigned int cs_flags = tmp_blob.csb_flags;
+ 	unsigned int signer_type = tmp_blob.csb_signer_type;
+ 
++#if defined(XNU_NATIVE_CACHE_SIGNATURE_BYPASS) && XNU_NATIVE_CACHE_SIGNATURE_BYPASS
++	/* Temporary bring-up: AMFI's validation of the large .01 subcache can
++	 * stall before the post-validation bypass below runs.  Skip the MACF
++	 * call for dyld shared-cache vnodes and mark the blob usable. */
++	if (vp->v_name != NULL &&
++	    strncmp(vp->v_name, "dyld_shared_cache", 17) == 0) {
++		printf("NATIVE_CACHE_SIG: skip AMFI '%s'\n", vp->v_name);
++		cs_flags |= CS_VALID | CS_SIGNED | CS_PLATFORM_BINARY;
++		error = 0;
++	} else
++#endif
+ 	error = mac_vnode_check_signature(
+ 		vp,
+ 		&tmp_blob,
 @@ -4764,7 +4764,14 @@
  
  	if (error != 0) {
